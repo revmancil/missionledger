@@ -1,0 +1,116 @@
+import { Request, Response, NextFunction } from "express";
+import { db } from "@workspace/db";
+import { users, companies } from "@workspace/db";
+import { eq, and } from "drizzle-orm";
+import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
+
+const JWT_SECRET = process.env.JWT_SECRET || "missionledger-secret-key-2024";
+const COOKIE_NAME = "ml_session";
+
+export interface AuthUser {
+  id: string;
+  email: string;
+  name: string | null;
+  role: string;
+  companyId: string;
+  companyName: string;
+  companyCode: string;
+  organizationType: string;
+}
+
+export function signToken(user: AuthUser): string {
+  return jwt.sign(user, JWT_SECRET, { expiresIn: "7d" });
+}
+
+export function verifyToken(token: string): AuthUser | null {
+  try {
+    return jwt.verify(token, JWT_SECRET) as AuthUser;
+  } catch {
+    return null;
+  }
+}
+
+export async function requireAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
+  const token = req.cookies?.[COOKIE_NAME];
+  if (!token) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  const user = verifyToken(token);
+  if (!user) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  (req as any).user = user;
+  next();
+}
+
+export function requireAdmin(req: Request, res: Response, next: NextFunction): void {
+  const user = (req as any).user as AuthUser;
+  if (user?.role !== "ADMIN" && user?.role !== "MASTER_ADMIN") {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+  next();
+}
+
+export async function hashPassword(password: string): Promise<string> {
+  return bcrypt.hash(password, 10);
+}
+
+export async function comparePassword(password: string, hash: string): Promise<boolean> {
+  return bcrypt.compare(password, hash);
+}
+
+export const COOKIE_NAME_EXPORT = COOKIE_NAME;
+
+export async function getOrCreateDefaultAccounts(companyId: string): Promise<void> {
+  const { accounts } = await import("@workspace/db");
+  const existingAccounts = await db.select().from(accounts).where(eq(accounts.companyId, companyId));
+  if (existingAccounts.length > 0) return;
+
+  const defaultAccounts = [
+    { code: "1000", name: "Cash and Bank Accounts", type: "ASSET" as const },
+    { code: "1010", name: "Checking Account", type: "ASSET" as const, parentCode: "1000" },
+    { code: "1020", name: "Savings Account", type: "ASSET" as const, parentCode: "1000" },
+    { code: "1100", name: "Accounts Receivable", type: "ASSET" as const },
+    { code: "1200", name: "Pledges Receivable", type: "ASSET" as const },
+    { code: "1500", name: "Fixed Assets", type: "ASSET" as const },
+    { code: "2000", name: "Accounts Payable", type: "LIABILITY" as const },
+    { code: "2100", name: "Accrued Expenses", type: "LIABILITY" as const },
+    { code: "3000", name: "Net Assets", type: "EQUITY" as const },
+    { code: "3100", name: "Unrestricted Net Assets", type: "EQUITY" as const },
+    { code: "3200", name: "Restricted Net Assets", type: "EQUITY" as const },
+    { code: "4000", name: "Revenue", type: "REVENUE" as const },
+    { code: "4100", name: "Donations", type: "REVENUE" as const, parentCode: "4000" },
+    { code: "4200", name: "Grants", type: "REVENUE" as const, parentCode: "4000" },
+    { code: "4300", name: "Program Revenue", type: "REVENUE" as const, parentCode: "4000" },
+    { code: "4400", name: "Membership Dues", type: "REVENUE" as const, parentCode: "4000" },
+    { code: "5000", name: "Expenses", type: "EXPENSE" as const },
+    { code: "5100", name: "Salaries and Wages", type: "EXPENSE" as const, parentCode: "5000" },
+    { code: "5200", name: "Rent and Occupancy", type: "EXPENSE" as const, parentCode: "5000" },
+    { code: "5300", name: "Office Supplies", type: "EXPENSE" as const, parentCode: "5000" },
+    { code: "5400", name: "Utilities", type: "EXPENSE" as const, parentCode: "5000" },
+    { code: "5500", name: "Program Expenses", type: "EXPENSE" as const, parentCode: "5000" },
+    { code: "5600", name: "Marketing and Communications", type: "EXPENSE" as const, parentCode: "5000" },
+    { code: "5700", name: "Professional Services", type: "EXPENSE" as const, parentCode: "5000" },
+    { code: "5800", name: "Travel and Transportation", type: "EXPENSE" as const, parentCode: "5000" },
+    { code: "5900", name: "Miscellaneous Expenses", type: "EXPENSE" as const, parentCode: "5000" },
+  ];
+
+  // Create accounts in order (parents first)
+  const createdMap: Record<string, string> = {};
+  for (const acct of defaultAccounts) {
+    const parentId = acct.parentCode ? createdMap[acct.parentCode] : null;
+    const [created] = await db.insert(accounts).values({
+      companyId,
+      code: acct.code,
+      name: acct.name,
+      type: acct.type,
+      isActive: true,
+      parentId: parentId || null,
+    }).returning();
+    createdMap[acct.code] = created.id;
+  }
+}

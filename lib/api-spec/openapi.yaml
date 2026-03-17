@@ -1,22 +1,54 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: MissionLedger API specification
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: auth
+    description: Authentication operations
+  - name: dashboard
+    description: Dashboard data
+  - name: donations
+    description: Donation management
+  - name: expenses
+    description: Expense management
+  - name: funds
+    description: Fund management
+  - name: accounts
+    description: Chart of accounts
+  - name: vendors
+    description: Vendor management
+  - name: bills
+    description: Bill management
+  - name: pledges
+    description: Pledge management
+  - name: journal-entries
+    description: Journal entries
+  - name: bank-accounts
+    description: Bank account management
+  - name: bank-transactions
+    description: Bank transactions
+  - name: reports
+    description: Financial reports
+  - name: companies
+    description: Company management
+  - name: users
+    description: User management
+  - name: budgets
+    description: Budget management
+  - name: reconciliation
+    description: Bank reconciliation
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +56,1211 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /auth/me:
+    get:
+      operationId: getMe
+      tags: [auth]
+      summary: Get current user session
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserSession"
+        "401":
+          description: Unauthorized
+
+  /auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      summary: Login with company code and password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserSession"
+        "401":
+          description: Invalid credentials
+
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: Logout
+      responses:
+        "200":
+          description: Logged out
+
+  /auth/register:
+    post:
+      operationId: register
+      tags: [auth]
+      summary: Register a new organization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: Organization registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserSession"
+
+  /dashboard:
+    get:
+      operationId: getDashboard
+      tags: [dashboard]
+      summary: Get dashboard data
+      responses:
+        "200":
+          description: Dashboard data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardData"
+
+  /donations:
+    get:
+      operationId: getDonations
+      tags: [donations]
+      summary: Get all donations
+      responses:
+        "200":
+          description: List of donations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Donation"
+    post:
+      operationId: createDonation
+      tags: [donations]
+      summary: Create a donation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDonationRequest"
+      responses:
+        "201":
+          description: Donation created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Donation"
+
+  /donations/{id}:
+    get:
+      operationId: getDonation
+      tags: [donations]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Donation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Donation"
+    put:
+      operationId: updateDonation
+      tags: [donations]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDonationRequest"
+      responses:
+        "200":
+          description: Donation updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Donation"
+    delete:
+      operationId: deleteDonation
+      tags: [donations]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Deleted
+
+  /expenses:
+    get:
+      operationId: getExpenses
+      tags: [expenses]
+      summary: Get all expenses
+      responses:
+        "200":
+          description: List of expenses
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Expense"
+    post:
+      operationId: createExpense
+      tags: [expenses]
+      summary: Create an expense
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateExpenseRequest"
+      responses:
+        "201":
+          description: Expense created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Expense"
+
+  /expenses/{id}:
+    put:
+      operationId: updateExpense
+      tags: [expenses]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateExpenseRequest"
+      responses:
+        "200":
+          description: Expense updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Expense"
+    delete:
+      operationId: deleteExpense
+      tags: [expenses]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Deleted
+
+  /funds:
+    get:
+      operationId: getFunds
+      tags: [funds]
+      summary: Get all funds
+      responses:
+        "200":
+          description: List of funds
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Fund"
+    post:
+      operationId: createFund
+      tags: [funds]
+      summary: Create a fund
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateFundRequest"
+      responses:
+        "201":
+          description: Fund created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Fund"
+
+  /funds/{id}:
+    put:
+      operationId: updateFund
+      tags: [funds]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateFundRequest"
+      responses:
+        "200":
+          description: Fund updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Fund"
+    delete:
+      operationId: deleteFund
+      tags: [funds]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Deleted
+
+  /accounts:
+    get:
+      operationId: getAccounts
+      tags: [accounts]
+      summary: Get chart of accounts
+      responses:
+        "200":
+          description: List of accounts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Account"
+    post:
+      operationId: createAccount
+      tags: [accounts]
+      summary: Create an account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAccountRequest"
+      responses:
+        "201":
+          description: Account created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+
+  /accounts/{id}:
+    put:
+      operationId: updateAccount
+      tags: [accounts]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAccountRequest"
+      responses:
+        "200":
+          description: Account updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+    delete:
+      operationId: deleteAccount
+      tags: [accounts]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Deleted
+
+  /vendors:
+    get:
+      operationId: getVendors
+      tags: [vendors]
+      summary: Get all vendors
+      responses:
+        "200":
+          description: List of vendors
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Vendor"
+    post:
+      operationId: createVendor
+      tags: [vendors]
+      summary: Create a vendor
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateVendorRequest"
+      responses:
+        "201":
+          description: Vendor created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Vendor"
+
+  /vendors/{id}:
+    put:
+      operationId: updateVendor
+      tags: [vendors]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateVendorRequest"
+      responses:
+        "200":
+          description: Vendor updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Vendor"
+    delete:
+      operationId: deleteVendor
+      tags: [vendors]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Deleted
+
+  /bills:
+    get:
+      operationId: getBills
+      tags: [bills]
+      summary: Get all bills
+      responses:
+        "200":
+          description: List of bills
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Bill"
+    post:
+      operationId: createBill
+      tags: [bills]
+      summary: Create a bill
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateBillRequest"
+      responses:
+        "201":
+          description: Bill created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Bill"
+
+  /bills/{id}:
+    put:
+      operationId: updateBill
+      tags: [bills]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateBillRequest"
+      responses:
+        "200":
+          description: Bill updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Bill"
+    delete:
+      operationId: deleteBill
+      tags: [bills]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Deleted
+
+  /bills/{id}/payments:
+    post:
+      operationId: createBillPayment
+      tags: [bills]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateBillPaymentRequest"
+      responses:
+        "201":
+          description: Payment created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillPayment"
+
+  /pledges:
+    get:
+      operationId: getPledges
+      tags: [pledges]
+      summary: Get all pledges
+      responses:
+        "200":
+          description: List of pledges
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Pledge"
+    post:
+      operationId: createPledge
+      tags: [pledges]
+      summary: Create a pledge
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePledgeRequest"
+      responses:
+        "201":
+          description: Pledge created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Pledge"
+
+  /pledges/{id}:
+    put:
+      operationId: updatePledge
+      tags: [pledges]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePledgeRequest"
+      responses:
+        "200":
+          description: Pledge updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Pledge"
+    delete:
+      operationId: deletePledge
+      tags: [pledges]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Deleted
+
+  /journal-entries:
+    get:
+      operationId: getJournalEntries
+      tags: [journal-entries]
+      summary: Get all journal entries
+      responses:
+        "200":
+          description: List of journal entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/JournalEntry"
+    post:
+      operationId: createJournalEntry
+      tags: [journal-entries]
+      summary: Create a journal entry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateJournalEntryRequest"
+      responses:
+        "201":
+          description: Journal entry created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JournalEntry"
+
+  /journal-entries/{id}:
+    get:
+      operationId: getJournalEntry
+      tags: [journal-entries]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Journal entry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JournalEntry"
+    put:
+      operationId: updateJournalEntry
+      tags: [journal-entries]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateJournalEntryRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JournalEntry"
+    delete:
+      operationId: deleteJournalEntry
+      tags: [journal-entries]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Deleted
+
+  /journal-entries/{id}/post:
+    post:
+      operationId: postJournalEntry
+      tags: [journal-entries]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Posted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JournalEntry"
+
+  /journal-entries/{id}/void:
+    post:
+      operationId: voidJournalEntry
+      tags: [journal-entries]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Voided
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JournalEntry"
+
+  /bank-accounts:
+    get:
+      operationId: getBankAccounts
+      tags: [bank-accounts]
+      summary: Get all bank accounts
+      responses:
+        "200":
+          description: List of bank accounts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/BankAccount"
+    post:
+      operationId: createBankAccount
+      tags: [bank-accounts]
+      summary: Create a bank account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateBankAccountRequest"
+      responses:
+        "201":
+          description: Bank account created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BankAccount"
+
+  /bank-accounts/{id}:
+    put:
+      operationId: updateBankAccount
+      tags: [bank-accounts]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateBankAccountRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BankAccount"
+    delete:
+      operationId: deleteBankAccount
+      tags: [bank-accounts]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Deleted
+
+  /bank-transactions:
+    get:
+      operationId: getBankTransactions
+      tags: [bank-transactions]
+      summary: Get bank transactions
+      parameters:
+        - name: bankAccountId
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of bank transactions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/BankTransaction"
+    post:
+      operationId: createBankTransaction
+      tags: [bank-transactions]
+      summary: Create a bank transaction
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateBankTransactionRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BankTransaction"
+
+  /bank-transactions/{id}:
+    put:
+      operationId: updateBankTransaction
+      tags: [bank-transactions]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateBankTransactionRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BankTransaction"
+    delete:
+      operationId: deleteBankTransaction
+      tags: [bank-transactions]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Deleted
+
+  /bank-transactions/{id}/categorize:
+    post:
+      operationId: categorizeBankTransaction
+      tags: [bank-transactions]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CategorizeBankTransactionRequest"
+      responses:
+        "200":
+          description: Categorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BankTransaction"
+
+  /reports/profit-loss:
+    get:
+      operationId: getProfitLossReport
+      tags: [reports]
+      summary: Get profit and loss report
+      parameters:
+        - name: startDate
+          in: query
+          schema:
+            type: string
+        - name: endDate
+          in: query
+          schema:
+            type: string
+        - name: fundId
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: P&L report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProfitLossReport"
+
+  /reports/balance-sheet:
+    get:
+      operationId: getBalanceSheetReport
+      tags: [reports]
+      summary: Get balance sheet report
+      parameters:
+        - name: asOfDate
+          in: query
+          schema:
+            type: string
+        - name: fundId
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Balance sheet report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BalanceSheetReport"
+
+  /reports/cash-flow:
+    get:
+      operationId: getCashFlowReport
+      tags: [reports]
+      summary: Get cash flow report
+      parameters:
+        - name: startDate
+          in: query
+          schema:
+            type: string
+        - name: endDate
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Cash flow report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CashFlowReport"
+
+  /reports/budget-vs-actual:
+    get:
+      operationId: getBudgetVsActualReport
+      tags: [reports]
+      summary: Get budget vs actual report
+      parameters:
+        - name: startDate
+          in: query
+          schema:
+            type: string
+        - name: endDate
+          in: query
+          schema:
+            type: string
+        - name: budgetId
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Budget vs actual report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BudgetVsActualReport"
+
+  /companies:
+    get:
+      operationId: getCompany
+      tags: [companies]
+      summary: Get current company info
+      responses:
+        "200":
+          description: Company
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Company"
+    put:
+      operationId: updateCompany
+      tags: [companies]
+      summary: Update company info
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateCompanyRequest"
+      responses:
+        "200":
+          description: Company updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Company"
+
+  /users:
+    get:
+      operationId: getUsers
+      tags: [users]
+      summary: Get all users
+      responses:
+        "200":
+          description: List of users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/User"
+    post:
+      operationId: createUser
+      tags: [users]
+      summary: Create a user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateUserRequest"
+      responses:
+        "201":
+          description: User created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+
+  /users/{id}:
+    put:
+      operationId: updateUser
+      tags: [users]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateUserRequest"
+      responses:
+        "200":
+          description: User updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+    delete:
+      operationId: deleteUser
+      tags: [users]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Deleted
+
+  /budgets:
+    get:
+      operationId: getBudgets
+      tags: [budgets]
+      summary: Get all budgets
+      responses:
+        "200":
+          description: List of budgets
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Budget"
+    post:
+      operationId: createBudget
+      tags: [budgets]
+      summary: Create a budget
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateBudgetRequest"
+      responses:
+        "201":
+          description: Budget created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Budget"
+
+  /reconciliation:
+    get:
+      operationId: getReconciliations
+      tags: [reconciliation]
+      summary: Get all reconciliations
+      responses:
+        "200":
+          description: List of reconciliations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Reconciliation"
+    post:
+      operationId: createReconciliation
+      tags: [reconciliation]
+      summary: Create a reconciliation session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateReconciliationRequest"
+      responses:
+        "201":
+          description: Reconciliation created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Reconciliation"
+
+  /reconciliation/{id}/items:
+    get:
+      operationId: getReconciliationItems
+      tags: [reconciliation]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Reconciliation items
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ReconciliationItem"
+    put:
+      operationId: updateReconciliationItems
+      tags: [reconciliation]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                itemIds:
+                  type: array
+                  items:
+                    type: string
+                cleared:
+                  type: boolean
+              required: [itemIds, cleared]
+      responses:
+        "200":
+          description: Updated
+
+  /reconciliation/{id}/finish:
+    post:
+      operationId: finishReconciliation
+      tags: [reconciliation]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Reconciliation finished
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Reconciliation"
+
 components:
   schemas:
     HealthStatus:
@@ -31,6 +1268,1008 @@ components:
       properties:
         status:
           type: string
-      required:
-        - status
+      required: [status]
 
+    UserSession:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        email:
+          type: string
+        role:
+          type: string
+        companyId:
+          type: string
+        companyName:
+          type: string
+        companyCode:
+          type: string
+        organizationType:
+          type: string
+      required: [id, email, role, companyId]
+
+    LoginRequest:
+      type: object
+      properties:
+        companyCode:
+          type: string
+        email:
+          type: string
+        password:
+          type: string
+      required: [companyCode, email, password]
+
+    RegisterRequest:
+      type: object
+      properties:
+        organizationName:
+          type: string
+        ein:
+          type: string
+        organizationType:
+          type: string
+        adminName:
+          type: string
+        adminEmail:
+          type: string
+        password:
+          type: string
+      required: [organizationName, ein, organizationType, adminName, adminEmail, password]
+
+    DashboardData:
+      type: object
+      properties:
+        totalDonations:
+          type: number
+        totalExpenses:
+          type: number
+        netIncome:
+          type: number
+        transactionCount:
+          type: integer
+        monthlyData:
+          type: array
+          items:
+            type: object
+            properties:
+              month:
+                type: string
+              donations:
+                type: number
+              expenses:
+                type: number
+            required: [month, donations, expenses]
+        expenseByCategory:
+          type: array
+          items:
+            type: object
+            properties:
+              category:
+                type: string
+              amount:
+                type: number
+            required: [category, amount]
+        recentDonations:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              donorName:
+                type: string
+              amount:
+                type: number
+              date:
+                type: string
+              type:
+                type: string
+            required: [id, donorName, amount, date, type]
+        recentExpenses:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              description:
+                type: string
+              amount:
+                type: number
+              date:
+                type: string
+              category:
+                type: string
+            required: [id, description, amount, date, category]
+      required: [totalDonations, totalExpenses, netIncome, transactionCount, monthlyData, expenseByCategory, recentDonations, recentExpenses]
+
+    Donation:
+      type: object
+      properties:
+        id:
+          type: string
+        donorName:
+          type: string
+        donorEmail:
+          type: string
+        amount:
+          type: number
+        date:
+          type: string
+        type:
+          type: string
+        fundId:
+          type: string
+          nullable: true
+        accountId:
+          type: string
+          nullable: true
+        cashAccountId:
+          type: string
+          nullable: true
+        fund:
+          $ref: "#/components/schemas/Fund"
+          nullable: true
+        account:
+          $ref: "#/components/schemas/Account"
+          nullable: true
+        journalEntryId:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      required: [id, donorName, amount, date, type, createdAt, updatedAt]
+
+    CreateDonationRequest:
+      type: object
+      properties:
+        donorName:
+          type: string
+        donorEmail:
+          type: string
+        amount:
+          type: number
+        date:
+          type: string
+        type:
+          type: string
+        fundId:
+          type: string
+        accountId:
+          type: string
+        cashAccountId:
+          type: string
+        notes:
+          type: string
+      required: [donorName, amount, date, type]
+
+    Expense:
+      type: object
+      properties:
+        id:
+          type: string
+        description:
+          type: string
+        amount:
+          type: number
+        date:
+          type: string
+        category:
+          type: string
+        fundId:
+          type: string
+          nullable: true
+        accountId:
+          type: string
+          nullable: true
+        cashAccountId:
+          type: string
+          nullable: true
+        vendorId:
+          type: string
+          nullable: true
+        vendor:
+          $ref: "#/components/schemas/Vendor"
+          nullable: true
+        fund:
+          $ref: "#/components/schemas/Fund"
+          nullable: true
+        journalEntryId:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      required: [id, description, amount, date, category, createdAt, updatedAt]
+
+    CreateExpenseRequest:
+      type: object
+      properties:
+        description:
+          type: string
+        amount:
+          type: number
+        date:
+          type: string
+        category:
+          type: string
+        fundId:
+          type: string
+        accountId:
+          type: string
+        cashAccountId:
+          type: string
+        vendorId:
+          type: string
+        notes:
+          type: string
+      required: [description, amount, date, category]
+
+    Fund:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        isActive:
+          type: boolean
+        balance:
+          type: number
+        totalDonations:
+          type: number
+        totalExpenses:
+          type: number
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      required: [id, name, isActive, createdAt, updatedAt]
+
+    CreateFundRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        isActive:
+          type: boolean
+      required: [name]
+
+    Account:
+      type: object
+      properties:
+        id:
+          type: string
+        code:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+        description:
+          type: string
+          nullable: true
+        isActive:
+          type: boolean
+        parentId:
+          type: string
+          nullable: true
+        balance:
+          type: number
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      required: [id, code, name, type, isActive, createdAt, updatedAt]
+
+    CreateAccountRequest:
+      type: object
+      properties:
+        code:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+        description:
+          type: string
+        isActive:
+          type: boolean
+        parentId:
+          type: string
+      required: [code, name, type]
+
+    Vendor:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        email:
+          type: string
+          nullable: true
+        phone:
+          type: string
+          nullable: true
+        address:
+          type: string
+          nullable: true
+        taxId:
+          type: string
+          nullable: true
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      required: [id, name, isActive, createdAt, updatedAt]
+
+    CreateVendorRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        address:
+          type: string
+        taxId:
+          type: string
+        isActive:
+          type: boolean
+      required: [name]
+
+    Bill:
+      type: object
+      properties:
+        id:
+          type: string
+        vendorId:
+          type: string
+          nullable: true
+        vendor:
+          $ref: "#/components/schemas/Vendor"
+          nullable: true
+        description:
+          type: string
+        amount:
+          type: number
+        dueDate:
+          type: string
+        status:
+          type: string
+        accountId:
+          type: string
+          nullable: true
+        fundId:
+          type: string
+          nullable: true
+        payments:
+          type: array
+          items:
+            $ref: "#/components/schemas/BillPayment"
+        paidAmount:
+          type: number
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      required: [id, description, amount, dueDate, status, createdAt, updatedAt]
+
+    CreateBillRequest:
+      type: object
+      properties:
+        vendorId:
+          type: string
+        description:
+          type: string
+        amount:
+          type: number
+        dueDate:
+          type: string
+        accountId:
+          type: string
+        fundId:
+          type: string
+      required: [description, amount, dueDate]
+
+    BillPayment:
+      type: object
+      properties:
+        id:
+          type: string
+        billId:
+          type: string
+        amount:
+          type: number
+        date:
+          type: string
+        notes:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+      required: [id, billId, amount, date, createdAt]
+
+    CreateBillPaymentRequest:
+      type: object
+      properties:
+        amount:
+          type: number
+        date:
+          type: string
+        cashAccountId:
+          type: string
+        notes:
+          type: string
+      required: [amount, date]
+
+    Pledge:
+      type: object
+      properties:
+        id:
+          type: string
+        donorName:
+          type: string
+        donorEmail:
+          type: string
+          nullable: true
+        totalAmount:
+          type: number
+        pledgeDate:
+          type: string
+        startDate:
+          type: string
+          nullable: true
+        endDate:
+          type: string
+          nullable: true
+        frequency:
+          type: string
+          nullable: true
+        fundId:
+          type: string
+          nullable: true
+        status:
+          type: string
+        paidAmount:
+          type: number
+        remainingAmount:
+          type: number
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      required: [id, donorName, totalAmount, pledgeDate, status, paidAmount, remainingAmount, createdAt, updatedAt]
+
+    CreatePledgeRequest:
+      type: object
+      properties:
+        donorName:
+          type: string
+        donorEmail:
+          type: string
+        totalAmount:
+          type: number
+        pledgeDate:
+          type: string
+        startDate:
+          type: string
+        endDate:
+          type: string
+        frequency:
+          type: string
+        fundId:
+          type: string
+        notes:
+          type: string
+      required: [donorName, totalAmount, pledgeDate]
+
+    JournalEntry:
+      type: object
+      properties:
+        id:
+          type: string
+        entryNumber:
+          type: string
+        date:
+          type: string
+        description:
+          type: string
+        memo:
+          type: string
+          nullable: true
+        status:
+          type: string
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/JournalEntryLine"
+        createdBy:
+          type: string
+          nullable: true
+        postedAt:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      required: [id, entryNumber, date, description, status, lines, createdAt, updatedAt]
+
+    JournalEntryLine:
+      type: object
+      properties:
+        id:
+          type: string
+        accountId:
+          type: string
+        account:
+          $ref: "#/components/schemas/Account"
+          nullable: true
+        debit:
+          type: number
+        credit:
+          type: number
+        description:
+          type: string
+          nullable: true
+        fundId:
+          type: string
+          nullable: true
+      required: [id, accountId, debit, credit]
+
+    CreateJournalEntryRequest:
+      type: object
+      properties:
+        date:
+          type: string
+        description:
+          type: string
+        memo:
+          type: string
+        lines:
+          type: array
+          items:
+            type: object
+            properties:
+              accountId:
+                type: string
+              debit:
+                type: number
+              credit:
+                type: number
+              description:
+                type: string
+              fundId:
+                type: string
+            required: [accountId, debit, credit]
+      required: [date, description, lines]
+
+    BankAccount:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        accountType:
+          type: string
+        lastFour:
+          type: string
+          nullable: true
+        currentBalance:
+          type: number
+        glAccountId:
+          type: string
+          nullable: true
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      required: [id, name, accountType, currentBalance, isActive, createdAt, updatedAt]
+
+    CreateBankAccountRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        accountType:
+          type: string
+        lastFour:
+          type: string
+        currentBalance:
+          type: number
+        glAccountId:
+          type: string
+        isActive:
+          type: boolean
+      required: [name, accountType, currentBalance]
+
+    BankTransaction:
+      type: object
+      properties:
+        id:
+          type: string
+        bankAccountId:
+          type: string
+        date:
+          type: string
+        description:
+          type: string
+        merchantName:
+          type: string
+          nullable: true
+        amount:
+          type: number
+        type:
+          type: string
+        status:
+          type: string
+        fundId:
+          type: string
+          nullable: true
+        accountId:
+          type: string
+          nullable: true
+        account:
+          $ref: "#/components/schemas/Account"
+          nullable: true
+        fund:
+          $ref: "#/components/schemas/Fund"
+          nullable: true
+        journalEntryId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      required: [id, bankAccountId, date, description, amount, type, status, createdAt, updatedAt]
+
+    CreateBankTransactionRequest:
+      type: object
+      properties:
+        bankAccountId:
+          type: string
+        date:
+          type: string
+        description:
+          type: string
+        merchantName:
+          type: string
+        amount:
+          type: number
+        type:
+          type: string
+      required: [bankAccountId, date, description, amount, type]
+
+    UpdateBankTransactionRequest:
+      type: object
+      properties:
+        description:
+          type: string
+        merchantName:
+          type: string
+        fundId:
+          type: string
+        accountId:
+          type: string
+        status:
+          type: string
+
+    CategorizeBankTransactionRequest:
+      type: object
+      properties:
+        accountId:
+          type: string
+        fundId:
+          type: string
+        description:
+          type: string
+      required: [accountId]
+
+    ProfitLossReport:
+      type: object
+      properties:
+        startDate:
+          type: string
+        endDate:
+          type: string
+        revenue:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportLineItem"
+        expenses:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportLineItem"
+        totalRevenue:
+          type: number
+        totalExpenses:
+          type: number
+        netIncome:
+          type: number
+      required: [startDate, endDate, revenue, expenses, totalRevenue, totalExpenses, netIncome]
+
+    BalanceSheetReport:
+      type: object
+      properties:
+        asOfDate:
+          type: string
+        assets:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportLineItem"
+        liabilities:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportLineItem"
+        equity:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportLineItem"
+        totalAssets:
+          type: number
+        totalLiabilities:
+          type: number
+        totalEquity:
+          type: number
+      required: [asOfDate, assets, liabilities, equity, totalAssets, totalLiabilities, totalEquity]
+
+    CashFlowReport:
+      type: object
+      properties:
+        startDate:
+          type: string
+        endDate:
+          type: string
+        operating:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportLineItem"
+        totalCashFlow:
+          type: number
+      required: [startDate, endDate, operating, totalCashFlow]
+
+    BudgetVsActualReport:
+      type: object
+      properties:
+        startDate:
+          type: string
+        endDate:
+          type: string
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              accountName:
+                type: string
+              budgeted:
+                type: number
+              actual:
+                type: number
+              variance:
+                type: number
+              variancePercent:
+                type: number
+            required: [accountName, budgeted, actual, variance, variancePercent]
+      required: [startDate, endDate, items]
+
+    ReportLineItem:
+      type: object
+      properties:
+        accountId:
+          type: string
+        accountCode:
+          type: string
+        accountName:
+          type: string
+        amount:
+          type: number
+        children:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportLineItem"
+      required: [accountId, accountCode, accountName, amount]
+
+    Company:
+      type: object
+      properties:
+        id:
+          type: string
+        companyCode:
+          type: string
+        name:
+          type: string
+        dba:
+          type: string
+          nullable: true
+        ein:
+          type: string
+        address:
+          type: string
+          nullable: true
+        phone:
+          type: string
+          nullable: true
+        email:
+          type: string
+          nullable: true
+        organizationType:
+          type: string
+        isActive:
+          type: boolean
+        subscriptionStatus:
+          type: string
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      required: [id, companyCode, name, ein, organizationType, isActive, createdAt, updatedAt]
+
+    UpdateCompanyRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        dba:
+          type: string
+        ein:
+          type: string
+        address:
+          type: string
+        phone:
+          type: string
+        email:
+          type: string
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+          nullable: true
+        email:
+          type: string
+        role:
+          type: string
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      required: [id, email, role, isActive, createdAt, updatedAt]
+
+    CreateUserRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+        password:
+          type: string
+        role:
+          type: string
+      required: [email, password, role]
+
+    Budget:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        fiscalYear:
+          type: integer
+        startDate:
+          type: string
+        endDate:
+          type: string
+        isActive:
+          type: boolean
+        totalBudget:
+          type: number
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      required: [id, name, fiscalYear, startDate, endDate, isActive, totalBudget, createdAt, updatedAt]
+
+    CreateBudgetRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        fiscalYear:
+          type: integer
+        startDate:
+          type: string
+        endDate:
+          type: string
+      required: [name, fiscalYear, startDate, endDate]
+
+    Reconciliation:
+      type: object
+      properties:
+        id:
+          type: string
+        bankAccountId:
+          type: string
+        statementDate:
+          type: string
+        statementBalance:
+          type: number
+        status:
+          type: string
+        clearedBalance:
+          type: number
+          nullable: true
+        difference:
+          type: number
+          nullable: true
+        reconciledAt:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      required: [id, bankAccountId, statementDate, statementBalance, status, createdAt, updatedAt]
+
+    CreateReconciliationRequest:
+      type: object
+      properties:
+        bankAccountId:
+          type: string
+        statementDate:
+          type: string
+        statementBalance:
+          type: number
+        openingBalance:
+          type: number
+      required: [bankAccountId, statementDate, statementBalance]
+
+    ReconciliationItem:
+      type: object
+      properties:
+        id:
+          type: string
+        reconciliationId:
+          type: string
+        bankTransactionId:
+          type: string
+        bankTransaction:
+          $ref: "#/components/schemas/BankTransaction"
+          nullable: true
+        cleared:
+          type: boolean
+      required: [id, reconciliationId, bankTransactionId, cleared]

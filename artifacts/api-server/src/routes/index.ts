@@ -1,8 +1,42 @@
 import { Router, type IRouter } from "express";
 import healthRouter from "./health";
+import authRouter from "./auth";
+import dashboardRouter from "./dashboard";
+import donationsRouter from "./donations";
+import expensesRouter from "./expenses";
+import fundsRouter from "./funds";
+import accountsRouter from "./accounts";
+import vendorsRouter from "./vendors";
+import billsRouter from "./bills";
+import pledgesRouter from "./pledges";
+import journalEntriesRouter from "./journal-entries";
+import bankAccountsRouter from "./bank-accounts";
+import bankTransactionsRouter from "./bank-transactions";
+import reportsRouter from "./reports";
+import companiesRouter from "./companies";
+import usersRouter from "./users";
+import budgetsRouter from "./budgets";
+import reconciliationRouter from "./reconciliation";
 
 const router: IRouter = Router();
 
-router.use(healthRouter);
+router.use("/healthz", healthRouter);
+router.use("/auth", authRouter);
+router.use("/dashboard", dashboardRouter);
+router.use("/donations", donationsRouter);
+router.use("/expenses", expensesRouter);
+router.use("/funds", fundsRouter);
+router.use("/accounts", accountsRouter);
+router.use("/vendors", vendorsRouter);
+router.use("/bills", billsRouter);
+router.use("/pledges", pledgesRouter);
+router.use("/journal-entries", journalEntriesRouter);
+router.use("/bank-accounts", bankAccountsRouter);
+router.use("/bank-transactions", bankTransactionsRouter);
+router.use("/reports", reportsRouter);
+router.use("/companies", companiesRouter);
+router.use("/users", usersRouter);
+router.use("/budgets", budgetsRouter);
+router.use("/reconciliation", reconciliationRouter);
 
 export default router;
