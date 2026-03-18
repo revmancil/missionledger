@@ -17,6 +17,8 @@ export interface AuthUser {
   companyName: string;
   companyCode: string;
   organizationType: string;
+  isPlatformAdmin: boolean;
+  impersonatedBy?: string;
 }
 
 export function signToken(user: AuthUser): string {
@@ -42,6 +44,19 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     res.status(401).json({ error: "Unauthorized" });
     return;
   }
+
+  // Enforce company suspension on every request
+  if (user.companyId && !user.isPlatformAdmin) {
+    const [company] = await db.select({ isActive: companies.isActive })
+      .from(companies)
+      .where(eq(companies.id, user.companyId))
+      .limit(1);
+    if (company && !company.isActive) {
+      res.status(403).json({ error: "ACCOUNT_SUSPENDED", message: "Your organization account has been suspended. Please contact support." });
+      return;
+    }
+  }
+
   (req as any).user = user;
   next();
 }
@@ -50,6 +65,15 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction): v
   const user = (req as any).user as AuthUser;
   if (user?.role !== "ADMIN" && user?.role !== "MASTER_ADMIN") {
     res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+  next();
+}
+
+export function requirePlatformAdmin(req: Request, res: Response, next: NextFunction): void {
+  const user = (req as any).user as AuthUser;
+  if (!user?.isPlatformAdmin) {
+    res.status(403).json({ error: "PLATFORM_ADMIN_REQUIRED", message: "This endpoint requires platform administrator access." });
     return;
   }
   next();
@@ -99,7 +123,6 @@ export async function getOrCreateDefaultAccounts(companyId: string): Promise<voi
     { code: "5900", name: "Miscellaneous Expenses", type: "EXPENSE" as const, parentCode: "5000" },
   ];
 
-  // Create accounts in order (parents first)
   const createdMap: Record<string, string> = {};
   for (const acct of defaultAccounts) {
     const parentId = acct.parentCode ? createdMap[acct.parentCode] : null;

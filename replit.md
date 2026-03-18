@@ -23,6 +23,12 @@ MissionLedger is a full-stack nonprofit financial management SaaS app for church
 - **Executive Dashboard**: KPI cards (Total Cash, Net Monthly Income, Budget %, Monthly Deposits), spending by category donut, 6-month income/expenses bar chart, budget tracker with over-budget alerts, recent activity feed
 - **Opening Balance Wizard**: Three-column wizard (Assets 1000s / Liabilities 2000s / Equity 3000s); accounting equation check Assets = Liabilities + Equity; Cash/Accrual toggle (Cash hides Liabilities column); creates a posted journal entry on finalize; stores `accountingMethod` on the company record; "Edit Balances" re-voids and replaces the prior entry
 - **Authentication**: Cookie-based JWT sessions with company code + email + password
+- **Multi-Tenant Architecture**: Every table uses `company_id` as the tenant firewall. All queries are filtered by `companyId` from the JWT. Application-level RLS is enforced on every route.
+- **Organization Users (`organization_users`)**: Join table enabling a single user to belong to multiple organizations. Used by the Org Switcher to let users switch context without re-logging in.
+- **Platform Admin Console** (`/master-admin`): Separate view (guarded by `isPlatformAdmin` flag on users) showing all organizations across the platform with stats, user counts, subscription status. Supports: suspend/activate orgs (which blocks all logins for that org), impersonate (view any org's books as a support admin with a 2-hour session), and org detail/user drill-down.
+- **Org Switcher**: Shown in the sidebar when a user belongs to multiple organizations. Calls `POST /auth/switch-org` to re-issue the JWT for the selected org.
+- **Impersonation Banner**: When a platform admin is viewing an org via impersonation, an amber banner appears in the sidebar showing "Viewing as [Org Name]" with an Exit button. Impersonation is time-limited (2h JWT).
+- **Account Suspension**: Setting `company.isActive = false` causes the `requireAuth` middleware to return `403 ACCOUNT_SUSPENDED` on all subsequent requests from users of that org.
 - **Double-Entry GL Engine**: `gl_entries` table + engine (`lib/gl.ts`) that generates balanced debit/credit pairs for every transaction. Strict balance enforcement — partial entries are never persisted.
 - **Trial Balance**: `/trial-balance` page with account groups (ASSET, LIABILITY, EQUITY, INCOME, EXPENSE), collapsible rows, balance banner (green/red), Sync GL Entries button, and GAAP note.
 - **Period & Year-End Close Wizard**: `/period-close` — multi-step wizard with:

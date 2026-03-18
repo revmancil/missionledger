@@ -1,6 +1,6 @@
 import { Router } from "express";
-import { db, users, companies } from "@workspace/db";
-import { eq, and } from "drizzle-orm";
+import { db, users, companies, organizationUsers } from "@workspace/db";
+import { eq, and, inArray } from "drizzle-orm";
 import {
   requireAuth,
   hashPassword,
@@ -22,6 +22,17 @@ function generateCompanyCode(): string {
   return code;
 }
 
+function setCookieAndRespond(res: any, authUser: AuthUser, status = 200) {
+  const token = signToken(authUser);
+  res.cookie(COOKIE_NAME, token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+  });
+  res.status(status).json(authUser);
+}
+
 // GET /auth/me
 router.get("/me", requireAuth, (req, res) => {
   res.json((req as any).user);
@@ -35,44 +46,55 @@ router.post("/login", async (req, res) => {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
-    const company = await db.select().from(companies).where(eq(companies.companyCode, companyCode.toUpperCase())).limit(1);
-    if (!company.length || !company[0].isActive) {
+    const [company] = await db.select().from(companies)
+      .where(eq(companies.companyCode, companyCode.toUpperCase()))
+      .limit(1);
+
+    if (!company) {
       return res.status(401).json({ error: "Invalid company code" });
     }
+    if (!company.isActive) {
+      return res.status(403).json({ error: "ACCOUNT_SUSPENDED", message: "This organization account has been suspended." });
+    }
 
-    const user = await db.select().from(users).where(
-      and(eq(users.companyId, company[0].id), eq(users.email, email.toLowerCase()))
+    const [user] = await db.select().from(users).where(
+      and(eq(users.email, email.toLowerCase()), eq(users.isActive, true))
     ).limit(1);
 
-    if (!user.length || !user[0].isActive) {
+    if (!user) {
       return res.status(401).json({ error: "Invalid credentials" });
     }
 
-    const valid = await comparePassword(password, user[0].password);
+    // Verify user has access to this company (check org_users or legacy companyId)
+    const [orgMembership] = await db.select().from(organizationUsers)
+      .where(and(eq(organizationUsers.userId, user.id), eq(organizationUsers.companyId, company.id), eq(organizationUsers.isActive, true)))
+      .limit(1);
+
+    // Fall back to legacy companyId check
+    if (!orgMembership && user.companyId !== company.id) {
+      return res.status(401).json({ error: "Invalid credentials" });
+    }
+
+    const valid = await comparePassword(password, user.password);
     if (!valid) {
       return res.status(401).json({ error: "Invalid credentials" });
     }
 
+    const effectiveRole = orgMembership?.role ?? user.role;
+
     const authUser: AuthUser = {
-      id: user[0].id,
-      email: user[0].email,
-      name: user[0].name,
-      role: user[0].role,
-      companyId: company[0].id,
-      companyName: company[0].name,
-      companyCode: company[0].companyCode,
-      organizationType: company[0].organizationType,
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: effectiveRole,
+      companyId: company.id,
+      companyName: company.name,
+      companyCode: company.companyCode,
+      organizationType: company.organizationType,
+      isPlatformAdmin: user.isPlatformAdmin,
     };
 
-    const token = signToken(authUser);
-    res.cookie(COOKIE_NAME, token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
-
-    res.json(authUser);
+    setCookieAndRespond(res, authUser);
   } catch (error) {
     console.error("Login error:", error);
     res.status(500).json({ error: "Internal server error" });
@@ -80,7 +102,7 @@ router.post("/login", async (req, res) => {
 });
 
 // POST /auth/logout
-router.post("/logout", (_req, res) => {
+router.post("/logout", (req, res) => {
   res.clearCookie(COOKIE_NAME);
   res.json({ success: true });
 });
@@ -93,13 +115,11 @@ router.post("/register", async (req, res) => {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
-    // Check if email already used
     const existingUser = await db.select().from(users).where(eq(users.email, adminEmail.toLowerCase())).limit(1);
     if (existingUser.length) {
       return res.status(400).json({ error: "Email already registered" });
     }
 
-    // Generate unique company code
     let companyCode = generateCompanyCode();
     let attempts = 0;
     while (attempts < 10) {
@@ -111,7 +131,6 @@ router.post("/register", async (req, res) => {
 
     const hashedPw = await hashPassword(password);
 
-    // Create company
     const [company] = await db.insert(companies).values({
       companyCode,
       name: organizationName,
@@ -121,7 +140,6 @@ router.post("/register", async (req, res) => {
       subscriptionStatus: "TRIAL",
     }).returning();
 
-    // Create admin user
     const [user] = await db.insert(users).values({
       companyId: company.id,
       name: adminName || null,
@@ -129,16 +147,23 @@ router.post("/register", async (req, res) => {
       password: hashedPw,
       role: "ADMIN",
       isActive: true,
+      isPlatformAdmin: false,
     }).returning();
 
-    // Create default chart of accounts (legacy accounts table)
+    // Create organization_users entry (primary membership)
+    await db.insert(organizationUsers).values({
+      userId: user.id,
+      companyId: company.id,
+      role: "ADMIN",
+      isPrimary: true,
+      isActive: true,
+    });
+
     await getOrCreateDefaultAccounts(company.id);
 
-    // Seed new chart_of_accounts table (4000/8000-series COA)
     const { seedChartOfAccounts } = await import("./chart-of-accounts");
     await seedChartOfAccounts(company.id);
 
-    // Create default General Fund
     const { funds } = await import("@workspace/db");
     await db.insert(funds).values({
       companyId: company.id,
@@ -156,19 +181,131 @@ router.post("/register", async (req, res) => {
       companyName: company.name,
       companyCode: company.companyCode,
       organizationType: company.organizationType,
+      isPlatformAdmin: false,
     };
 
-    const token = signToken(authUser);
-    res.cookie(COOKIE_NAME, token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
-
-    res.status(201).json(authUser);
+    setCookieAndRespond(res, authUser, 201);
   } catch (error) {
     console.error("Register error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// GET /auth/my-orgs — list all organizations the current user belongs to
+router.get("/my-orgs", requireAuth, async (req, res) => {
+  try {
+    const { id: userId } = (req as any).user as AuthUser;
+
+    const memberships = await db.select({
+      companyId: organizationUsers.companyId,
+      role: organizationUsers.role,
+      isPrimary: organizationUsers.isPrimary,
+      joinedAt: organizationUsers.joinedAt,
+    }).from(organizationUsers)
+      .where(and(eq(organizationUsers.userId, userId), eq(organizationUsers.isActive, true)));
+
+    if (!memberships.length) {
+      // Fallback: user has no org_users rows, use their companyId
+      const user = (req as any).user as AuthUser;
+      const [company] = await db.select().from(companies).where(eq(companies.id, user.companyId)).limit(1);
+      return res.json([{
+        companyId: company.id,
+        companyName: company.name,
+        companyCode: company.companyCode,
+        organizationType: company.organizationType,
+        role: user.role,
+        isPrimary: true,
+        isActive: company.isActive,
+      }]);
+    }
+
+    const companyIds = memberships.map(m => m.companyId);
+    const orgs = await db.select({
+      id: companies.id,
+      name: companies.name,
+      companyCode: companies.companyCode,
+      organizationType: companies.organizationType,
+      isActive: companies.isActive,
+      subscriptionStatus: companies.subscriptionStatus,
+    }).from(companies).where(inArray(companies.id, companyIds));
+
+    const result = memberships
+      .map(m => {
+        const org = orgs.find(o => o.id === m.companyId);
+        if (!org) return null;
+        return {
+          companyId: org.id,
+          companyName: org.name,
+          companyCode: org.companyCode,
+          organizationType: org.organizationType,
+          role: m.role,
+          isPrimary: m.isPrimary,
+          isActive: org.isActive,
+        };
+      })
+      .filter(Boolean);
+
+    res.json(result);
+  } catch (error) {
+    console.error("My orgs error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// POST /auth/switch-org — switch the active organization context
+router.post("/switch-org", requireAuth, async (req, res) => {
+  try {
+    const { id: userId, isPlatformAdmin } = (req as any).user as AuthUser;
+    const { companyId } = req.body ?? {};
+
+    if (!companyId) {
+      return res.status(400).json({ error: "companyId is required" });
+    }
+
+    // Verify access: check organization_users or platform admin
+    if (!isPlatformAdmin) {
+      const [membership] = await db.select().from(organizationUsers)
+        .where(and(
+          eq(organizationUsers.userId, userId),
+          eq(organizationUsers.companyId, companyId),
+          eq(organizationUsers.isActive, true)
+        ))
+        .limit(1);
+
+      // Also allow if it's the user's primary company (legacy support)
+      const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+      if (!membership && user?.companyId !== companyId) {
+        return res.status(403).json({ error: "You do not have access to this organization" });
+      }
+    }
+
+    const [company] = await db.select().from(companies).where(eq(companies.id, companyId)).limit(1);
+    if (!company || !company.isActive) {
+      return res.status(403).json({ error: "Organization is not accessible" });
+    }
+
+    const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    const [membership] = await db.select().from(organizationUsers)
+      .where(and(eq(organizationUsers.userId, userId), eq(organizationUsers.companyId, companyId)))
+      .limit(1);
+
+    const authUser: AuthUser = {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: membership?.role ?? user.role,
+      companyId: company.id,
+      companyName: company.name,
+      companyCode: company.companyCode,
+      organizationType: company.organizationType,
+      isPlatformAdmin: user.isPlatformAdmin,
+    };
+
+    setCookieAndRespond(res, authUser);
+  } catch (error) {
+    console.error("Switch org error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });

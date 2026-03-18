@@ -22,6 +22,7 @@ import transactionsRouter from "./transactions";
 import openingBalanceRouter from "./opening-balance";
 import trialBalanceRouter from "./trial-balance";
 import periodCloseRouter from "./period-close";
+import masterAdminRouter from "./master-admin";
 
 const router: IRouter = Router();
 
@@ -48,5 +49,6 @@ router.use("/transactions", transactionsRouter);
 router.use("/opening-balance", openingBalanceRouter);
 router.use("/trial-balance", trialBalanceRouter);
 router.use("/period-close", periodCloseRouter);
+router.use("/master-admin", masterAdminRouter);
 
 export default router;
