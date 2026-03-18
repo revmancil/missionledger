@@ -18,6 +18,7 @@ import VendorsPage from "@/pages/vendors";
 import BillsPage from "@/pages/bills";
 import PledgesPage from "@/pages/pledges";
 import BankAccountsPage from "@/pages/bank-accounts";
+import BankRegisterPage from "@/pages/bank-register";
 import ReportsPage from "@/pages/reports";
 import NotFound from "@/pages/not-found";
 
@@ -53,6 +54,7 @@ function Router() {
       <Route path="/bills"><ProtectedRoute component={BillsPage} /></Route>
       <Route path="/pledges"><ProtectedRoute component={PledgesPage} /></Route>
       <Route path="/bank-accounts"><ProtectedRoute component={BankAccountsPage} /></Route>
+      <Route path="/bank-register"><ProtectedRoute component={BankRegisterPage} /></Route>
       <Route path="/reports"><ProtectedRoute component={ReportsPage} /></Route>
 
       <Route component={NotFound} />

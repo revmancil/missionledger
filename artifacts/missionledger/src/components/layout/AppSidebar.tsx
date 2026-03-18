@@ -2,7 +2,7 @@ import { Link, useLocation } from "wouter";
 import { 
   LayoutDashboard, Heart, Receipt, Wallet, BookOpen, Building2, 
   FileText, HandHeart, LogOut, Settings, BarChart3, Building,
-  Banknote
+  Banknote, ClipboardList
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
@@ -28,6 +28,7 @@ const navGroups = [
   {
     label: "Accounting & Banking",
     items: [
+      { href: "/bank-register", label: "Bank Register", icon: ClipboardList },
       { href: "/bank-accounts", label: "Bank Accounts", icon: Banknote },
       { href: "/accounts", label: "Chart of Accounts", icon: BookOpen },
       { href: "/funds", label: "Funds", icon: Wallet },

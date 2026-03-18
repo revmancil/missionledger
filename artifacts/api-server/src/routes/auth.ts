@@ -131,8 +131,12 @@ router.post("/register", async (req, res) => {
       isActive: true,
     }).returning();
 
-    // Create default chart of accounts
+    // Create default chart of accounts (legacy accounts table)
     await getOrCreateDefaultAccounts(company.id);
+
+    // Seed new chart_of_accounts table (4000/8000-series COA)
+    const { seedChartOfAccounts } = await import("./chart-of-accounts");
+    await seedChartOfAccounts(company.id);
 
     // Create default General Fund
     const { funds } = await import("@workspace/db");

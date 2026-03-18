@@ -17,6 +17,8 @@ import companiesRouter from "./companies";
 import usersRouter from "./users";
 import budgetsRouter from "./budgets";
 import reconciliationRouter from "./reconciliation";
+import chartOfAccountsRouter from "./chart-of-accounts";
+import transactionsRouter from "./transactions";
 
 const router: IRouter = Router();
 
@@ -38,5 +40,7 @@ router.use("/companies", companiesRouter);
 router.use("/users", usersRouter);
 router.use("/budgets", budgetsRouter);
 router.use("/reconciliation", reconciliationRouter);
+router.use("/chart-of-accounts", chartOfAccountsRouter);
+router.use("/transactions", transactionsRouter);
 
 export default router;

@@ -12,3 +12,5 @@ export * from "./bankAccounts";
 export * from "./bankTransactions";
 export * from "./budgets";
 export * from "./reconciliation";
+export * from "./chartOfAccounts";
+export * from "./transactions";

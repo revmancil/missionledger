@@ -15,6 +15,9 @@ MissionLedger is a full-stack nonprofit financial management SaaS app for church
 - **Bills**: Accounts payable with partial payment tracking
 - **Pledges**: Multi-year pledge tracking with frequency and fulfillment status
 - **Bank Accounts**: Track checking/savings accounts with balances
+- **Bank Register**: QuickBooks-style double-row transaction register — Row 1 (Date, Check#, Payee, Payment, Deposit, Balance, Status), Row 2 (Account/Category, Fund, Memo). Supports filtering by bank account and status, inline clear/void actions, running balance column, footer totals.
+- **Chart of Accounts (new)**: Dedicated `chart_of_accounts` table with 56 pre-seeded accounts: 4000-series Income (Individual Contributions, Grants, Membership Dues, etc.) and 8000-series Expense (Personnel, Occupancy, Program, Admin, Professional Services, Travel, Marketing, etc.). Auto-seeded per company on registration.
+- **Transactions**: Full `transactions` table for the bank register: soft-void only (no deletes), DEBIT/CREDIT types, UNCLEARED/CLEARED/RECONCILED/VOID statuses.
 - **Reports**: P&L, Balance Sheet, Cash Flow, Budget vs Actual
 - **Authentication**: Cookie-based JWT sessions with company code + email + password
 
@@ -34,7 +37,7 @@ MissionLedger is a full-stack nonprofit financial management SaaS app for church
 
 ## Auth Flow
 
-- Registration creates company + admin user + 26 default chart of accounts + "General Fund"
+- Registration creates company + admin user + 26 legacy accounts + 56 chart_of_accounts (4000/8000 series) + "General Fund"
 - Login requires: `companyCode` (6-char alphanumeric), `email`, `password`
 - Company code is shown after registration
 - JWT stored in httpOnly cookie `ml_session`
