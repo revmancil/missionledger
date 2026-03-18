@@ -14,3 +14,4 @@ export * from "./budgets";
 export * from "./reconciliation";
 export * from "./chartOfAccounts";
 export * from "./transactions";
+export * from "./transactionSplits";

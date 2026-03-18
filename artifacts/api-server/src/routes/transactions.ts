@@ -1,28 +1,35 @@
 import { Router } from "express";
-import { db, transactions, chartOfAccounts, bankAccounts, funds } from "@workspace/db";
-import { eq, and, desc, asc } from "drizzle-orm";
+import {
+  db, transactions, transactionSplits, chartOfAccounts,
+  bankAccounts, funds, vendors,
+} from "@workspace/db";
+import { eq, and, desc, inArray } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
 
 const router = Router();
 
-async function enrichTransaction(tx: any, companyId: string) {
-  const allCoa = await db
-    .select()
-    .from(chartOfAccounts)
-    .where(eq(chartOfAccounts.companyId, companyId));
-  const allFunds = await db
-    .select()
-    .from(funds)
-    .where(eq(funds.companyId, companyId));
-  const allBankAccounts = await db
-    .select()
-    .from(bankAccounts)
-    .where(eq(bankAccounts.companyId, companyId));
+// ── helpers ───────────────────────────────────────────────────────────────────
+async function getLookups(companyId: string) {
+  const [allCoa, allFunds, allBanks, allVendors] = await Promise.all([
+    db.select().from(chartOfAccounts).where(eq(chartOfAccounts.companyId, companyId)),
+    db.select().from(funds).where(eq(funds.companyId, companyId)),
+    db.select().from(bankAccounts).where(eq(bankAccounts.companyId, companyId)),
+    db.select().from(vendors).where(eq(vendors.companyId, companyId)),
+  ]);
+  return {
+    coaMap: Object.fromEntries(allCoa.map((a) => [a.id, a])),
+    fundMap: Object.fromEntries(allFunds.map((f) => [f.id, f])),
+    bankMap: Object.fromEntries(allBanks.map((b) => [b.id, b])),
+    vendorMap: Object.fromEntries(allVendors.map((v) => [v.id, v])),
+  };
+}
 
-  const coaMap = Object.fromEntries(allCoa.map((a) => [a.id, a]));
-  const fundMap = Object.fromEntries(allFunds.map((f) => [f.id, f]));
-  const bankMap = Object.fromEntries(allBankAccounts.map((b) => [b.id, b]));
-
+function serializeTx(
+  tx: any,
+  splits: any[],
+  lookups: Awaited<ReturnType<typeof getLookups>>
+) {
+  const { coaMap, fundMap, bankMap, vendorMap } = lookups;
   return {
     ...tx,
     date: tx.date instanceof Date ? tx.date.toISOString() : tx.date,
@@ -31,72 +38,101 @@ async function enrichTransaction(tx: any, companyId: string) {
     chartAccount: tx.chartAccountId ? coaMap[tx.chartAccountId] ?? null : null,
     fund: tx.fundId ? fundMap[tx.fundId] ?? null : null,
     bankAccount: tx.bankAccountId ? bankMap[tx.bankAccountId] ?? null : null,
+    vendor: tx.vendorId ? vendorMap[tx.vendorId] ?? null : null,
+    splits: splits.map((s) => ({
+      ...s,
+      createdAt: s.createdAt instanceof Date ? s.createdAt.toISOString() : s.createdAt,
+      updatedAt: s.updatedAt instanceof Date ? s.updatedAt.toISOString() : s.updatedAt,
+      chartAccount: s.chartAccountId ? coaMap[s.chartAccountId] ?? null : null,
+      vendor: s.vendorId ? vendorMap[s.vendorId] ?? null : null,
+    })),
   };
 }
 
-// GET /transactions?bankAccountId=&status=
+async function upsertSplits(
+  transactionId: string,
+  rawSplits: Array<{ chartAccountId?: string | null; vendorId?: string | null; amount: number; memo?: string | null; sortOrder?: number }>
+) {
+  await db.delete(transactionSplits).where(eq(transactionSplits.transactionId, transactionId));
+  if (rawSplits.length === 0) return;
+  for (let i = 0; i < rawSplits.length; i++) {
+    const s = rawSplits[i];
+    await db.insert(transactionSplits).values({
+      transactionId,
+      chartAccountId: s.chartAccountId ?? null,
+      vendorId: s.vendorId ?? null,
+      amount: s.amount,
+      memo: s.memo ?? null,
+      sortOrder: s.sortOrder ?? i,
+    });
+  }
+}
+
+// ── GET /transactions ─────────────────────────────────────────────────────────
 router.get("/", requireAuth, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
     const { bankAccountId, status } = req.query;
 
-    const all = await db
+    let all = await db
       .select()
       .from(transactions)
       .where(eq(transactions.companyId, companyId))
       .orderBy(desc(transactions.date), desc(transactions.createdAt));
 
-    const filtered = all.filter((t) => {
-      if (bankAccountId && t.bankAccountId !== bankAccountId) return false;
-      if (status && t.status !== status) return false;
-      return true;
-    });
+    if (bankAccountId) all = all.filter((t) => t.bankAccountId === bankAccountId);
+    if (status) all = all.filter((t) => t.status === status);
 
-    // Bulk-enrich (fetch lookup data once)
-    const allCoa = await db.select().from(chartOfAccounts).where(eq(chartOfAccounts.companyId, companyId));
-    const allFunds = await db.select().from(funds).where(eq(funds.companyId, companyId));
-    const allBanks = await db.select().from(bankAccounts).where(eq(bankAccounts.companyId, companyId));
-    const coaMap = Object.fromEntries(allCoa.map((a) => [a.id, a]));
-    const fundMap = Object.fromEntries(allFunds.map((f) => [f.id, f]));
-    const bankMap = Object.fromEntries(allBanks.map((b) => [b.id, b]));
+    const txIds = all.map((t) => t.id);
+    let allSplits: any[] = [];
+    if (txIds.length) {
+      allSplits = await db
+        .select()
+        .from(transactionSplits)
+        .where(inArray(transactionSplits.transactionId, txIds))
+        .orderBy(transactionSplits.transactionId, transactionSplits.sortOrder);
+    }
 
-    res.json(
-      filtered.map((t) => ({
-        ...t,
-        date: t.date.toISOString(),
-        createdAt: t.createdAt.toISOString(),
-        updatedAt: t.updatedAt.toISOString(),
-        chartAccount: t.chartAccountId ? coaMap[t.chartAccountId] ?? null : null,
-        fund: t.fundId ? fundMap[t.fundId] ?? null : null,
-        bankAccount: t.bankAccountId ? bankMap[t.bankAccountId] ?? null : null,
-      }))
-    );
-  } catch (error) {
-    console.error("Get transactions error:", error);
+    const splitsByTx = allSplits.reduce<Record<string, any[]>>((acc, s) => {
+      (acc[s.transactionId] ??= []).push(s);
+      return acc;
+    }, {});
+
+    const lookups = await getLookups(companyId);
+
+    res.json(all.map((tx) => serializeTx(tx, splitsByTx[tx.id] ?? [], lookups)));
+  } catch (err) {
+    console.error("Get transactions error:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 });
 
-// POST /transactions
+// ── POST /transactions ────────────────────────────────────────────────────────
 router.post("/", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
     const {
-      bankAccountId,
-      date,
-      payee,
-      amount,
-      type,
-      status,
-      chartAccountId,
-      memo,
-      checkNumber,
-      referenceNumber,
-      fundId,
+      bankAccountId, date, payee, vendorId,
+      amount, type, status,
+      chartAccountId, memo, checkNumber, referenceNumber,
+      fundId, splits: rawSplits,
     } = req.body ?? {};
 
     if (!date || !payee || amount === undefined)
       return res.status(400).json({ error: "date, payee, and amount are required" });
+
+    const isSplit = Array.isArray(rawSplits) && rawSplits.length > 0;
+
+    // Validate split sum
+    if (isSplit) {
+      const sum = rawSplits.reduce((acc: number, s: any) => acc + Number(s.amount), 0);
+      const diff = Math.abs(sum - Number(amount));
+      if (diff > 0.005) {
+        return res.status(400).json({
+          error: `Split amounts (${sum.toFixed(2)}) must equal the transaction total (${Number(amount).toFixed(2)})`,
+        });
+      }
+    }
 
     const [created] = await db
       .insert(transactions)
@@ -105,10 +141,12 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
         bankAccountId: bankAccountId ?? null,
         date: new Date(date),
         payee,
+        vendorId: vendorId ?? null,
         amount: parseFloat(amount),
         type: (type as any) ?? "DEBIT",
         status: (status as any) ?? "UNCLEARED",
-        chartAccountId: chartAccountId ?? null,
+        chartAccountId: isSplit ? null : (chartAccountId ?? null),
+        isSplit,
         memo: memo ?? null,
         checkNumber: checkNumber ?? null,
         referenceNumber: referenceNumber ?? null,
@@ -117,29 +155,28 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
       })
       .returning();
 
-    res.status(201).json(await enrichTransaction(created, companyId));
-  } catch (error) {
-    console.error("Create transaction error:", error);
+    if (isSplit) await upsertSplits(created.id, rawSplits);
+
+    const lookups = await getLookups(companyId);
+    const splits = isSplit
+      ? await db.select().from(transactionSplits).where(eq(transactionSplits.transactionId, created.id)).orderBy(transactionSplits.sortOrder)
+      : [];
+
+    res.status(201).json(serializeTx(created, splits, lookups));
+  } catch (err) {
+    console.error("Create transaction error:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 });
 
-// PUT /transactions/:id
+// ── PUT /transactions/:id ─────────────────────────────────────────────────────
 router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
     const {
-      date,
-      payee,
-      amount,
-      type,
-      status,
-      chartAccountId,
-      memo,
-      checkNumber,
-      referenceNumber,
-      fundId,
-      bankAccountId,
+      date, payee, vendorId, amount, type, status,
+      chartAccountId, memo, checkNumber, referenceNumber,
+      fundId, bankAccountId, splits: rawSplits,
     } = req.body ?? {};
 
     const [existing] = await db
@@ -149,15 +186,29 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
     if (!existing) return res.status(404).json({ error: "Not found" });
     if (existing.isVoid) return res.status(400).json({ error: "Cannot edit a voided transaction" });
 
+    const isSplit = Array.isArray(rawSplits) && rawSplits.length > 0;
+
+    if (isSplit && amount !== undefined) {
+      const sum = rawSplits.reduce((acc: number, s: any) => acc + Number(s.amount), 0);
+      const diff = Math.abs(sum - Number(amount));
+      if (diff > 0.005) {
+        return res.status(400).json({
+          error: `Split amounts (${sum.toFixed(2)}) must equal the transaction total (${Number(amount).toFixed(2)})`,
+        });
+      }
+    }
+
     const [updated] = await db
       .update(transactions)
       .set({
         date: date ? new Date(date) : undefined,
         payee: payee ?? undefined,
+        vendorId: vendorId ?? null,
         amount: amount !== undefined ? parseFloat(amount) : undefined,
         type: (type as any) ?? undefined,
         status: (status as any) ?? undefined,
-        chartAccountId: chartAccountId ?? null,
+        chartAccountId: isSplit ? null : (chartAccountId ?? null),
+        isSplit,
         memo: memo ?? null,
         checkNumber: checkNumber ?? null,
         referenceNumber: referenceNumber ?? null,
@@ -168,13 +219,21 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
       .where(eq(transactions.id, req.params.id))
       .returning();
 
-    res.json(await enrichTransaction(updated, companyId));
-  } catch (error) {
+    await upsertSplits(updated.id, isSplit ? rawSplits : []);
+
+    const lookups = await getLookups(companyId);
+    const splits = isSplit
+      ? await db.select().from(transactionSplits).where(eq(transactionSplits.transactionId, updated.id)).orderBy(transactionSplits.sortOrder)
+      : [];
+
+    res.json(serializeTx(updated, splits, lookups));
+  } catch (err) {
+    console.error("Update transaction error:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 });
 
-// DELETE /transactions/:id  (soft-void, not hard delete)
+// ── DELETE /transactions/:id (soft-void) ──────────────────────────────────────
 router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
@@ -185,12 +244,12 @@ router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
       .returning();
     if (!updated) return res.status(404).json({ error: "Not found" });
     res.json({ success: true });
-  } catch (error) {
+  } catch (err) {
     res.status(500).json({ error: "Internal server error" });
   }
 });
 
-// PATCH /transactions/:id/status  (toggle cleared/uncleared)
+// ── PATCH /transactions/:id/status ────────────────────────────────────────────
 router.patch("/:id/status", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
@@ -203,8 +262,16 @@ router.patch("/:id/status", requireAuth, requireAdmin, async (req, res) => {
       .where(and(eq(transactions.id, req.params.id), eq(transactions.companyId, companyId)))
       .returning();
     if (!updated) return res.status(404).json({ error: "Not found" });
-    res.json(await enrichTransaction(updated, companyId));
-  } catch (error) {
+
+    const lookups = await getLookups(companyId);
+    const splits = await db
+      .select()
+      .from(transactionSplits)
+      .where(eq(transactionSplits.transactionId, updated.id))
+      .orderBy(transactionSplits.sortOrder);
+
+    res.json(serializeTx(updated, splits, lookups));
+  } catch (err) {
     res.status(500).json({ error: "Internal server error" });
   }
 });

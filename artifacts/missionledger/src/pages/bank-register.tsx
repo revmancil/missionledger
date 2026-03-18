@@ -1,13 +1,15 @@
-import React, { useState, useEffect, useCallback } from "react";
-import { AppLayout } from "@/components/layout/AppLayout";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { format, parseISO } from "date-fns";
 import {
   Plus, ChevronDown, ChevronUp, CheckCircle, Circle,
-  Ban, RefreshCw, Edit, Wallet
+  Ban, RefreshCw, Edit, Wallet, Scissors, Trash2, Search,
+  AlertCircle, CheckCheck,
 } from "lucide-react";
+import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -21,38 +23,56 @@ import {
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 
+const BASE = import.meta.env.BASE_URL;
+
 function apiFetch(url: string, init?: RequestInit) {
   return fetch(url, { credentials: "include", ...init });
 }
 
-const BASE = import.meta.env.BASE_URL;
-
-interface BankAccount { id: string; name: string; accountNumber: string; bankName: string; currentBalance: number; }
+// ── Types ─────────────────────────────────────────────────────────────────────
+interface BankAccount { id: string; name: string; accountNumber: string; currentBalance: number; }
 interface ChartAccount { id: string; code: string; name: string; type: string; }
 interface Fund { id: string; name: string; }
+interface Vendor { id: string; name: string; email?: string; phone?: string; }
+interface SplitLine {
+  id: string; // local key only
+  chartAccountId: string;
+  vendorId: string;
+  amount: string; // raw string for input
+  memo: string;
+}
 interface Transaction {
   id: string; date: string; payee: string; amount: number;
   type: "DEBIT" | "CREDIT";
   status: "UNCLEARED" | "CLEARED" | "RECONCILED" | "VOID";
   checkNumber: string | null; referenceNumber: string | null; memo: string | null;
-  isVoid: boolean;
-  chartAccount: ChartAccount | null; fund: Fund | null; bankAccount: BankAccount | null;
+  isVoid: boolean; isSplit: boolean;
+  chartAccount: ChartAccount | null;
+  fund: Fund | null; bankAccount: BankAccount | null; vendor: Vendor | null;
+  splits: Array<{ id: string; chartAccountId: string | null; vendorId: string | null; amount: number; memo: string | null; chartAccount: ChartAccount | null; vendor: Vendor | null; }>;
   runningBalance?: number;
 }
 type StatusFilter = "ALL" | "UNCLEARED" | "CLEARED" | "RECONCILED" | "VOID";
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function fmtAmt(n: number) {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
+}
+
+function newSplitLine(): SplitLine {
+  return { id: crypto.randomUUID(), chartAccountId: "", vendorId: "", amount: "", memo: "" };
+}
+
 const emptyForm = {
   date: format(new Date(), "yyyy-MM-dd"),
-  payee: "", amount: "",
+  payee: "", vendorId: "", amount: "",
   type: "DEBIT" as "DEBIT" | "CREDIT",
   status: "UNCLEARED" as "UNCLEARED" | "CLEARED",
   chartAccountId: "", fundId: "", bankAccountId: "",
   memo: "", checkNumber: "", referenceNumber: "",
+  isSplit: false,
+  splits: [newSplitLine()],
 };
-
-function fmtAmt(n: number) {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
-}
 
 function StatusBadge({ status }: { status: string }) {
   const map: Record<string, string> = {
@@ -61,19 +81,268 @@ function StatusBadge({ status }: { status: string }) {
     UNCLEARED:  "bg-amber-50 text-amber-700 border-amber-200",
     VOID:       "bg-red-50 text-red-600 border-red-200",
   };
-  const label: Record<string, string> = { CLEARED: "Cleared", RECONCILED: "Reconciled", UNCLEARED: "Uncleared", VOID: "Void" };
+  const labels: Record<string, string> = { CLEARED: "Cleared", RECONCILED: "Reconciled", UNCLEARED: "Uncleared", VOID: "Void" };
   return (
     <span className={cn("text-xs font-medium px-2 py-0.5 rounded-full border", map[status] ?? map.UNCLEARED)}>
-      {label[status] ?? status}
+      {labels[status] ?? status}
     </span>
   );
 }
 
+// ── Vendor Combobox ───────────────────────────────────────────────────────────
+function VendorCombobox({
+  value, onChange, vendors, onAddNew, placeholder = "Payee / Vendor\u2026",
+}: {
+  value: string; onChange: (id: string, name: string) => void;
+  vendors: Vendor[]; onAddNew: () => void; placeholder?: string;
+}) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  const selected = vendors.find((v) => v.id === value);
+  const filtered = vendors.filter((v) =>
+    v.name.toLowerCase().includes(query.toLowerCase())
+  ).slice(0, 12);
+
+  useEffect(() => {
+    if (selected && !query) setQuery(selected.name);
+  }, [selected]);
+
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  return (
+    <div ref={ref} className="relative">
+      <div className="relative">
+        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+        <Input
+          className="pl-8"
+          placeholder={placeholder}
+          value={query}
+          onFocus={() => setOpen(true)}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setOpen(true);
+            if (!e.target.value) onChange("", "");
+          }}
+        />
+      </div>
+      {open && (
+        <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-52 overflow-y-auto">
+          {filtered.length === 0 && query && (
+            <div className="px-3 py-2 text-sm text-muted-foreground italic">No vendors match</div>
+          )}
+          {filtered.map((v) => (
+            <button
+              key={v.id}
+              className={cn(
+                "w-full text-left px-3 py-2 text-sm hover:bg-[hsl(210,60%,97%)] transition-colors",
+                v.id === value && "bg-[hsl(210,60%,95%)] font-medium"
+              )}
+              onMouseDown={(e) => { e.preventDefault(); onChange(v.id, v.name); setQuery(v.name); setOpen(false); }}
+            >
+              {v.name}
+              {v.email && <span className="ml-2 text-xs text-muted-foreground">{v.email}</span>}
+            </button>
+          ))}
+          <button
+            className="w-full text-left px-3 py-2 text-sm text-[hsl(174,60%,40%)] hover:bg-emerald-50 border-t flex items-center gap-2 font-medium"
+            onMouseDown={(e) => { e.preventDefault(); setOpen(false); onAddNew(); }}
+          >
+            <Plus className="h-3.5 w-3.5" /> Add New Vendor
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── COA Combobox (with + Add New Account) ─────────────────────────────────────
+function CoaSelect({
+  value, onChange, coaList, onAddNew,
+}: {
+  value: string; onChange: (id: string) => void; coaList: ChartAccount[]; onAddNew: () => void;
+}) {
+  return (
+    <Select
+      value={value || "__none__"}
+      onValueChange={(v) => {
+        if (v === "__add__") { onAddNew(); return; }
+        onChange(v === "__none__" ? "" : v);
+      }}
+    >
+      <SelectTrigger className="text-sm">
+        <SelectValue placeholder="Account / Category\u2026" />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="__none__">— None —</SelectItem>
+        {coaList.map((a) => (
+          <SelectItem key={a.id} value={a.id}>
+            <span className="font-mono text-xs mr-1 text-muted-foreground">{a.code}</span>
+            {a.name}
+          </SelectItem>
+        ))}
+        <SelectItem value="__add__" className="text-[hsl(174,60%,40%)] font-medium border-t mt-1">
+          <Plus className="h-3.5 w-3.5 inline mr-1" /> Add New Account
+        </SelectItem>
+      </SelectContent>
+    </Select>
+  );
+}
+
+// ── Add New Vendor Modal ───────────────────────────────────────────────────────
+function AddVendorModal({
+  open, onClose, onCreated,
+}: {
+  open: boolean; onClose: () => void; onCreated: (v: Vendor) => void;
+}) {
+  const [form, setForm] = useState({ name: "", email: "", phone: "", taxId: "" });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+
+  async function handleSave() {
+    if (!form.name.trim()) { setErr("Vendor name is required"); return; }
+    setSaving(true); setErr("");
+    try {
+      const res = await apiFetch(`${BASE}api/vendors`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      if (!res.ok) { const e = await res.json(); setErr(e.error ?? "Error saving vendor"); return; }
+      const created = await res.json();
+      onCreated(created);
+      setForm({ name: "", email: "", phone: "", taxId: "" });
+    } finally { setSaving(false); }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Add New Vendor</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3 py-2">
+          {err && <p className="text-sm text-red-600">{err}</p>}
+          <div>
+            <Label className="text-xs">Vendor Name *</Label>
+            <Input placeholder="e.g. Office Depot" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label className="text-xs">Email</Label>
+              <Input placeholder="Optional" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+            </div>
+            <div>
+              <Label className="text-xs">Phone</Label>
+              <Input placeholder="Optional" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+            </div>
+          </div>
+          <div>
+            <Label className="text-xs">Tax ID / EIN</Label>
+            <Input placeholder="Optional" value={form.taxId} onChange={(e) => setForm({ ...form, taxId: e.target.value })} />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button
+            onClick={handleSave} disabled={saving}
+            className="bg-[hsl(210,60%,25%)] hover:bg-[hsl(210,60%,20%)] text-white"
+          >
+            {saving ? "Saving…" : "Add Vendor"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── Add New Account Modal ──────────────────────────────────────────────────────
+function AddAccountModal({
+  open, onClose, onCreated,
+}: {
+  open: boolean; onClose: () => void; onCreated: (a: ChartAccount) => void;
+}) {
+  const [form, setForm] = useState({ code: "", name: "", type: "EXPENSE" });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+
+  async function handleSave() {
+    if (!form.code.trim() || !form.name.trim()) { setErr("Code and name are required"); return; }
+    setSaving(true); setErr("");
+    try {
+      const res = await apiFetch(`${BASE}api/chart-of-accounts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      if (!res.ok) { const e = await res.json(); setErr(e.error ?? "Error saving account"); return; }
+      const created = await res.json();
+      onCreated(created);
+      setForm({ code: "", name: "", type: "EXPENSE" });
+    } finally { setSaving(false); }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Add New Account</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3 py-2">
+          {err && <p className="text-sm text-red-600">{err}</p>}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label className="text-xs">Account Number *</Label>
+              <Input placeholder="e.g. 4150 or 8250" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} />
+              <p className="text-[10px] text-muted-foreground mt-0.5">4000s = Income · 8000s = Expense</p>
+            </div>
+            <div>
+              <Label className="text-xs">Type *</Label>
+              <Select value={form.type} onValueChange={(v) => setForm({ ...form, type: v })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="INCOME">Income</SelectItem>
+                  <SelectItem value="EXPENSE">Expense</SelectItem>
+                  <SelectItem value="ASSET">Asset</SelectItem>
+                  <SelectItem value="LIABILITY">Liability</SelectItem>
+                  <SelectItem value="EQUITY">Equity</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div>
+            <Label className="text-xs">Account Name *</Label>
+            <Input placeholder="e.g. Sound Equipment" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button
+            onClick={handleSave} disabled={saving}
+            className="bg-[hsl(210,60%,25%)] hover:bg-[hsl(210,60%,20%)] text-white"
+          >
+            {saving ? "Saving…" : "Add Account"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── Main Page ─────────────────────────────────────────────────────────────────
 export default function BankRegisterPage() {
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
   const [coaList, setCoaList] = useState<ChartAccount[]>([]);
   const [fundList, setFundList] = useState<Fund[]>([]);
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [vendorList, setVendorList] = useState<Vendor[]>([]);
+  const [txList, setTxList] = useState<Transaction[]>([]);
   const [selectedBank, setSelectedBank] = useState<string>("ALL");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
@@ -83,39 +352,39 @@ export default function BankRegisterPage() {
   const [deleteTarget, setDeleteTarget] = useState<Transaction | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [showAddVendor, setShowAddVendor] = useState(false);
+  const [showAddAccount, setShowAddAccount] = useState(false);
+  const [formError, setFormError] = useState("");
 
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [banksRes, coaRes, fundsRes, txRes] = await Promise.all([
+      const [banksR, coaR, fundsR, vendorsR, txR] = await Promise.all([
         apiFetch(`${BASE}api/bank-accounts`),
         apiFetch(`${BASE}api/chart-of-accounts`),
         apiFetch(`${BASE}api/funds`),
+        apiFetch(`${BASE}api/vendors`),
         apiFetch(`${BASE}api/transactions`),
       ]);
-      if (banksRes.ok) setBankAccounts(await banksRes.json());
-      if (coaRes.ok) setCoaList(await coaRes.json());
-      if (fundsRes.ok) {
-        const d = await fundsRes.json();
-        setFundList(Array.isArray(d) ? d : (d.data ?? []));
-      }
-      if (txRes.ok) setTransactions(await txRes.json());
-    } finally {
-      setLoading(false);
-    }
+      if (banksR.ok) setBankAccounts(await banksR.json());
+      if (coaR.ok) setCoaList(await coaR.json());
+      if (fundsR.ok) { const d = await fundsR.json(); setFundList(Array.isArray(d) ? d : (d.data ?? [])); }
+      if (vendorsR.ok) setVendorList(await vendorsR.json());
+      if (txR.ok) setTxList(await txR.json());
+    } finally { setLoading(false); }
   }, []);
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
-  // --- Derived data ---
-  const filtered = transactions.filter((t) => {
+  // ── Derived state ───────────────────────────────────────────────────────────
+  const filtered = txList.filter((t) => {
     if (selectedBank !== "ALL" && t.bankAccount?.id !== selectedBank) return false;
     if (statusFilter !== "ALL" && t.status !== statusFilter) return false;
     return true;
   });
 
   let rb = 0;
-  const withBalance: Transaction[] = filtered.map((t) => {
+  const withBalance = filtered.map((t) => {
     if (!t.isVoid) rb += t.type === "CREDIT" ? t.amount : -t.amount;
     return { ...t, runningBalance: rb };
   });
@@ -133,26 +402,42 @@ export default function BankRegisterPage() {
 
   const selectedBankObj = bankAccounts.find((b) => b.id === selectedBank);
 
-  // --- Handlers ---
+  // ── Split validation ────────────────────────────────────────────────────────
+  const splitSum = useMemo(() => {
+    if (!form.isSplit) return 0;
+    return form.splits.reduce((s, row) => s + (parseFloat(row.amount) || 0), 0);
+  }, [form.isSplit, form.splits]);
+
+  const bankTotal = parseFloat(form.amount) || 0;
+  const splitDiff = Math.abs(splitSum - bankTotal);
+  const splitValid = !form.isSplit || splitDiff < 0.005;
+
+  // ── Handlers ────────────────────────────────────────────────────────────────
   function toggleRow(id: string) {
     setExpandedRows((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
+      const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next;
     });
   }
 
   function openAdd() {
     setEditTx(null);
-    setForm({ ...emptyForm, bankAccountId: selectedBank !== "ALL" ? selectedBank : (bankAccounts[0]?.id ?? "") });
+    setFormError("");
+    setForm({
+      ...emptyForm,
+      bankAccountId: selectedBank !== "ALL" ? selectedBank : (bankAccounts[0]?.id ?? ""),
+      splits: [newSplitLine()],
+    });
     setShowForm(true);
   }
 
   function openEdit(tx: Transaction) {
     setEditTx(tx);
+    setFormError("");
     setForm({
       date: format(parseISO(tx.date), "yyyy-MM-dd"),
-      payee: tx.payee, amount: String(tx.amount),
+      payee: tx.payee,
+      vendorId: tx.vendor?.id ?? "",
+      amount: String(tx.amount),
       type: tx.type,
       status: tx.status === "CLEARED" ? "CLEARED" : "UNCLEARED",
       chartAccountId: tx.chartAccount?.id ?? "",
@@ -161,38 +446,82 @@ export default function BankRegisterPage() {
       memo: tx.memo ?? "",
       checkNumber: tx.checkNumber ?? "",
       referenceNumber: tx.referenceNumber ?? "",
+      isSplit: tx.isSplit,
+      splits: tx.isSplit && tx.splits.length > 0
+        ? tx.splits.map((s) => ({
+            id: s.id,
+            chartAccountId: s.chartAccountId ?? "",
+            vendorId: s.vendorId ?? "",
+            amount: String(s.amount),
+            memo: s.memo ?? "",
+          }))
+        : [newSplitLine()],
     });
     setShowForm(true);
   }
 
+  function updateSplit(idx: number, field: keyof SplitLine, val: string) {
+    const next = [...form.splits];
+    next[idx] = { ...next[idx], [field]: val };
+    setForm((f) => ({ ...f, splits: next }));
+  }
+
+  function addSplitRow() {
+    setForm((f) => ({ ...f, splits: [...f.splits, newSplitLine()] }));
+  }
+
+  function removeSplitRow(idx: number) {
+    setForm((f) => ({ ...f, splits: f.splits.filter((_, i) => i !== idx) }));
+  }
+
   async function handleSave() {
-    setSaving(true);
+    if (!splitValid) {
+      setFormError(`Split total (${fmtAmt(splitSum)}) must equal bank total (${fmtAmt(bankTotal)})`);
+      return;
+    }
+    setSaving(true); setFormError("");
     try {
-      const body = {
-        ...form,
+      const body: any = {
+        date: form.date, payee: form.payee,
+        vendorId: form.vendorId || null,
         amount: parseFloat(form.amount) || 0,
-        chartAccountId: (form.chartAccountId && form.chartAccountId !== "__none__") ? form.chartAccountId : null,
-        fundId: (form.fundId && form.fundId !== "__none__") ? form.fundId : null,
-        bankAccountId: (form.bankAccountId && form.bankAccountId !== "__none__") ? form.bankAccountId : null,
+        type: form.type, status: form.status,
+        chartAccountId: form.isSplit ? null : (form.chartAccountId || null),
+        fundId: form.fundId || null,
+        bankAccountId: form.bankAccountId || null,
         checkNumber: form.checkNumber || null,
         referenceNumber: form.referenceNumber || null,
         memo: form.memo || null,
+        isSplit: form.isSplit,
+        splits: form.isSplit
+          ? form.splits.map((s, i) => ({
+              chartAccountId: s.chartAccountId || null,
+              vendorId: s.vendorId || null,
+              amount: parseFloat(s.amount) || 0,
+              memo: s.memo || null,
+              sortOrder: i,
+            }))
+          : [],
       };
+
       const url = editTx ? `${BASE}api/transactions/${editTx.id}` : `${BASE}api/transactions`;
       const res = await apiFetch(url, {
         method: editTx ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (!res.ok) { const e = await res.json(); alert(e.error ?? "Error saving transaction"); return; }
+      if (!res.ok) {
+        const e = await res.json();
+        setFormError(e.error ?? "Error saving transaction");
+        return;
+      }
       setShowForm(false);
       await loadAll();
     } finally { setSaving(false); }
   }
 
   async function handleVoid(tx: Transaction) {
-    const res = await apiFetch(`${BASE}api/transactions/${tx.id}`, { method: "DELETE" });
-    if (!res.ok) { alert("Failed to void transaction"); return; }
+    await apiFetch(`${BASE}api/transactions/${tx.id}`, { method: "DELETE" });
     setDeleteTarget(null);
     await loadAll();
   }
@@ -200,407 +529,543 @@ export default function BankRegisterPage() {
   async function toggleStatus(tx: Transaction) {
     const next = tx.status === "CLEARED" ? "UNCLEARED" : "CLEARED";
     await apiFetch(`${BASE}api/transactions/${tx.id}/status`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      method: "PATCH", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: next }),
     });
     await loadAll();
   }
 
-  // --- Render ---
+  // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <AppLayout>
-    <div className="flex flex-col -m-4 md:-m-8 min-h-[calc(100vh-8rem)]">
+      <div className="flex flex-col -m-4 md:-m-8 min-h-[calc(100vh-8rem)]">
 
-      {/* ── Header ───────────────────────────────────── */}
-      <div className="border-b bg-white px-6 py-4">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h1 className="text-xl font-bold text-[hsl(210,60%,25%)]">Bank Register</h1>
-            <p className="text-sm text-muted-foreground mt-0.5">QuickBooks-style double-row transaction register</p>
+        {/* ── Toolbar ─────────────────────────────────── */}
+        <div className="border-b bg-white px-6 py-4">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h1 className="text-xl font-bold text-[hsl(210,60%,25%)]">Bank Register</h1>
+              <p className="text-sm text-muted-foreground mt-0.5">
+                Double-row register with split transactions and vendor tracking
+              </p>
+            </div>
+            <Button onClick={openAdd} className="bg-[hsl(210,60%,25%)] hover:bg-[hsl(210,60%,20%)] text-white gap-2">
+              <Plus className="h-4 w-4" /> Add Transaction
+            </Button>
           </div>
-          <Button onClick={openAdd} className="bg-[hsl(210,60%,25%)] hover:bg-[hsl(210,60%,20%)] text-white gap-2">
-            <Plus className="h-4 w-4" /> Add Transaction
-          </Button>
+
+          <div className="flex flex-wrap gap-3 items-center">
+            <div className="flex items-center gap-2">
+              <Wallet className="h-4 w-4 text-muted-foreground" />
+              <Select value={selectedBank} onValueChange={setSelectedBank}>
+                <SelectTrigger className="w-52 h-8 text-sm"><SelectValue placeholder="All Accounts" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ALL">All Bank Accounts</SelectItem>
+                  {bankAccounts.map((b) => (
+                    <SelectItem key={b.id} value={b.id}>
+                      {b.name}{b.accountNumber ? ` (\u2026${b.accountNumber.slice(-4)})` : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex gap-1">
+              {(["ALL","UNCLEARED","CLEARED","RECONCILED","VOID"] as StatusFilter[]).map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setStatusFilter(s)}
+                  className={cn(
+                    "px-3 py-1 rounded-full text-xs font-medium border transition-colors",
+                    statusFilter === s
+                      ? "bg-[hsl(210,60%,25%)] text-white border-[hsl(210,60%,25%)]"
+                      : "bg-white text-gray-600 border-gray-200 hover:border-gray-400"
+                  )}
+                >
+                  {s === "ALL" ? "All" : s.charAt(0) + s.slice(1).toLowerCase()}
+                </button>
+              ))}
+            </div>
+            <button onClick={loadAll} disabled={loading}
+              className="ml-auto text-muted-foreground hover:text-foreground p-1 rounded" title="Refresh">
+              <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
+            </button>
+          </div>
+
+          {selectedBankObj && (
+            <div className="mt-3 flex gap-6 text-sm">
+              <span className="text-muted-foreground">Balance:&nbsp;<span className="font-semibold">{fmtAmt(selectedBankObj.currentBalance)}</span></span>
+              <span className="text-muted-foreground">Payments:&nbsp;<span className="font-semibold text-red-600">{fmtAmt(totals.debits)}</span></span>
+              <span className="text-muted-foreground">Deposits:&nbsp;<span className="font-semibold text-emerald-600">{fmtAmt(totals.credits)}</span></span>
+            </div>
+          )}
         </div>
 
-        {/* Toolbar */}
-        <div className="flex flex-wrap gap-3 items-center">
-          <div className="flex items-center gap-2">
-            <Wallet className="h-4 w-4 text-muted-foreground" />
-            <Select value={selectedBank} onValueChange={setSelectedBank}>
-              <SelectTrigger className="w-52 h-8 text-sm"><SelectValue placeholder="All Accounts" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="ALL">All Bank Accounts</SelectItem>
-                {bankAccounts.map((b) => (
-                  <SelectItem key={b.id} value={b.id}>
-                    {b.name}{b.accountNumber ? ` (\u2026${b.accountNumber.slice(-4)})` : ""}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+        {/* ── Register Table ───────────────────────────── */}
+        <div className="flex-1 overflow-auto">
+          <table className="w-full text-sm border-collapse">
+            <thead className="sticky top-0 z-10 bg-[hsl(210,40%,96%)] border-b">
+              <tr>
+                <th className="text-left px-4 py-2 font-semibold text-xs text-muted-foreground w-28">DATE</th>
+                <th className="text-left px-2 py-2 font-semibold text-xs text-muted-foreground w-24">CHECK #</th>
+                <th className="text-left px-2 py-2 font-semibold text-xs text-muted-foreground">PAYEE / ACCOUNT</th>
+                <th className="text-right px-2 py-2 font-semibold text-xs text-muted-foreground w-32">PAYMENT</th>
+                <th className="text-right px-2 py-2 font-semibold text-xs text-muted-foreground w-32">DEPOSIT</th>
+                <th className="text-right px-2 py-2 font-semibold text-xs text-muted-foreground w-32">BALANCE</th>
+                <th className="text-center px-2 py-2 font-semibold text-xs text-muted-foreground w-28">STATUS</th>
+                <th className="px-2 py-2 w-24"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {withBalance.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="text-center py-16 text-muted-foreground">
+                    {loading ? "Loading\u2026" : "No transactions yet. Click \u201cAdd Transaction\u201d to get started."}
+                  </td>
+                </tr>
+              )}
 
-          {/* Status pills */}
-          <div className="flex gap-1">
-            {(["ALL","UNCLEARED","CLEARED","RECONCILED","VOID"] as StatusFilter[]).map((s) => (
-              <button
-                key={s}
-                onClick={() => setStatusFilter(s)}
-                className={cn(
-                  "px-3 py-1 rounded-full text-xs font-medium border transition-colors",
-                  statusFilter === s
-                    ? "bg-[hsl(210,60%,25%)] text-white border-[hsl(210,60%,25%)]"
-                    : "bg-white text-gray-600 border-gray-200 hover:border-gray-400"
-                )}
-              >
-                {s === "ALL" ? "All" : s.charAt(0) + s.slice(1).toLowerCase()}
-              </button>
-            ))}
-          </div>
+              {withBalance.map((tx, idx) => {
+                const expanded = expandedRows.has(tx.id);
+                const isVoid = tx.isVoid;
+                const isDebit = tx.type === "DEBIT";
+                const stripe = idx % 2 === 0 ? "bg-white" : "bg-[hsl(210,40%,99%)]";
 
-          <button
-            onClick={loadAll} disabled={loading}
-            className="ml-auto text-muted-foreground hover:text-foreground p-1 rounded"
-            title="Refresh"
-          >
-            <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
-          </button>
+                return (
+                  <React.Fragment key={tx.id}>
+                    {/* ROW 1 */}
+                    <tr
+                      className={cn(
+                        "group border-b border-gray-100 cursor-pointer transition-colors",
+                        stripe,
+                        isVoid && "opacity-40 line-through",
+                        !isVoid && "hover:bg-[hsl(210,60%,97%)]"
+                      )}
+                      onClick={() => toggleRow(tx.id)}
+                    >
+                      <td className="px-4 py-2.5 text-muted-foreground text-xs whitespace-nowrap">
+                        {format(parseISO(tx.date), "MM/dd/yyyy")}
+                      </td>
+                      <td className="px-2 py-2.5 text-xs text-muted-foreground">
+                        {tx.checkNumber ?? "\u2014"}
+                      </td>
+                      <td className="px-2 py-2.5">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-[hsl(210,60%,25%)]">{tx.payee}</span>
+                          {tx.isSplit && (
+                            <span className="inline-flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded border border-violet-200 bg-violet-50 text-violet-700">
+                              <Scissors className="h-3 w-3" /> Split
+                            </span>
+                          )}
+                        </div>
+                        {tx.vendor && (
+                          <div className="text-xs text-muted-foreground mt-0.5">{tx.vendor.name}</div>
+                        )}
+                      </td>
+                      <td className="px-2 py-2.5 text-right tabular-nums">
+                        {isDebit && !isVoid
+                          ? <span className="text-red-600 font-medium">{fmtAmt(tx.amount)}</span>
+                          : <span className="text-muted-foreground/30">\u2014</span>}
+                      </td>
+                      <td className="px-2 py-2.5 text-right tabular-nums">
+                        {!isDebit && !isVoid
+                          ? <span className="text-emerald-600 font-medium">{fmtAmt(tx.amount)}</span>
+                          : <span className="text-muted-foreground/30">\u2014</span>}
+                      </td>
+                      <td className="px-2 py-2.5 text-right tabular-nums text-foreground font-medium">
+                        {!isVoid ? fmtAmt(tx.runningBalance ?? 0) : "\u2014"}
+                      </td>
+                      <td className="px-2 py-2.5 text-center"><StatusBadge status={tx.status} /></td>
+                      <td className="px-2 py-2.5">
+                        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                          {!isVoid && (
+                            <>
+                              <button title={tx.status === "CLEARED" ? "Mark Uncleared" : "Mark Cleared"}
+                                onClick={(e) => { e.stopPropagation(); toggleStatus(tx); }}
+                                className="p-1 rounded hover:bg-gray-100 text-muted-foreground hover:text-emerald-600">
+                                {tx.status === "CLEARED"
+                                  ? <CheckCircle className="h-4 w-4 text-emerald-600" />
+                                  : <Circle className="h-4 w-4" />}
+                              </button>
+                              <button title="Edit"
+                                onClick={(e) => { e.stopPropagation(); openEdit(tx); }}
+                                className="p-1 rounded hover:bg-gray-100 text-muted-foreground hover:text-blue-600">
+                                <Edit className="h-4 w-4" />
+                              </button>
+                              <button title="Void"
+                                onClick={(e) => { e.stopPropagation(); setDeleteTarget(tx); }}
+                                className="p-1 rounded hover:bg-red-50 text-muted-foreground hover:text-red-600">
+                                <Ban className="h-4 w-4" />
+                              </button>
+                            </>
+                          )}
+                          {expanded
+                            ? <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                            : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+                        </div>
+                      </td>
+                    </tr>
+
+                    {/* ROW 2 — detail / splits */}
+                    <tr className={cn("border-b", stripe, isVoid && "opacity-40", !expanded && "border-transparent")}>
+                      <td colSpan={8} className={cn("overflow-hidden transition-all duration-200", expanded ? "py-1" : "h-0 py-0")}>
+                        {expanded && (
+                          <div className="px-6 pb-3 pt-1">
+                            {tx.isSplit ? (
+                              /* Split detail rows */
+                              <div className="border border-violet-100 rounded-lg overflow-hidden">
+                                <div className="bg-violet-50 px-3 py-1.5 text-[10px] font-semibold text-violet-700 uppercase tracking-wide flex items-center gap-1">
+                                  <Scissors className="h-3 w-3" /> Split Transaction ({tx.splits.length} lines)
+                                </div>
+                                <table className="w-full text-sm">
+                                  <thead>
+                                    <tr className="bg-violet-50/50 border-b border-violet-100">
+                                      <th className="text-left px-3 py-1.5 text-[10px] font-semibold text-muted-foreground uppercase">Account</th>
+                                      <th className="text-left px-3 py-1.5 text-[10px] font-semibold text-muted-foreground uppercase">Vendor</th>
+                                      <th className="text-left px-3 py-1.5 text-[10px] font-semibold text-muted-foreground uppercase">Memo</th>
+                                      <th className="text-right px-3 py-1.5 text-[10px] font-semibold text-muted-foreground uppercase">Amount</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {tx.splits.map((s) => (
+                                      <tr key={s.id} className="border-t border-violet-50">
+                                        <td className="px-3 py-1.5 text-sm">
+                                          {s.chartAccount
+                                            ? <><span className="font-mono text-xs text-muted-foreground mr-1">{s.chartAccount.code}</span>{s.chartAccount.name}</>
+                                            : <span className="italic text-muted-foreground">No account</span>}
+                                        </td>
+                                        <td className="px-3 py-1.5 text-sm text-muted-foreground">
+                                          {s.vendor?.name ?? "\u2014"}
+                                        </td>
+                                        <td className="px-3 py-1.5 text-sm italic text-muted-foreground">
+                                          {s.memo ?? "\u2014"}
+                                        </td>
+                                        <td className={cn("px-3 py-1.5 text-sm text-right font-medium tabular-nums",
+                                          s.amount < 0 ? "text-red-600" : "text-emerald-600")}>
+                                          {fmtAmt(s.amount)}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                    <tr className="border-t-2 border-violet-200 bg-violet-50/40">
+                                      <td colSpan={3} className="px-3 py-1.5 text-xs font-semibold text-muted-foreground text-right">Total</td>
+                                      <td className="px-3 py-1.5 text-sm font-bold text-right tabular-nums">{fmtAmt(tx.amount)}</td>
+                                    </tr>
+                                  </tbody>
+                                </table>
+                              </div>
+                            ) : (
+                              /* Simple detail */
+                              <div className="pl-4 border-l-2 border-[hsl(174,60%,40%)] flex flex-wrap gap-8">
+                                <div>
+                                  <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Account / Category</div>
+                                  <div className="text-sm">
+                                    {tx.chartAccount
+                                      ? <><span className="font-mono text-xs text-muted-foreground mr-1">{tx.chartAccount.code}</span>{tx.chartAccount.name}</>
+                                      : <span className="italic text-muted-foreground">No account assigned</span>}
+                                  </div>
+                                </div>
+                                {tx.fund && (
+                                  <div>
+                                    <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Fund</div>
+                                    <div className="text-sm">{tx.fund.name}</div>
+                                  </div>
+                                )}
+                                {tx.bankAccount && (
+                                  <div>
+                                    <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Bank</div>
+                                    <div className="text-sm">{tx.bankAccount.name}</div>
+                                  </div>
+                                )}
+                                {tx.memo && (
+                                  <div>
+                                    <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Memo</div>
+                                    <div className="text-sm italic text-muted-foreground">{tx.memo}</div>
+                                  </div>
+                                )}
+                                {tx.referenceNumber && (
+                                  <div>
+                                    <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Reference</div>
+                                    <div className="text-sm">{tx.referenceNumber}</div>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  </React.Fragment>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
 
-        {/* Account summary bar */}
-        {selectedBankObj && (
-          <div className="mt-3 flex gap-6 text-sm">
-            <span className="text-muted-foreground">
-              Balance:&nbsp;<span className="font-semibold text-foreground">{fmtAmt(selectedBankObj.currentBalance)}</span>
+        {/* ── Footer totals ───────────────────────────── */}
+        {filtered.length > 0 && (
+          <div className="border-t bg-[hsl(210,40%,97%)] px-6 py-2 flex items-center gap-8 text-sm">
+            <span className="text-muted-foreground font-medium">
+              {filtered.length} transaction{filtered.length !== 1 ? "s" : ""}
             </span>
-            <span className="text-muted-foreground">
+            <span className="ml-auto text-muted-foreground">
               Payments:&nbsp;<span className="font-semibold text-red-600">{fmtAmt(totals.debits)}</span>
             </span>
             <span className="text-muted-foreground">
               Deposits:&nbsp;<span className="font-semibold text-emerald-600">{fmtAmt(totals.credits)}</span>
             </span>
+            <span className="text-muted-foreground">
+              Net:&nbsp;
+              <span className={cn("font-semibold", totals.credits - totals.debits >= 0 ? "text-emerald-600" : "text-red-600")}>
+                {fmtAmt(totals.credits - totals.debits)}
+              </span>
+            </span>
           </div>
         )}
       </div>
 
-      {/* ── Register Table ───────────────────────────── */}
-      <div className="flex-1 overflow-auto">
-        <table className="w-full text-sm border-collapse">
-          <thead className="sticky top-0 z-10 bg-[hsl(210,40%,96%)] border-b">
-            <tr>
-              <th className="text-left px-4 py-2 font-semibold text-xs text-muted-foreground w-28">DATE</th>
-              <th className="text-left px-2 py-2 font-semibold text-xs text-muted-foreground w-24">CHECK #</th>
-              <th className="text-left px-2 py-2 font-semibold text-xs text-muted-foreground">PAYEE / ACCOUNT</th>
-              <th className="text-right px-2 py-2 font-semibold text-xs text-muted-foreground w-32">PAYMENT</th>
-              <th className="text-right px-2 py-2 font-semibold text-xs text-muted-foreground w-32">DEPOSIT</th>
-              <th className="text-right px-2 py-2 font-semibold text-xs text-muted-foreground w-32">BALANCE</th>
-              <th className="text-center px-2 py-2 font-semibold text-xs text-muted-foreground w-28">STATUS</th>
-              <th className="px-2 py-2 w-24"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {/* Empty state */}
-            {withBalance.length === 0 && (
-              <tr>
-                <td colSpan={8} className="text-center py-16 text-muted-foreground">
-                  {loading
-                    ? "Loading\u2026"
-                    : "No transactions found. Click \u201cAdd Transaction\u201d to get started."}
-                </td>
-              </tr>
+      {/* ── Transaction Form Dialog ──────────────────────────────────────────── */}
+      <Dialog open={showForm} onOpenChange={setShowForm}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {editTx ? "Edit Transaction" : "Add Transaction"}
+              {form.isSplit && <span className="text-xs font-normal text-violet-600 flex items-center gap-1"><Scissors className="h-3.5 w-3.5" /> Split mode</span>}
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4 py-1">
+            {formError && (
+              <div className="flex items-center gap-2 p-3 rounded-md bg-red-50 border border-red-200 text-sm text-red-700">
+                <AlertCircle className="h-4 w-4 shrink-0" />
+                {formError}
+              </div>
             )}
 
-            {/* Double-row per transaction */}
-            {withBalance.map((tx, idx) => {
-              const expanded = expandedRows.has(tx.id);
-              const isVoid = tx.isVoid;
-              const isDebit = tx.type === "DEBIT";
-              const stripe = idx % 2 === 0 ? "bg-white" : "bg-[hsl(210,40%,99%)]";
-
-              return (
-                <React.Fragment key={tx.id}>
-                  {/* ROW 1 — primary data */}
-                  <tr
-                    className={cn(
-                      "group border-b border-gray-100 cursor-pointer transition-colors",
-                      stripe,
-                      isVoid && "opacity-40 line-through",
-                      !isVoid && "hover:bg-[hsl(210,60%,97%)]"
-                    )}
-                    onClick={() => toggleRow(tx.id)}
-                  >
-                    <td className="px-4 py-2.5 text-muted-foreground text-xs whitespace-nowrap">
-                      {format(parseISO(tx.date), "MM/dd/yyyy")}
-                    </td>
-                    <td className="px-2 py-2.5 text-xs text-muted-foreground">
-                      {tx.checkNumber ?? "\u2014"}
-                    </td>
-                    <td className="px-2 py-2.5">
-                      <div className="font-semibold text-[hsl(210,60%,25%)]">{tx.payee}</div>
-                    </td>
-                    {/* Payment column */}
-                    <td className="px-2 py-2.5 text-right tabular-nums">
-                      {isDebit && !isVoid
-                        ? <span className="text-red-600 font-medium">{fmtAmt(tx.amount)}</span>
-                        : <span className="text-muted-foreground/30">\u2014</span>}
-                    </td>
-                    {/* Deposit column */}
-                    <td className="px-2 py-2.5 text-right tabular-nums">
-                      {!isDebit && !isVoid
-                        ? <span className="text-emerald-600 font-medium">{fmtAmt(tx.amount)}</span>
-                        : <span className="text-muted-foreground/30">\u2014</span>}
-                    </td>
-                    {/* Running balance */}
-                    <td className="px-2 py-2.5 text-right tabular-nums text-foreground font-medium">
-                      {!isVoid ? fmtAmt(tx.runningBalance ?? 0) : "\u2014"}
-                    </td>
-                    <td className="px-2 py-2.5 text-center">
-                      <StatusBadge status={tx.status} />
-                    </td>
-                    <td className="px-2 py-2.5">
-                      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                        {!isVoid && (
-                          <>
-                            <button
-                              title={tx.status === "CLEARED" ? "Mark Uncleared" : "Mark Cleared"}
-                              onClick={(e) => { e.stopPropagation(); toggleStatus(tx); }}
-                              className="p-1 rounded hover:bg-gray-100 text-muted-foreground hover:text-emerald-600"
-                            >
-                              {tx.status === "CLEARED"
-                                ? <CheckCircle className="h-4 w-4 text-emerald-600" />
-                                : <Circle className="h-4 w-4" />}
-                            </button>
-                            <button
-                              title="Edit"
-                              onClick={(e) => { e.stopPropagation(); openEdit(tx); }}
-                              className="p-1 rounded hover:bg-gray-100 text-muted-foreground hover:text-blue-600"
-                            >
-                              <Edit className="h-4 w-4" />
-                            </button>
-                            <button
-                              title="Void"
-                              onClick={(e) => { e.stopPropagation(); setDeleteTarget(tx); }}
-                              className="p-1 rounded hover:bg-red-50 text-muted-foreground hover:text-red-600"
-                            >
-                              <Ban className="h-4 w-4" />
-                            </button>
-                          </>
-                        )}
-                        {expanded
-                          ? <ChevronUp className="h-4 w-4 text-muted-foreground" />
-                          : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
-                      </div>
-                    </td>
-                  </tr>
-
-                  {/* ROW 2 — account / memo detail (QuickBooks-style second row) */}
-                  <tr
-                    className={cn(
-                      "border-b",
-                      stripe,
-                      isVoid && "opacity-40",
-                      !expanded && "border-transparent"
-                    )}
-                  >
-                    <td
-                      colSpan={8}
-                      className={cn("overflow-hidden transition-all duration-200", expanded ? "py-1" : "h-0 py-0")}
-                    >
-                      {expanded && (
-                        <div className="px-6 pb-2 pt-0.5">
-                          <div className="pl-4 border-l-2 border-[hsl(174,60%,40%)] flex flex-wrap gap-8">
-                            <div>
-                              <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">
-                                Account / Category
-                              </div>
-                              <div className="text-sm text-foreground">
-                                {tx.chartAccount
-                                  ? `${tx.chartAccount.code} \u2013 ${tx.chartAccount.name}`
-                                  : <span className="text-muted-foreground italic">No account assigned</span>}
-                              </div>
-                            </div>
-                            {tx.fund && (
-                              <div>
-                                <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Fund</div>
-                                <div className="text-sm text-foreground">{tx.fund.name}</div>
-                              </div>
-                            )}
-                            {tx.bankAccount && (
-                              <div>
-                                <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Bank Account</div>
-                                <div className="text-sm text-foreground">{tx.bankAccount.name}</div>
-                              </div>
-                            )}
-                            {tx.memo && (
-                              <div>
-                                <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Memo</div>
-                                <div className="text-sm italic text-muted-foreground">{tx.memo}</div>
-                              </div>
-                            )}
-                            {tx.referenceNumber && (
-                              <div>
-                                <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Reference</div>
-                                <div className="text-sm text-foreground">{tx.referenceNumber}</div>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                </React.Fragment>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-
-      {/* ── Footer totals ───────────────────────────── */}
-      {filtered.length > 0 && (
-        <div className="border-t bg-[hsl(210,40%,97%)] px-6 py-2 flex items-center gap-8 text-sm">
-          <span className="text-muted-foreground font-medium">
-            {filtered.length} transaction{filtered.length !== 1 ? "s" : ""}
-          </span>
-          <span className="ml-auto text-muted-foreground">
-            Total Payments:&nbsp;<span className="font-semibold text-red-600">{fmtAmt(totals.debits)}</span>
-          </span>
-          <span className="text-muted-foreground">
-            Total Deposits:&nbsp;<span className="font-semibold text-emerald-600">{fmtAmt(totals.credits)}</span>
-          </span>
-          <span className="text-muted-foreground">
-            Net:&nbsp;
-            <span className={cn("font-semibold", totals.credits - totals.debits >= 0 ? "text-emerald-600" : "text-red-600")}>
-              {fmtAmt(totals.credits - totals.debits)}
-            </span>
-          </span>
-        </div>
-      )}
-
-      {/* ── Add / Edit Dialog ────────────────────────── */}
-      <Dialog open={showForm} onOpenChange={setShowForm}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>{editTx ? "Edit Transaction" : "Add Transaction"}</DialogTitle>
-          </DialogHeader>
-          <div className="grid grid-cols-2 gap-4 py-2">
-            {/* Date + Type */}
-            <div>
-              <Label className="text-xs">Date *</Label>
-              <Input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
-            </div>
-            <div>
-              <Label className="text-xs">Type *</Label>
-              <Select value={form.type} onValueChange={(v) => setForm({ ...form, type: v as "DEBIT"|"CREDIT" })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="DEBIT">Payment (Debit)</SelectItem>
-                  <SelectItem value="CREDIT">Deposit (Credit)</SelectItem>
-                </SelectContent>
-              </Select>
+            {/* Row 1: Date + Type + Amount + Status */}
+            <div className="grid grid-cols-4 gap-3">
+              <div>
+                <Label className="text-xs">Date *</Label>
+                <Input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
+              </div>
+              <div>
+                <Label className="text-xs">Type *</Label>
+                <Select value={form.type} onValueChange={(v) => setForm({ ...form, type: v as any })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="DEBIT">Payment (Debit)</SelectItem>
+                    <SelectItem value="CREDIT">Deposit (Credit)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-xs">Bank Total *</Label>
+                <Input
+                  type="number" step="0.01" placeholder="0.00"
+                  value={form.amount}
+                  onChange={(e) => setForm({ ...form, amount: e.target.value })}
+                />
+              </div>
+              <div>
+                <Label className="text-xs">Status</Label>
+                <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v as any })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="UNCLEARED">Uncleared</SelectItem>
+                    <SelectItem value="CLEARED">Cleared</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
-            {/* Payee */}
-            <div className="col-span-2">
-              <Label className="text-xs">Payee / Vendor *</Label>
-              <Input
-                placeholder="Name of person or organization"
-                value={form.payee}
-                onChange={(e) => setForm({ ...form, payee: e.target.value })}
-              />
-            </div>
-
-            {/* Amount + Status */}
-            <div>
-              <Label className="text-xs">Amount *</Label>
-              <Input
-                type="number" step="0.01" min="0" placeholder="0.00"
-                value={form.amount}
-                onChange={(e) => setForm({ ...form, amount: e.target.value })}
-              />
-            </div>
-            <div>
-              <Label className="text-xs">Status</Label>
-              <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v as "UNCLEARED"|"CLEARED" })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="UNCLEARED">Uncleared</SelectItem>
-                  <SelectItem value="CLEARED">Cleared</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* COA */}
-            <div className="col-span-2">
-              <Label className="text-xs">Account / Category</Label>
-              <Select
-                value={form.chartAccountId || "__none__"}
-                onValueChange={(v) => setForm({ ...form, chartAccountId: v === "__none__" ? "" : v })}
-              >
-                <SelectTrigger><SelectValue placeholder="Select account\u2026" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">— None —</SelectItem>
-                  {coaList.map((a) => (
-                    <SelectItem key={a.id} value={a.id}>{a.code} \u2013 {a.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            {/* Payee + Vendor */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs">Payee Name *</Label>
+                <Input
+                  placeholder="Who is this transaction with?"
+                  value={form.payee}
+                  onChange={(e) => setForm({ ...form, payee: e.target.value })}
+                />
+              </div>
+              <div>
+                <Label className="text-xs">Vendor (searchable)</Label>
+                <VendorCombobox
+                  value={form.vendorId}
+                  vendors={vendorList}
+                  onChange={(id, name) => {
+                    setForm((f) => ({ ...f, vendorId: id, payee: name || f.payee }));
+                  }}
+                  onAddNew={() => setShowAddVendor(true)}
+                />
+              </div>
             </div>
 
             {/* Bank + Fund */}
-            <div>
-              <Label className="text-xs">Bank Account</Label>
-              <Select
-                value={form.bankAccountId || "__none__"}
-                onValueChange={(v) => setForm({ ...form, bankAccountId: v === "__none__" ? "" : v })}
-              >
-                <SelectTrigger><SelectValue placeholder="Select bank\u2026" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">— None —</SelectItem>
-                  {bankAccounts.map((b) => (
-                    <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label className="text-xs">Fund</Label>
-              <Select
-                value={form.fundId || "__none__"}
-                onValueChange={(v) => setForm({ ...form, fundId: v === "__none__" ? "" : v })}
-              >
-                <SelectTrigger><SelectValue placeholder="Select fund\u2026" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">— None —</SelectItem>
-                  {fundList.map((f) => (
-                    <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Check + Ref */}
-            <div>
-              <Label className="text-xs">Check Number</Label>
-              <Input placeholder="e.g. 1042" value={form.checkNumber} onChange={(e) => setForm({ ...form, checkNumber: e.target.value })} />
-            </div>
-            <div>
-              <Label className="text-xs">Reference #</Label>
-              <Input placeholder="Optional" value={form.referenceNumber} onChange={(e) => setForm({ ...form, referenceNumber: e.target.value })} />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs">Bank Account</Label>
+                <Select
+                  value={form.bankAccountId || "__none__"}
+                  onValueChange={(v) => setForm({ ...form, bankAccountId: v === "__none__" ? "" : v })}
+                >
+                  <SelectTrigger><SelectValue placeholder="Select bank\u2026" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">— None —</SelectItem>
+                    {bankAccounts.map((b) => (
+                      <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-xs">Fund</Label>
+                <Select
+                  value={form.fundId || "__none__"}
+                  onValueChange={(v) => setForm({ ...form, fundId: v === "__none__" ? "" : v })}
+                >
+                  <SelectTrigger><SelectValue placeholder="Select fund\u2026" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">— None —</SelectItem>
+                    {fundList.map((f) => (
+                      <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
-            {/* Memo */}
-            <div className="col-span-2">
-              <Label className="text-xs">Memo / Description</Label>
-              <Input placeholder="Optional memo" value={form.memo} onChange={(e) => setForm({ ...form, memo: e.target.value })} />
+            {/* Check + Ref + Memo */}
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <Label className="text-xs">Check #</Label>
+                <Input placeholder="e.g. 1042" value={form.checkNumber}
+                  onChange={(e) => setForm({ ...form, checkNumber: e.target.value })} />
+              </div>
+              <div>
+                <Label className="text-xs">Reference #</Label>
+                <Input placeholder="Optional" value={form.referenceNumber}
+                  onChange={(e) => setForm({ ...form, referenceNumber: e.target.value })} />
+              </div>
+              <div>
+                <Label className="text-xs">Memo</Label>
+                <Input placeholder="Optional" value={form.memo}
+                  onChange={(e) => setForm({ ...form, memo: e.target.value })} />
+              </div>
             </div>
+
+            {/* Split toggle */}
+            <div className="flex items-center gap-3 pt-1">
+              <button
+                type="button"
+                onClick={() => setForm((f) => ({ ...f, isSplit: !f.isSplit }))}
+                className={cn(
+                  "flex items-center gap-2 px-3 py-1.5 rounded-md border text-sm font-medium transition-colors",
+                  form.isSplit
+                    ? "bg-violet-50 border-violet-300 text-violet-700"
+                    : "bg-white border-gray-200 text-gray-600 hover:border-gray-400"
+                )}
+              >
+                <Scissors className="h-4 w-4" />
+                {form.isSplit ? "Split Transaction ON" : "Split Transaction"}
+              </button>
+              {!form.isSplit && (
+                <div className="flex-1">
+                  <CoaSelect
+                    value={form.chartAccountId}
+                    coaList={coaList}
+                    onChange={(id) => setForm((f) => ({ ...f, chartAccountId: id }))}
+                    onAddNew={() => setShowAddAccount(true)}
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* ── Split Rows ──────────────────────────── */}
+            {form.isSplit && (
+              <div className="border border-violet-200 rounded-lg overflow-hidden">
+                <div className="bg-violet-50 px-4 py-2 flex items-center justify-between">
+                  <span className="text-xs font-semibold text-violet-700 flex items-center gap-1">
+                    <Scissors className="h-3.5 w-3.5" /> Split Lines
+                  </span>
+                  {/* Sum indicator */}
+                  <div className={cn(
+                    "flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded",
+                    splitValid
+                      ? "bg-emerald-50 text-emerald-700"
+                      : "bg-red-50 text-red-700"
+                  )}>
+                    {splitValid
+                      ? <CheckCheck className="h-3.5 w-3.5" />
+                      : <AlertCircle className="h-3.5 w-3.5" />}
+                    {fmtAmt(splitSum)} / {fmtAmt(bankTotal)}
+                    {!splitValid && ` (diff: ${fmtAmt(splitDiff)})`}
+                  </div>
+                </div>
+
+                {/* Column headers */}
+                <div className="grid grid-cols-[1fr_1fr_auto_80px_32px] gap-2 px-4 py-1.5 bg-violet-50/50 border-b border-violet-100">
+                  <span className="text-[10px] font-semibold text-muted-foreground uppercase">Account</span>
+                  <span className="text-[10px] font-semibold text-muted-foreground uppercase">Vendor</span>
+                  <span className="text-[10px] font-semibold text-muted-foreground uppercase">Memo</span>
+                  <span className="text-[10px] font-semibold text-muted-foreground uppercase text-right">Amount</span>
+                  <span></span>
+                </div>
+
+                {form.splits.map((split, idx) => (
+                  <div key={split.id} className="grid grid-cols-[1fr_1fr_auto_80px_32px] gap-2 items-center px-4 py-2 border-b border-violet-50">
+                    <CoaSelect
+                      value={split.chartAccountId}
+                      coaList={coaList}
+                      onChange={(id) => updateSplit(idx, "chartAccountId", id)}
+                      onAddNew={() => setShowAddAccount(true)}
+                    />
+                    <VendorCombobox
+                      value={split.vendorId}
+                      vendors={vendorList}
+                      onChange={(id, _name) => updateSplit(idx, "vendorId", id)}
+                      onAddNew={() => setShowAddVendor(true)}
+                      placeholder="Vendor (optional)"
+                    />
+                    <Input
+                      className="text-sm" placeholder="Memo"
+                      value={split.memo}
+                      onChange={(e) => updateSplit(idx, "memo", e.target.value)}
+                    />
+                    <Input
+                      className="text-sm text-right font-mono"
+                      type="number" step="0.01" placeholder="0.00"
+                      value={split.amount}
+                      onChange={(e) => updateSplit(idx, "amount", e.target.value)}
+                    />
+                    <button
+                      onClick={() => removeSplitRow(idx)}
+                      disabled={form.splits.length === 1}
+                      className="p-1 rounded hover:bg-red-50 text-muted-foreground hover:text-red-600 disabled:opacity-30"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                ))}
+
+                <div className="px-4 py-2 flex items-center justify-between bg-white">
+                  <button
+                    onClick={addSplitRow}
+                    className="flex items-center gap-1.5 text-sm text-violet-600 hover:text-violet-800 font-medium"
+                  >
+                    <Plus className="h-4 w-4" /> Add Split Line
+                  </button>
+                  <p className="text-xs text-muted-foreground">
+                    Tip: use negative amounts (e.g. &minus;$3.20) for fees deducted from a deposit.
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowForm(false)}>Cancel</Button>
             <Button
               onClick={handleSave}
-              disabled={saving || !form.date || !form.payee || !form.amount}
+              disabled={saving || !form.date || !form.payee || !form.amount || !splitValid}
               className="bg-[hsl(210,60%,25%)] hover:bg-[hsl(210,60%,20%)] text-white"
             >
               {saving ? "Saving\u2026" : editTx ? "Save Changes" : "Add Transaction"}
@@ -609,28 +1074,47 @@ export default function BankRegisterPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Void Confirm ─────────────────────────────── */}
+      {/* ── Add Vendor Modal ───────────────────────── */}
+      <AddVendorModal
+        open={showAddVendor}
+        onClose={() => setShowAddVendor(false)}
+        onCreated={(v) => {
+          setVendorList((prev) => [...prev, v].sort((a, b) => a.name.localeCompare(b.name)));
+          setForm((f) => ({ ...f, vendorId: v.id, payee: v.name }));
+          setShowAddVendor(false);
+        }}
+      />
+
+      {/* ── Add Account Modal ──────────────────────── */}
+      <AddAccountModal
+        open={showAddAccount}
+        onClose={() => setShowAddAccount(false)}
+        onCreated={(a) => {
+          setCoaList((prev) => [...prev, a].sort((x, y) => x.code.localeCompare(y.code)));
+          setForm((f) => ({ ...f, chartAccountId: a.id }));
+          setShowAddAccount(false);
+        }}
+      />
+
+      {/* ── Void Confirm ───────────────────────────── */}
       <AlertDialog open={!!deleteTarget} onOpenChange={(o) => { if (!o) setDeleteTarget(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Void Transaction?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will mark <strong>{deleteTarget?.payee}</strong> ({fmtAmt(deleteTarget?.amount ?? 0)}) as{" "}
-              <strong>VOID</strong>. The record is kept for audit purposes.
+              This marks <strong>{deleteTarget?.payee}</strong> ({fmtAmt(deleteTarget?.amount ?? 0)}) as{" "}
+              <strong>VOID</strong>. The record is kept for audit purposes and cannot be deleted.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-red-600 hover:bg-red-700"
-              onClick={() => deleteTarget && handleVoid(deleteTarget)}
-            >
+            <AlertDialogAction className="bg-red-600 hover:bg-red-700"
+              onClick={() => deleteTarget && handleVoid(deleteTarget)}>
               Void Transaction
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
     </AppLayout>
   );
 }
