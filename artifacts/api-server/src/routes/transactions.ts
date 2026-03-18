@@ -5,6 +5,7 @@ import {
 } from "@workspace/db";
 import { eq, and, desc, inArray } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
+import { generateGlEntries, voidGlEntries } from "../lib/gl";
 
 const router = Router();
 
@@ -157,6 +158,11 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
 
     if (isSplit) await upsertSplits(created.id, rawSplits);
 
+    // Generate double-entry GL records (fire-and-forget, non-blocking to response)
+    generateGlEntries(created.id, companyId).catch((e) =>
+      console.error("[GL] create error:", e)
+    );
+
     const lookups = await getLookups(companyId);
     const splits = isSplit
       ? await db.select().from(transactionSplits).where(eq(transactionSplits.transactionId, created.id)).orderBy(transactionSplits.sortOrder)
@@ -221,6 +227,11 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
 
     await upsertSplits(updated.id, isSplit ? rawSplits : []);
 
+    // Regenerate GL entries to reflect changes
+    generateGlEntries(updated.id, companyId).catch((e) =>
+      console.error("[GL] update error:", e)
+    );
+
     const lookups = await getLookups(companyId);
     const splits = isSplit
       ? await db.select().from(transactionSplits).where(eq(transactionSplits.transactionId, updated.id)).orderBy(transactionSplits.sortOrder)
@@ -243,6 +254,12 @@ router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
       .where(and(eq(transactions.id, req.params.id), eq(transactions.companyId, companyId)))
       .returning();
     if (!updated) return res.status(404).json({ error: "Not found" });
+
+    // Void the GL entries for this transaction
+    voidGlEntries(req.params.id, companyId).catch((e) =>
+      console.error("[GL] void error:", e)
+    );
+
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: "Internal server error" });

@@ -15,3 +15,4 @@ export * from "./reconciliation";
 export * from "./chartOfAccounts";
 export * from "./transactions";
 export * from "./transactionSplits";
+export * from "./glEntries";

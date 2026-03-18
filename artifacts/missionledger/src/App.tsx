@@ -21,6 +21,7 @@ import BankAccountsPage from "@/pages/bank-accounts";
 import BankRegisterPage from "@/pages/bank-register";
 import ReconciliationPage from "@/pages/reconciliation";
 import OpeningBalancePage from "@/pages/opening-balance";
+import TrialBalancePage from "@/pages/trial-balance";
 import ReportsPage from "@/pages/reports";
 import NotFound from "@/pages/not-found";
 
@@ -59,6 +60,7 @@ function Router() {
       <Route path="/bank-register"><ProtectedRoute component={BankRegisterPage} /></Route>
       <Route path="/reconciliation"><ProtectedRoute component={ReconciliationPage} /></Route>
       <Route path="/opening-balance"><ProtectedRoute component={OpeningBalancePage} /></Route>
+      <Route path="/trial-balance"><ProtectedRoute component={TrialBalancePage} /></Route>
       <Route path="/reports"><ProtectedRoute component={ReportsPage} /></Route>
 
       <Route component={NotFound} />
