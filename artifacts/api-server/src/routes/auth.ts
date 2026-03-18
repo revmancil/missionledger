@@ -13,13 +13,13 @@ import {
 
 const router = Router();
 
-function generateCompanyCode(): string {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-  let code = "";
-  for (let i = 0; i < 6; i++) {
-    code += chars[Math.floor(Math.random() * chars.length)];
-  }
-  return code;
+function generateCompanyCode(orgName?: string): string {
+  // Derive first 4 letters from org name (letters only), then 2 random digits
+  const letters = orgName
+    ? orgName.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 4).padEnd(4, "X")
+    : "ORG" + "X";
+  const digits = String(Math.floor(Math.random() * 90) + 10); // 10–99
+  return letters + digits;
 }
 
 function setCookieAndRespond(res: any, authUser: AuthUser, status = 200) {
@@ -120,12 +120,12 @@ router.post("/register", async (req, res) => {
       return res.status(400).json({ error: "Email already registered" });
     }
 
-    let companyCode = generateCompanyCode();
+    let companyCode = generateCompanyCode(organizationName);
     let attempts = 0;
     while (attempts < 10) {
       const existing = await db.select().from(companies).where(eq(companies.companyCode, companyCode)).limit(1);
       if (!existing.length) break;
-      companyCode = generateCompanyCode();
+      companyCode = generateCompanyCode(organizationName);
       attempts++;
     }
 
