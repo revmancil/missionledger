@@ -5,6 +5,21 @@ import { requireAuth, requireAdmin, hashPassword } from "../lib/auth";
 
 const router = Router();
 
+// ── GET /users/me ─────────────────────────────────────────────────────────────
+router.get("/me", requireAuth, async (req, res) => {
+  try {
+    const { id: userId, companyId, email, role } = (req as any).user;
+    const [u] = await db.select({
+      id: users.id, name: users.name, email: users.email,
+      role: users.role, isActive: users.isActive,
+    }).from(users).where(and(eq(users.id, userId), eq(users.companyId, companyId)));
+    if (!u) return res.status(404).json({ error: "User not found" });
+    res.json({ ...u, role: u.role ?? role });
+  } catch {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 router.get("/", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;

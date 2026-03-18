@@ -23,6 +23,15 @@ MissionLedger is a full-stack nonprofit financial management SaaS app for church
 - **Executive Dashboard**: KPI cards (Total Cash, Net Monthly Income, Budget %, Monthly Deposits), spending by category donut, 6-month income/expenses bar chart, budget tracker with over-budget alerts, recent activity feed
 - **Opening Balance Wizard**: Three-column wizard (Assets 1000s / Liabilities 2000s / Equity 3000s); accounting equation check Assets = Liabilities + Equity; Cash/Accrual toggle (Cash hides Liabilities column); creates a posted journal entry on finalize; stores `accountingMethod` on the company record; "Edit Balances" re-voids and replaces the prior entry
 - **Authentication**: Cookie-based JWT sessions with company code + email + password
+- **Double-Entry GL Engine**: `gl_entries` table + engine (`lib/gl.ts`) that generates balanced debit/credit pairs for every transaction. Strict balance enforcement — partial entries are never persisted.
+- **Trial Balance**: `/trial-balance` page with account groups (ASSET, LIABILITY, EQUITY, INCOME, EXPENSE), collapsible rows, balance banner (green/red), Sync GL Entries button, and GAAP note.
+- **Period & Year-End Close Wizard**: `/period-close` — multi-step wizard with:
+  - Pre-Close Health Check (3 automated checks: reconciliation, uncategorized transactions, trial balance)
+  - Monthly/Period Soft Lock: sets `company.closedUntil`; transactions in locked period become read-only
+  - Year-End Hard Close: posts a multi-line closing journal entry zeroing income/expense accounts to retained earnings
+  - Finalized financial statement snapshots (Statement of Activities + Balance Sheet) saved to `financial_snapshots` table
+  - Reopen Protocol: MASTER_ADMIN only, requires reason, logged permanently to `audit_logs` table
+  - Bank Register shows amber lock banner + lock icon on closed-period transactions
 
 ## Tech Stack
 

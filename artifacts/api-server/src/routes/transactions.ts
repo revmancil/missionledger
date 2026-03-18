@@ -1,11 +1,22 @@
 import { Router } from "express";
 import {
   db, transactions, transactionSplits, chartOfAccounts,
-  bankAccounts, funds, vendors,
+  bankAccounts, funds, vendors, companies,
 } from "@workspace/db";
 import { eq, and, desc, inArray } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
 import { generateGlEntries, voidGlEntries } from "../lib/gl";
+
+async function getClosedUntil(companyId: string): Promise<Date | null> {
+  const [co] = await db.select({ closedUntil: companies.closedUntil }).from(companies).where(eq(companies.id, companyId));
+  return co?.closedUntil ?? null;
+}
+
+function isInClosedPeriod(txDate: Date | string, closedUntil: Date | null): boolean {
+  if (!closedUntil) return false;
+  const d = txDate instanceof Date ? txDate : new Date(txDate);
+  return d <= closedUntil;
+}
 
 const router = Router();
 
@@ -100,8 +111,15 @@ router.get("/", requireAuth, async (req, res) => {
     }, {});
 
     const lookups = await getLookups(companyId);
+    const closedUntil = await getClosedUntil(companyId);
 
-    res.json(all.map((tx) => serializeTx(tx, splitsByTx[tx.id] ?? [], lookups)));
+    res.json({
+      closedUntil: closedUntil ? closedUntil.toISOString() : null,
+      transactions: all.map((tx) => ({
+        ...serializeTx(tx, splitsByTx[tx.id] ?? [], lookups),
+        isClosed: isInClosedPeriod(tx.date, closedUntil),
+      })),
+    });
   } catch (err) {
     console.error("Get transactions error:", err);
     res.status(500).json({ error: "Internal server error" });
@@ -121,6 +139,15 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
 
     if (!date || !payee || amount === undefined)
       return res.status(400).json({ error: "date, payee, and amount are required" });
+
+    // Period-close protection
+    const closedUntil = await getClosedUntil(companyId);
+    if (isInClosedPeriod(date, closedUntil)) {
+      return res.status(403).json({
+        error: `This period is locked through ${closedUntil!.toISOString().substring(0, 10)}. Reopen the period before adding transactions.`,
+        code: "PERIOD_LOCKED",
+      });
+    }
 
     const isSplit = Array.isArray(rawSplits) && rawSplits.length > 0;
 
@@ -192,6 +219,16 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
     if (!existing) return res.status(404).json({ error: "Not found" });
     if (existing.isVoid) return res.status(400).json({ error: "Cannot edit a voided transaction" });
 
+    // Period-close protection
+    const closedUntil = await getClosedUntil(companyId);
+    const effectiveDate = date ? new Date(date) : existing.date;
+    if (isInClosedPeriod(existing.date, closedUntil) || isInClosedPeriod(effectiveDate, closedUntil)) {
+      return res.status(403).json({
+        error: `This period is locked through ${closedUntil!.toISOString().substring(0, 10)}. Reopen the period to edit this transaction.`,
+        code: "PERIOD_LOCKED",
+      });
+    }
+
     const isSplit = Array.isArray(rawSplits) && rawSplits.length > 0;
 
     if (isSplit && amount !== undefined) {
@@ -248,6 +285,21 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
 router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
+    const [existing] = await db
+      .select()
+      .from(transactions)
+      .where(and(eq(transactions.id, req.params.id), eq(transactions.companyId, companyId)));
+    if (!existing) return res.status(404).json({ error: "Not found" });
+
+    // Period-close protection
+    const closedUntil = await getClosedUntil(companyId);
+    if (isInClosedPeriod(existing.date, closedUntil)) {
+      return res.status(403).json({
+        error: `This period is locked through ${closedUntil!.toISOString().substring(0, 10)}. Reopen the period to delete this transaction.`,
+        code: "PERIOD_LOCKED",
+      });
+    }
+
     const [updated] = await db
       .update(transactions)
       .set({ isVoid: true, status: "VOID", updatedAt: new Date() })

@@ -2,7 +2,7 @@ import { Link, useLocation } from "wouter";
 import { 
   LayoutDashboard, Heart, Receipt, Wallet, BookOpen, Building2, 
   FileText, HandHeart, LogOut, Settings, BarChart3, Building,
-  Banknote, ClipboardList, RefreshCcw, Wand2, Scale
+  Banknote, ClipboardList, RefreshCcw, Wand2, Scale, CalendarCheck
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
@@ -34,6 +34,7 @@ const navGroups = [
       { href: "/accounts", label: "Chart of Accounts", icon: BookOpen },
       { href: "/opening-balance", label: "Opening Balances", icon: Wand2 },
       { href: "/trial-balance",   label: "Trial Balance",    icon: Scale  },
+      { href: "/period-close",    label: "Period Close",     icon: CalendarCheck },
       { href: "/funds", label: "Funds", icon: Wallet },
     ]
   },

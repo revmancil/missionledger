@@ -3,7 +3,7 @@ import { format, parseISO } from "date-fns";
 import {
   Plus, ChevronDown, ChevronUp, CheckCircle, Circle,
   Ban, RefreshCw, Edit, Wallet, Scissors, Trash2, Search,
-  AlertCircle, CheckCheck,
+  AlertCircle, CheckCheck, Lock,
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
@@ -46,7 +46,7 @@ interface Transaction {
   type: "DEBIT" | "CREDIT";
   status: "UNCLEARED" | "CLEARED" | "RECONCILED" | "VOID";
   checkNumber: string | null; referenceNumber: string | null; memo: string | null;
-  isVoid: boolean; isSplit: boolean;
+  isVoid: boolean; isSplit: boolean; isClosed?: boolean;
   chartAccount: ChartAccount | null;
   fund: Fund | null; bankAccount: BankAccount | null; vendor: Vendor | null;
   splits: Array<{ id: string; chartAccountId: string | null; vendorId: string | null; amount: number; memo: string | null; chartAccount: ChartAccount | null; vendor: Vendor | null; }>;
@@ -343,6 +343,7 @@ export default function BankRegisterPage() {
   const [fundList, setFundList] = useState<Fund[]>([]);
   const [vendorList, setVendorList] = useState<Vendor[]>([]);
   const [txList, setTxList] = useState<Transaction[]>([]);
+  const [closedUntil, setClosedUntil] = useState<string | null>(null);
   const [selectedBank, setSelectedBank] = useState<string>("ALL");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
@@ -370,7 +371,15 @@ export default function BankRegisterPage() {
       if (coaR.ok) setCoaList(await coaR.json());
       if (fundsR.ok) { const d = await fundsR.json(); setFundList(Array.isArray(d) ? d : (d.data ?? [])); }
       if (vendorsR.ok) setVendorList(await vendorsR.json());
-      if (txR.ok) setTxList(await txR.json());
+      if (txR.ok) {
+        const txData = await txR.json();
+        if (Array.isArray(txData)) {
+          setTxList(txData);
+        } else {
+          setTxList(txData.transactions ?? []);
+          setClosedUntil(txData.closedUntil ?? null);
+        }
+      }
     } finally { setLoading(false); }
   }, []);
 
@@ -554,6 +563,15 @@ export default function BankRegisterPage() {
             </Button>
           </div>
 
+          {closedUntil && (
+            <div className="flex items-center gap-2 p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-sm">
+              <Lock className="h-4 w-4 text-amber-600 shrink-0" />
+              <span className="text-amber-800 font-medium">
+                Period locked through {format(parseISO(closedUntil), "MMMM d, yyyy")} — transactions in this period are read-only.
+              </span>
+            </div>
+          )}
+
           <div className="flex flex-wrap gap-3 items-center">
             <div className="flex items-center gap-2">
               <Wallet className="h-4 w-4 text-muted-foreground" />
@@ -677,7 +695,12 @@ export default function BankRegisterPage() {
                       <td className="px-2 py-2.5 text-center"><StatusBadge status={tx.status} /></td>
                       <td className="px-2 py-2.5">
                         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                          {!isVoid && (
+                          {tx.isClosed ? (
+                            <span title={`Period locked through ${closedUntil ? format(parseISO(closedUntil), "MM/dd/yyyy") : ""}`}
+                              className="p-1 text-amber-500">
+                              <Lock className="h-4 w-4" />
+                            </span>
+                          ) : !isVoid && (
                             <>
                               <button title={tx.status === "CLEARED" ? "Mark Uncleared" : "Mark Cleared"}
                                 onClick={(e) => { e.stopPropagation(); toggleStatus(tx); }}

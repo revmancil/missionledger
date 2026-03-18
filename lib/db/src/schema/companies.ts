@@ -25,6 +25,8 @@ export const companies = pgTable("companies", {
   accountingMethod: accountingMethodEnum("accounting_method").notNull().default("CASH"),
   openingBalanceEntryId: text("opening_balance_entry_id"),
   openingBalanceDate: timestamp("opening_balance_date"),
+  closedUntil: timestamp("closed_until"),
+  fiscalYearEndMonth: text("fiscal_year_end_month").notNull().default("12"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

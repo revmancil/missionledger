@@ -16,3 +16,5 @@ export * from "./chartOfAccounts";
 export * from "./transactions";
 export * from "./transactionSplits";
 export * from "./glEntries";
+export * from "./auditLogs";
+export * from "./financialSnapshots";
