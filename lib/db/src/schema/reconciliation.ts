@@ -23,7 +23,8 @@ export const reconciliations = pgTable("reconciliations", {
 export const reconciliationItems = pgTable("reconciliation_items", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   reconciliationId: text("reconciliation_id").notNull(),
-  bankTransactionId: text("bank_transaction_id").notNull(),
+  bankTransactionId: text("bank_transaction_id"),
+  transactionId: text("transaction_id"),
   cleared: boolean("cleared").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),

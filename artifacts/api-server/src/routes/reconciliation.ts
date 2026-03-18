@@ -1,132 +1,240 @@
 import { Router } from "express";
-import { db, reconciliations, reconciliationItems, bankTransactions, bankAccounts } from "@workspace/db";
+import {
+  db, reconciliations, reconciliationItems,
+  bankTransactions, bankAccounts, transactions,
+} from "@workspace/db";
 import { eq, and, desc } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
 
+function serializeRecon(r: any) {
+  return {
+    ...r,
+    statementDate: r.statementDate instanceof Date ? r.statementDate.toISOString() : r.statementDate,
+    reconciledAt: r.reconciledAt instanceof Date ? r.reconciledAt.toISOString() : (r.reconciledAt ?? null),
+    createdAt: r.createdAt instanceof Date ? r.createdAt.toISOString() : r.createdAt,
+    updatedAt: r.updatedAt instanceof Date ? r.updatedAt.toISOString() : r.updatedAt,
+  };
+}
+
 const router = Router();
 
+// ── GET / — history ──────────────────────────────────────────────────────────
 router.get("/", requireAuth, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
-    const all = await db.select().from(reconciliations).where(eq(reconciliations.companyId, companyId)).orderBy(desc(reconciliations.statementDate));
-    res.json(all.map(r => ({
-      ...r,
-      statementDate: r.statementDate.toISOString(),
-      reconciledAt: r.reconciledAt?.toISOString() || null,
-      createdAt: r.createdAt.toISOString(),
-      updatedAt: r.updatedAt.toISOString(),
-    })));
-  } catch (error) {
+    const all = await db
+      .select().from(reconciliations)
+      .where(eq(reconciliations.companyId, companyId))
+      .orderBy(desc(reconciliations.statementDate));
+    res.json(all.map(serializeRecon));
+  } catch (err) {
     res.status(500).json({ error: "Internal server error" });
   }
 });
 
+// ── POST / — start new reconciliation session ────────────────────────────────
 router.post("/", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
-    const { bankAccountId, statementDate, statementBalance, openingBalance } = req.body ?? {};
-    if (!bankAccountId || !statementDate || statementBalance === undefined) {
-      return res.status(400).json({ error: "Missing required fields" });
+    const { bankAccountId, statementDate, statementBalance } = req.body ?? {};
+    if (!bankAccountId || !statementDate || statementBalance === undefined)
+      return res.status(400).json({ error: "bankAccountId, statementDate, statementBalance are required" });
+
+    const stmtDate = new Date(statementDate);
+
+    // Opening balance: last completed recon's clearedBalance, or bank account opening balance
+    const [lastRecon] = await db
+      .select().from(reconciliations)
+      .where(and(
+        eq(reconciliations.companyId, companyId),
+        eq(reconciliations.bankAccountId, bankAccountId),
+        eq(reconciliations.status, "COMPLETED")
+      ))
+      .orderBy(desc(reconciliations.statementDate))
+      .limit(1);
+
+    let openingBalance = 0;
+    if (lastRecon) {
+      openingBalance = lastRecon.clearedBalance ?? 0;
+    } else {
+      const [bank] = await db.select().from(bankAccounts).where(eq(bankAccounts.id, bankAccountId));
+      openingBalance = (bank as any)?.openingBalance ?? 0;
     }
 
+    // Void any prior IN_PROGRESS sessions for this bank account
+    await db.update(reconciliations)
+      .set({ status: "VOID", updatedAt: new Date() })
+      .where(and(
+        eq(reconciliations.companyId, companyId),
+        eq(reconciliations.bankAccountId, bankAccountId),
+        eq(reconciliations.status, "IN_PROGRESS")
+      ));
+
     const [recon] = await db.insert(reconciliations).values({
-      companyId,
-      bankAccountId,
-      statementDate: new Date(statementDate),
+      companyId, bankAccountId,
+      statementDate: stmtDate,
       statementBalance: parseFloat(statementBalance),
-      openingBalance: parseFloat(openingBalance) || 0,
+      openingBalance,
       status: "IN_PROGRESS",
     }).returning();
 
-    // Create reconciliation items for unreconciled transactions in this bank account
-    const transactions = await db.select().from(bankTransactions).where(
-      and(eq(bankTransactions.companyId, companyId), eq(bankTransactions.bankAccountId, bankAccountId))
-    );
+    // Build items from new transactions table
+    const allTx = await db.select().from(transactions)
+      .where(and(eq(transactions.companyId, companyId), eq(transactions.bankAccountId, bankAccountId)));
 
-    for (const tx of transactions) {
-      if (tx.status !== "RECONCILED") {
-        await db.insert(reconciliationItems).values({
-          reconciliationId: recon.id,
-          bankTransactionId: tx.id,
-          cleared: false,
-        });
-      }
+    const eligible = allTx.filter((t) => {
+      if (t.isVoid || t.status === "RECONCILED") return false;
+      const d = t.date instanceof Date ? t.date : new Date(t.date);
+      return d <= stmtDate;
+    });
+
+    for (const tx of eligible) {
+      await db.insert(reconciliationItems).values({
+        reconciliationId: recon.id,
+        transactionId: tx.id,
+        bankTransactionId: null,
+        cleared: tx.status === "CLEARED",
+      });
     }
 
-    res.status(201).json({ ...recon, statementDate: recon.statementDate.toISOString(), reconciledAt: null, createdAt: recon.createdAt.toISOString(), updatedAt: recon.updatedAt.toISOString() });
-  } catch (error) {
+    res.status(201).json(serializeRecon(recon));
+  } catch (err) {
+    console.error("Start recon error:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 });
 
+// ── GET /:id/items — workspace data ──────────────────────────────────────────
 router.get("/:id/items", requireAuth, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
-    const items = await db.select().from(reconciliationItems).where(eq(reconciliationItems.reconciliationId, req.params.id));
-    const transactions = await db.select().from(bankTransactions).where(eq(bankTransactions.companyId, companyId));
-    const txMap = Object.fromEntries(transactions.map(t => [t.id, t]));
 
-    res.json(items.map(item => ({
-      ...item,
-      createdAt: item.createdAt.toISOString(),
-      updatedAt: item.updatedAt.toISOString(),
-      bankTransaction: txMap[item.bankTransactionId] ? {
-        ...txMap[item.bankTransactionId],
-        date: txMap[item.bankTransactionId].date.toISOString(),
-        createdAt: txMap[item.bankTransactionId].createdAt.toISOString(),
-        updatedAt: txMap[item.bankTransactionId].updatedAt.toISOString(),
-      } : null,
-    })));
-  } catch (error) {
+    const [recon] = await db.select().from(reconciliations)
+      .where(and(eq(reconciliations.id, req.params.id), eq(reconciliations.companyId, companyId)));
+    if (!recon) return res.status(404).json({ error: "Not found" });
+
+    const items = await db.select().from(reconciliationItems)
+      .where(eq(reconciliationItems.reconciliationId, req.params.id));
+
+    const txList = await db.select().from(transactions)
+      .where(eq(transactions.companyId, companyId));
+    const txMap = Object.fromEntries(txList.map((t) => [t.id, t]));
+
+    const enriched = items.map((item) => {
+      const tx = item.transactionId ? txMap[item.transactionId] : null;
+      return {
+        id: item.id,
+        reconciliationId: item.reconciliationId,
+        transactionId: item.transactionId ?? null,
+        cleared: item.cleared,
+        createdAt: item.createdAt.toISOString(),
+        updatedAt: item.updatedAt.toISOString(),
+        transaction: tx ? {
+          id: tx.id,
+          date: (tx.date instanceof Date ? tx.date : new Date(tx.date)).toISOString(),
+          payee: tx.payee,
+          amount: tx.amount,
+          type: tx.type,
+          status: tx.status,
+          checkNumber: tx.checkNumber ?? null,
+          memo: tx.memo ?? null,
+        } : null,
+      };
+    });
+
+    res.json({ reconciliation: serializeRecon(recon), items: enriched });
+  } catch (err) {
+    console.error("Get recon items error:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 });
 
+// ── PATCH /:id/items/:itemId — toggle single item ────────────────────────────
+router.patch("/:id/items/:itemId", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { cleared } = req.body ?? {};
+    if (cleared === undefined) return res.status(400).json({ error: "cleared is required" });
+    await db.update(reconciliationItems)
+      .set({ cleared: !!cleared, updatedAt: new Date() })
+      .where(and(
+        eq(reconciliationItems.id, req.params.itemId),
+        eq(reconciliationItems.reconciliationId, req.params.id)
+      ));
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ── POST /:id/complete — finalize & lock ─────────────────────────────────────
+router.post("/:id/complete", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { companyId, email } = (req as any).user;
+
+    const [recon] = await db.select().from(reconciliations)
+      .where(and(eq(reconciliations.id, req.params.id), eq(reconciliations.companyId, companyId)));
+    if (!recon) return res.status(404).json({ error: "Not found" });
+    if (recon.status === "COMPLETED") return res.status(400).json({ error: "Already reconciled" });
+
+    const items = await db.select().from(reconciliationItems)
+      .where(eq(reconciliationItems.reconciliationId, req.params.id));
+
+    const clearedItems = items.filter((i) => i.cleared);
+    const txIds = clearedItems.map((i) => i.transactionId).filter(Boolean) as string[];
+
+    const txList = await db.select().from(transactions)
+      .where(eq(transactions.companyId, companyId));
+    const txMap = Object.fromEntries(txList.map((t) => [t.id, t]));
+
+    const clearedBalance = (recon.openingBalance ?? 0) + clearedItems.reduce((sum, item) => {
+      if (!item.transactionId) return sum;
+      const tx = txMap[item.transactionId];
+      if (!tx) return sum;
+      return tx.type === "CREDIT" ? sum + tx.amount : sum - tx.amount;
+    }, 0);
+
+    const difference = recon.statementBalance - clearedBalance;
+
+    if (Math.abs(difference) > 0.005)
+      return res.status(400).json({
+        error: `Cannot reconcile: difference of $${Math.abs(difference).toFixed(2)} must be $0.00`,
+      });
+
+    // Lock cleared transactions
+    for (const txId of txIds) {
+      await db.update(transactions)
+        .set({ status: "RECONCILED", updatedAt: new Date() })
+        .where(eq(transactions.id, txId));
+    }
+
+    const [finished] = await db.update(reconciliations)
+      .set({ clearedBalance, difference, status: "COMPLETED", reconciledBy: email ?? null, reconciledAt: new Date(), updatedAt: new Date() })
+      .where(eq(reconciliations.id, req.params.id))
+      .returning();
+
+    res.json(serializeRecon(finished));
+  } catch (err) {
+    console.error("Complete recon error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ── Legacy ────────────────────────────────────────────────────────────────────
 router.put("/:id/items", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { itemIds, cleared } = req.body ?? {};
     if (!itemIds || cleared === undefined) return res.status(400).json({ error: "Missing fields" });
-
-    for (const itemId of itemIds) {
-      await db.update(reconciliationItems).set({ cleared, updatedAt: new Date() }).where(eq(reconciliationItems.id, itemId));
+    for (const id of itemIds) {
+      await db.update(reconciliationItems).set({ cleared, updatedAt: new Date() }).where(eq(reconciliationItems.id, id));
     }
-
     res.json({ success: true });
-  } catch (error) {
+  } catch (err) {
     res.status(500).json({ error: "Internal server error" });
   }
 });
 
-router.post("/:id/finish", requireAuth, requireAdmin, async (req, res) => {
-  try {
-    const { companyId, email } = (req as any).user;
-    const [recon] = await db.select().from(reconciliations).where(and(eq(reconciliations.id, req.params.id), eq(reconciliations.companyId, companyId)));
-    if (!recon) return res.status(404).json({ error: "Not found" });
-
-    // Calculate cleared balance
-    const items = await db.select().from(reconciliationItems).where(eq(reconciliationItems.reconciliationId, req.params.id));
-    const clearedItemIds = items.filter(i => i.cleared).map(i => i.bankTransactionId);
-    
-    const transactions = await db.select().from(bankTransactions).where(eq(bankTransactions.companyId, companyId));
-    const clearedTxs = transactions.filter(t => clearedItemIds.includes(t.id));
-    const clearedBalance = (recon.openingBalance || 0) + clearedTxs.reduce((s, t) => {
-      return t.type === "CREDIT" ? s + (t.amount || 0) : s - (t.amount || 0);
-    }, 0);
-    const difference = recon.statementBalance - clearedBalance;
-
-    const [updated] = await db.update(reconciliations).set({
-      clearedBalance,
-      difference,
-      status: "COMPLETED",
-      reconciledBy: email || null,
-      reconciledAt: new Date(),
-      updatedAt: new Date(),
-    }).where(eq(reconciliations.id, req.params.id)).returning();
-
-    res.json({ ...updated, statementDate: updated.statementDate.toISOString(), reconciledAt: updated.reconciledAt?.toISOString() || null, createdAt: updated.createdAt.toISOString(), updatedAt: updated.updatedAt.toISOString() });
-  } catch (error) {
-    res.status(500).json({ error: "Internal server error" });
-  }
+router.post("/:id/finish", requireAuth, requireAdmin, (req, res) => {
+  res.redirect(307, `/${req.params.id}/complete`);
 });
 
 export default router;
