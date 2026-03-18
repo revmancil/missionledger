@@ -19,6 +19,7 @@ import budgetsRouter from "./budgets";
 import reconciliationRouter from "./reconciliation";
 import chartOfAccountsRouter from "./chart-of-accounts";
 import transactionsRouter from "./transactions";
+import openingBalanceRouter from "./opening-balance";
 
 const router: IRouter = Router();
 
@@ -42,5 +43,6 @@ router.use("/budgets", budgetsRouter);
 router.use("/reconciliation", reconciliationRouter);
 router.use("/chart-of-accounts", chartOfAccountsRouter);
 router.use("/transactions", transactionsRouter);
+router.use("/opening-balance", openingBalanceRouter);
 
 export default router;

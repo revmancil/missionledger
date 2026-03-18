@@ -5,6 +5,7 @@ import { z } from "zod/v4";
 export const organizationTypeEnum = pgEnum("organization_type", ["CHURCH", "MEMBERSHIP", "NONPROFIT"]);
 export const subscriptionStatusEnum = pgEnum("subscription_status", ["ACTIVE", "INACTIVE", "TRIAL", "CANCELLED"]);
 export const roleEnum = pgEnum("role", ["MASTER_ADMIN", "ADMIN", "VIEWER", "PASTOR", "OFFICER"]);
+export const accountingMethodEnum = pgEnum("accounting_method", ["CASH", "ACCRUAL"]);
 
 export const companies = pgTable("companies", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -21,6 +22,9 @@ export const companies = pgTable("companies", {
   defaultFundId: text("default_fund_id"),
   stripeCustomerId: text("stripe_customer_id"),
   stripeSubscriptionId: text("stripe_subscription_id"),
+  accountingMethod: accountingMethodEnum("accounting_method").notNull().default("CASH"),
+  openingBalanceEntryId: text("opening_balance_entry_id"),
+  openingBalanceDate: timestamp("opening_balance_date"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
