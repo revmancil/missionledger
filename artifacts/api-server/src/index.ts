@@ -1,6 +1,7 @@
 import app from "./app";
 import { seedPlatformAdmin } from "./seeds/platform-admin";
 import { runMigrations, getStripeSync } from "./lib/stripeClient";
+import { pool } from "@workspace/db";
 
 const rawPort = process.env["PORT"];
 
@@ -47,8 +48,20 @@ async function initStripe() {
   }
 }
 
+async function ensureSchema() {
+  try {
+    await pool.query(`
+      ALTER TABLE bank_transactions ADD COLUMN IF NOT EXISTS plaid_transaction_id TEXT;
+    `);
+    console.log("Schema check: bank_transactions.plaid_transaction_id OK");
+  } catch (err: any) {
+    console.error("Schema migration error:", err.message);
+  }
+}
+
 app.listen(port, async () => {
   console.log(`Server listening on port ${port}`);
+  await ensureSchema();
   await seedPlatformAdmin();
   await initStripe();
 });
