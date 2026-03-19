@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
-import { Building2, Lock, Mail } from "lucide-react";
+import { Building2, Lock, Mail, Terminal } from "lucide-react";
 
 export default function LoginPage() {
   const { login, isLoggingIn } = useAuth();
@@ -84,6 +84,15 @@ export default function LoginPage() {
           </form>
           <div className="mt-6 text-center text-sm text-muted-foreground">
             Don't have an account? <Link href="/register" className="text-primary font-medium hover:underline">Register your organization</Link>
+          </div>
+          <div className="mt-4 pt-4 border-t border-border/50">
+            <a
+              href={`${import.meta.env.BASE_URL.replace(/\/$/, "")}/admin/login`}
+              className="w-full flex items-center justify-center gap-2 h-9 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            >
+              <Terminal className="h-3.5 w-3.5" />
+              Admin Control Center
+            </a>
           </div>
         </CardContent>
       </Card>
