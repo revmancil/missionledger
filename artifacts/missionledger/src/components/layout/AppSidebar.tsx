@@ -174,24 +174,6 @@ export function AppSidebar() {
 
       {/* Nav */}
       <div className="flex-1 overflow-y-auto py-4 px-3 space-y-6">
-        {/* Platform Admin section — only visible to platform admins */}
-        {isPlatformAdmin && (
-          <div>
-            <h3 className="px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-              Platform
-            </h3>
-            <div className="space-y-1">
-              <a
-                href={`${import.meta.env.BASE_URL.replace(/\/$/, "")}/admin`}
-                className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 text-muted-foreground hover:bg-muted hover:text-foreground"
-              >
-                <Shield className="w-5 h-5 text-muted-foreground" />
-                Admin Command Center
-              </a>
-            </div>
-          </div>
-        )}
-
         {navGroups.map((group) => (
           <div key={group.label}>
             <h3 className="px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">

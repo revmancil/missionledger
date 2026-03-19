@@ -2,7 +2,7 @@ import React, { ReactNode } from "react";
 import { Link, useLocation } from "wouter";
 import { cn } from "@/lib/utils";
 import {
-  LayoutDashboard, Building2, BookOpen, Settings,
+  LayoutDashboard, BookOpen,
   Shield, LogOut, ArrowLeft, Terminal,
 } from "lucide-react";
 
@@ -10,7 +10,6 @@ const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
 const navItems = [
   { href: "/admin", label: "Command Center", icon: LayoutDashboard },
-  { href: "/admin/organizations", label: "Organizations", icon: Building2 },
   { href: "/admin/global-coa", label: "Global COA Template", icon: BookOpen },
 ];
 
