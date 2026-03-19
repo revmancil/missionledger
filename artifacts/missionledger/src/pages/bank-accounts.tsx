@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { useGetBankAccounts, useCreateBankAccount, useDeleteBankAccount } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -186,6 +186,12 @@ function PlaidLinkButtonWithToken({ account, onSuccess }: { account: any; onSucc
     token: linkToken || "",
     onSuccess: onPlaidSuccess,
   });
+
+  useEffect(() => {
+    if (plaidReady && linkToken) {
+      openPlaid();
+    }
+  }, [plaidReady, linkToken, openPlaid]);
 
   const handleConnect = async () => {
     if (linkToken && plaidReady) {
