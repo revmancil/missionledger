@@ -1,19 +1,21 @@
 import { Router } from "express";
 import { db, companies, chartOfAccounts, funds, journalEntries, journalEntryLines } from "@workspace/db";
-import { eq, and, asc, desc, like } from "drizzle-orm";
+import { eq, and, asc, desc, like, inArray } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
 
 const router = Router();
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/** Find or auto-create a COA EQUITY account for a fund. */
-async function getOrCreateFundCoaAccount(
+/**
+ * Find or auto-create a fund-specific Net Assets equity account.
+ * Uses description tag `fund:<fundId>` for lookups.
+ */
+async function getOrCreateFundNetAssetsAccount(
   companyId: string,
   fundId: string,
   fundName: string
 ): Promise<string> {
-  // Look for an existing EQUITY account whose description contains the fund ID
   const existing = await db
     .select()
     .from(chartOfAccounts)
@@ -28,25 +30,17 @@ async function getOrCreateFundCoaAccount(
 
   if (existing.length) return existing[0].id;
 
-  // Find the next available code in the 3200-3299 range (fund equity sub-accounts)
   const equityAccounts = await db
     .select({ code: chartOfAccounts.code })
     .from(chartOfAccounts)
-    .where(
-      and(
-        eq(chartOfAccounts.companyId, companyId),
-        eq(chartOfAccounts.type, "EQUITY")
-      )
-    );
+    .where(and(eq(chartOfAccounts.companyId, companyId), eq(chartOfAccounts.type, "EQUITY")));
 
-  // Collect used codes in the 3200-3299 range
   const used = new Set(equityAccounts.map((a) => a.code));
   let newCode = "3210";
   for (let n = 3210; n <= 3299; n += 10) {
     const candidate = String(n);
     if (!used.has(candidate)) { newCode = candidate; break; }
   }
-  // Fall back to 3400+ if 32xx range is full
   if (used.has(newCode)) {
     for (let n = 3400; n <= 3990; n += 10) {
       const candidate = String(n);
@@ -59,9 +53,9 @@ async function getOrCreateFundCoaAccount(
     .values({
       companyId,
       code: newCode,
-      name: fundName,
+      name: `Net Assets — ${fundName}`,
       type: "EQUITY",
-      description: `Restricted Fund account. fund:${fundId}`,
+      description: `Net Assets for fund. fund:${fundId}`,
       isSystem: false,
       isActive: true,
       sortOrder: parseInt(newCode),
@@ -85,47 +79,57 @@ router.get("/", requireAuth, async (req, res) => {
       .where(eq(chartOfAccounts.companyId, companyId))
       .orderBy(asc(chartOfAccounts.code));
 
-    // Active funds for this company
     const activeFunds = await db
       .select()
       .from(funds)
       .where(and(eq(funds.companyId, companyId), eq(funds.isActive, true)))
       .orderBy(asc(funds.name));
 
-    // If an opening balance JE exists, fetch its lines
-    let existingLines: any[] = [];
+    // Reconstruct rows from existing JE for pre-fill
+    let existingRows: any[] = [];
     if (company.openingBalanceEntryId) {
-      existingLines = await db
+      const jeLines = await db
         .select()
         .from(journalEntryLines)
         .where(eq(journalEntryLines.journalEntryId, company.openingBalanceEntryId));
-    }
 
-    // Group COA by type — exclude EQUITY accounts that were auto-created for funds
-    // (those are shown under the Funds section instead)
-    const fundLinkedCoaIds = new Set<string>();
-    for (const f of activeFunds) {
-      const linked = await db
-        .select({ id: chartOfAccounts.id })
-        .from(chartOfAccounts)
-        .where(
-          and(
-            eq(chartOfAccounts.companyId, companyId),
-            eq(chartOfAccounts.type, "EQUITY"),
-            like(chartOfAccounts.description, `%fund:${f.id}%`)
-          )
-        )
-        .limit(1);
-      if (linked.length) {
-        fundLinkedCoaIds.add(linked[0].id);
-        // Map existing JE lines for this fund's coa account back to the fund ID
-        const line = existingLines.find((l) => l.accountId === linked[0].id);
-        if (line) {
-          existingLines = existingLines.map((l) =>
-            l.accountId === linked[0].id
-              ? { ...l, fundId: f.id, accountId: linked[0].id }
-              : l
-          );
+      // Get account types for all accounts in the JE
+      const accountIds = [...new Set(jeLines.map((l) => l.accountId))];
+      const accountsInJe = accountIds.length
+        ? await db.select().from(chartOfAccounts).where(inArray(chartOfAccounts.id, accountIds))
+        : [];
+      const acctMap = Object.fromEntries(accountsInJe.map((a) => [a.id, a]));
+
+      // Collect fund-linked equity account IDs so we can skip them (they're the balancing side)
+      const fundLinkedIds = new Set<string>();
+      for (const a of accountsInJe) {
+        if (a.type === "EQUITY" && a.description?.includes("fund:")) {
+          fundLinkedIds.add(a.id);
+        }
+      }
+
+      for (const line of jeLines) {
+        const acct = acctMap[line.accountId];
+        if (!acct) continue;
+        // Skip the balancing (equity) side — we only reconstruct the asset/liability rows
+        if (fundLinkedIds.has(line.accountId)) continue;
+
+        if (acct.type === "ASSET" && line.debit > 0) {
+          existingRows.push({
+            accountId: line.accountId,
+            accountType: "ASSET",
+            fundId: line.fundId ?? null,
+            amount: line.debit,
+            memo: line.description ?? "",
+          });
+        } else if (acct.type === "LIABILITY" && line.credit > 0) {
+          existingRows.push({
+            accountId: line.accountId,
+            accountType: "LIABILITY",
+            fundId: line.fundId ?? null,
+            amount: line.credit,
+            memo: line.description ?? "",
+          });
         }
       }
     }
@@ -133,8 +137,7 @@ router.get("/", requireAuth, async (req, res) => {
     const grouped = {
       ASSET:     coa.filter((a) => a.type === "ASSET"),
       LIABILITY: coa.filter((a) => a.type === "LIABILITY"),
-      // Exclude fund-linked equity accounts from main COA list
-      EQUITY:    coa.filter((a) => a.type === "EQUITY" && !fundLinkedCoaIds.has(a.id)),
+      EQUITY:    coa.filter((a) => a.type === "EQUITY"),
     };
 
     res.json({
@@ -146,25 +149,8 @@ router.get("/", requireAuth, async (req, res) => {
             : company.openingBalanceDate)
         : null,
       coa: grouped,
-      funds: activeFunds.map((f) => {
-        const linkedId = [...fundLinkedCoaIds].find((id) =>
-          existingLines.some((l) => l.accountId === id && l.fundId === f.id)
-        ) ?? null;
-        const line = linkedId ? existingLines.find((l) => l.accountId === linkedId) : null;
-        return {
-          id: f.id,
-          name: f.name,
-          description: f.description,
-          existingBalance: line ? (line.credit ?? 0) : 0,
-        };
-      }),
-      existingLines: existingLines
-        .filter((l) => !l.fundId) // COA-only lines (funds handled above)
-        .map((l) => ({
-          accountId: l.accountId,
-          debit: l.debit,
-          credit: l.credit,
-        })),
+      funds: activeFunds,
+      existingRows,
     });
   } catch (err) {
     console.error("Opening balance GET error:", err);
@@ -172,7 +158,7 @@ router.get("/", requireAuth, async (req, res) => {
   }
 });
 
-// ── PATCH /opening-balance/method — save accounting method preference ─────────
+// ── PATCH /opening-balance/method ─────────────────────────────────────────────
 router.patch("/method", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
@@ -191,51 +177,88 @@ router.patch("/method", requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
-// ── POST /opening-balance/finalize — create JE + lock ────────────────────────
+// ── POST /opening-balance/finalize ────────────────────────────────────────────
+/**
+ * Accepts per-row fund assignments and creates a self-balancing journal entry.
+ *
+ * Each row becomes a DR/CR pair:
+ *   ASSET:     DR [Asset Account / fundId]  |  CR [Fund Net Assets / fundId]
+ *   LIABILITY: DR [Fund Net Assets / fundId] |  CR [Liability Account / fundId]
+ *
+ * This ensures the Statement of Financial Position shows equity correctly
+ * allocated to each fund (Restricted, Unrestricted, Board-Designated, etc.)
+ */
 router.post("/finalize", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId, email } = (req as any).user;
-    const { date, accountingMethod, lines, fundLines } = req.body ?? {};
+    const { date, accountingMethod, rows } = req.body ?? {};
 
-    if (!date || (!lines?.length && !fundLines?.length))
-      return res.status(400).json({ error: "date and at least one balance line are required" });
+    if (!date) return res.status(400).json({ error: "As-of date is required" });
 
-    const allCoaLines: any[] = lines ?? [];
-
-    // Resolve fund lines → ensure each has a COA account
-    const resolvedFundLines: Array<{ accountId: string; accountName: string; accountType: "EQUITY"; amount: number }> = [];
-    for (const fl of (fundLines ?? [])) {
-      const amt = Math.abs(Number(fl.amount));
-      if (amt === 0) continue;
-      const coaId = await getOrCreateFundCoaAccount(companyId, fl.fundId, fl.fundName);
-      resolvedFundLines.push({
-        accountId: coaId,
-        accountName: fl.fundName,
-        accountType: "EQUITY",
-        amount: amt,
-      });
+    const asOf = new Date(date);
+    const today = new Date();
+    today.setHours(23, 59, 59, 999);
+    if (asOf > today) {
+      return res.status(400).json({ error: "As-of date cannot be in the future." });
     }
 
-    const combinedEquityLines = [
-      ...allCoaLines.filter((l: any) => l.accountType === "EQUITY"),
-      ...resolvedFundLines,
-    ];
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return res.status(400).json({ error: "At least one balance row is required." });
+    }
 
-    const totalAssets = allCoaLines
-      .filter((l: any) => l.accountType === "ASSET")
-      .reduce((s: number, l: any) => s + Math.abs(Number(l.amount)), 0);
+    // Validate every row has a fund
+    const missingFund = rows.find((r: any) => !r.fundId);
+    if (missingFund) {
+      return res.status(400).json({ error: "Every row must have a Fund selected." });
+    }
 
-    const totalLiabilities = allCoaLines
-      .filter((l: any) => l.accountType === "LIABILITY")
-      .reduce((s: number, l: any) => s + Math.abs(Number(l.amount)), 0);
+    // Filter to non-zero amounts
+    const activeRows = rows.filter((r: any) => Math.abs(Number(r.amount)) > 0);
+    if (activeRows.length === 0) {
+      return res.status(400).json({ error: "At least one row must have an amount greater than zero." });
+    }
 
-    const totalEquity = combinedEquityLines.reduce((s, l) => s + Math.abs(Number(l.amount)), 0);
+    // Fetch all referenced funds for names
+    const fundIds = [...new Set(activeRows.map((r: any) => r.fundId as string))];
+    const fundRecords = await db.select().from(funds).where(inArray(funds.id, fundIds));
+    const fundMap = Object.fromEntries(fundRecords.map((f) => [f.id, f.name]));
 
-    const diff = totalAssets - (totalLiabilities + totalEquity);
-    if (Math.abs(diff) > 0.005) {
-      return res.status(400).json({
-        error: `Accounting equation out of balance by $${Math.abs(diff).toFixed(2)}. Assets must equal Liabilities + Equity.`,
-      });
+    // Build JE lines (each row creates 2 lines: asset/liability + fund net assets)
+    interface JELine {
+      accountId: string;
+      debit: number;
+      credit: number;
+      fundId: string;
+      description: string | null;
+    }
+    const jeLines: JELine[] = [];
+
+    let totalAssets = 0;
+    let totalLiabilities = 0;
+
+    for (const row of activeRows) {
+      const amt = Math.abs(Number(row.amount));
+      const fundName = fundMap[row.fundId] ?? row.fundName ?? "Fund";
+      const fundNetAssetsId = await getOrCreateFundNetAssetsAccount(companyId, row.fundId, fundName);
+
+      if (row.accountType === "ASSET") {
+        totalAssets += amt;
+        // DR Asset Account / CR Fund Net Assets
+        jeLines.push({ accountId: row.accountId, debit: amt, credit: 0, fundId: row.fundId, description: row.memo || null });
+        jeLines.push({ accountId: fundNetAssetsId, debit: 0, credit: amt, fundId: row.fundId, description: row.memo || null });
+      } else if (row.accountType === "LIABILITY") {
+        totalLiabilities += amt;
+        // DR Fund Net Assets / CR Liability Account
+        jeLines.push({ accountId: fundNetAssetsId, debit: amt, credit: 0, fundId: row.fundId, description: row.memo || null });
+        jeLines.push({ accountId: row.accountId, debit: 0, credit: amt, fundId: row.fundId, description: row.memo || null });
+      }
+    }
+
+    // Verify self-balancing
+    const totalDebits  = jeLines.reduce((s, l) => s + l.debit, 0);
+    const totalCredits = jeLines.reduce((s, l) => s + l.credit, 0);
+    if (Math.abs(totalDebits - totalCredits) > 0.005) {
+      return res.status(500).json({ error: "Internal balancing error — please contact support." });
     }
 
     // Generate entry number
@@ -262,13 +285,13 @@ router.post("/finalize", requireAuth, requireAdmin, async (req, res) => {
         .where(eq(journalEntries.id, company.openingBalanceEntryId));
     }
 
-    // Create new posted JE
+    // Create posted JE
     const [je] = await db
       .insert(journalEntries)
       .values({
         companyId,
         entryNumber,
-        date: new Date(date),
+        date: asOf,
         description: "Opening Balance Entry",
         memo: `Accounting method: ${accountingMethod ?? "CASH"}. Created by ${email ?? "admin"}.`,
         status: "POSTED",
@@ -277,23 +300,16 @@ router.post("/finalize", requireAuth, requireAdmin, async (req, res) => {
       })
       .returning();
 
-    // Assets → DEBIT; Liabilities + Equity (including funds) → CREDIT
-    const jeLines = [
-      ...allCoaLines.filter((l: any) => l.accountType !== "EQUITY"),
-      ...combinedEquityLines,
-    ];
-
+    // Insert all JE lines
     for (const line of jeLines) {
-      const amt = Math.abs(Number(line.amount));
-      if (amt === 0) continue;
-      const isAsset = line.accountType === "ASSET";
       await db.insert(journalEntryLines).values({
         journalEntryId: je.id,
         companyId,
         accountId: line.accountId,
-        debit: isAsset ? amt : 0,
-        credit: isAsset ? 0 : amt,
-        description: line.accountName ?? null,
+        debit: line.debit,
+        credit: line.credit,
+        fundId: line.fundId,
+        description: line.description,
       });
     }
 
@@ -303,10 +319,12 @@ router.post("/finalize", requireAuth, requireAdmin, async (req, res) => {
       .set({
         accountingMethod: (accountingMethod ?? "CASH") as any,
         openingBalanceEntryId: je.id,
-        openingBalanceDate: new Date(date),
+        openingBalanceDate: asOf,
         updatedAt: new Date(),
       })
       .where(eq(companies.id, companyId));
+
+    const totalNetAssets = totalAssets - totalLiabilities;
 
     res.status(201).json({
       success: true,
@@ -314,7 +332,16 @@ router.post("/finalize", requireAuth, requireAdmin, async (req, res) => {
       entryNumber: je.entryNumber,
       totalAssets,
       totalLiabilities,
-      totalEquity,
+      totalNetAssets,
+      fundSummary: fundRecords.map((f) => {
+        const fundAssets = activeRows
+          .filter((r: any) => r.fundId === f.id && r.accountType === "ASSET")
+          .reduce((s: number, r: any) => s + Math.abs(Number(r.amount)), 0);
+        const fundLiabilities = activeRows
+          .filter((r: any) => r.fundId === f.id && r.accountType === "LIABILITY")
+          .reduce((s: number, r: any) => s + Math.abs(Number(r.amount)), 0);
+        return { fundId: f.id, fundName: f.name, assets: fundAssets, liabilities: fundLiabilities, netAssets: fundAssets - fundLiabilities };
+      }),
     });
   } catch (err) {
     console.error("Opening balance finalize error:", err);
