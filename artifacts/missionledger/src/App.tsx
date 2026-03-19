@@ -25,6 +25,7 @@ import TrialBalancePage from "@/pages/trial-balance";
 import PeriodClosePage from "@/pages/period-close";
 import ReportsPage from "@/pages/reports";
 import MasterAdminPage from "@/pages/master-admin";
+import BillingPage from "@/pages/billing";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient({
@@ -66,6 +67,7 @@ function Router() {
       <Route path="/period-close"><ProtectedRoute component={PeriodClosePage} /></Route>
       <Route path="/reports"><ProtectedRoute component={ReportsPage} /></Route>
       <Route path="/master-admin"><ProtectedRoute component={MasterAdminPage} /></Route>
+      <Route path="/billing"><ProtectedRoute component={BillingPage} /></Route>
 
       <Route component={NotFound} />
     </Switch>

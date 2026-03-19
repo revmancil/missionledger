@@ -1,15 +1,262 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { useGetBankAccounts, useCreateBankAccount, useDeleteBankAccount } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import { formatCurrency } from "@/lib/utils";
-import { Plus, Trash2, Banknote, CreditCard } from "lucide-react";
+import { Plus, Trash2, Banknote, CreditCard, Link2, Link2Off, RefreshCw, Building2 } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { usePlaidLink } from "react-plaid-link";
+import { useQueryClient } from "@tanstack/react-query";
+
+function PlaidLinkButton({ account, onSuccess }: { account: any; onSuccess: () => void }) {
+  const [linkToken, setLinkToken] = useState<string | null>(null);
+  const [loadingToken, setLoadingToken] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+
+  const fetchLinkToken = async () => {
+    setLoadingToken(true);
+    try {
+      const res = await fetch("/api/plaid/create-link-token", {
+        method: "POST",
+        credentials: "include",
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed to get link token");
+      setLinkToken(json.linkToken);
+    } catch (err: any) {
+      toast.error(err.message || "Plaid not configured. Add PLAID_CLIENT_ID and PLAID_SECRET to connect banks.");
+    } finally {
+      setLoadingToken(false);
+    }
+  };
+
+  const onPlaidSuccess = useCallback(async (publicToken: string, metadata: any) => {
+    try {
+      const res = await fetch("/api/plaid/exchange-token", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          publicToken,
+          bankAccountId: account.id,
+          institutionName: metadata?.institution?.name || null,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed to link bank");
+      toast.success(`${account.name} linked with Plaid successfully!`);
+      onSuccess();
+      setLinkToken(null);
+    } catch (err: any) {
+      toast.error(err.message || "Failed to link bank account");
+    }
+  }, [account.id, account.name, onSuccess]);
+
+  const { open: openPlaid, ready } = usePlaidLink({
+    token: linkToken || "",
+    onSuccess: onPlaidSuccess,
+  });
+
+  const handleSync = async () => {
+    setSyncing(true);
+    try {
+      const res = await fetch(`/api/plaid/sync/${account.id}`, {
+        method: "POST",
+        credentials: "include",
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Sync failed");
+      toast.success(`Synced ${json.imported} transactions from ${account.plaidInstitutionName || "bank"}`);
+    } catch (err: any) {
+      toast.error(err.message || "Failed to sync transactions");
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const handleUnlink = async () => {
+    if (!confirm(`Unlink ${account.name} from Plaid? Existing transactions will remain.`)) return;
+    try {
+      const res = await fetch(`/api/plaid/unlink/${account.id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Failed to unlink");
+      toast.success("Bank account unlinked from Plaid");
+      onSuccess();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to unlink");
+    }
+  };
+
+  if (account.isPlaidLinked) {
+    return (
+      <div className="flex gap-1">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+          onClick={handleSync}
+          disabled={syncing}
+        >
+          <RefreshCw className={`w-3 h-3 mr-1 ${syncing ? "animate-spin" : ""}`} />
+          {syncing ? "Syncing..." : "Sync"}
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+          onClick={handleUnlink}
+        >
+          <Link2Off className="w-3 h-3 mr-1" />
+          Unlink
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="h-7 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+      onClick={() => {
+        if (linkToken && ready) {
+          openPlaid();
+        } else {
+          fetchLinkToken().then(() => {});
+        }
+      }}
+      disabled={loadingToken}
+    >
+      {loadingToken ? (
+        <><RefreshCw className="w-3 h-3 mr-1 animate-spin" /> Connecting...</>
+      ) : (
+        <><Link2 className="w-3 h-3 mr-1" /> Link via Plaid</>
+      )}
+    </Button>
+  );
+}
+
+function PlaidLinkButtonWithToken({ account, onSuccess }: { account: any; onSuccess: () => void }) {
+  const [linkToken, setLinkToken] = useState<string | null>(null);
+  const [ready, setReady] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+
+  const fetchToken = async () => {
+    try {
+      const res = await fetch("/api/plaid/create-link-token", {
+        method: "POST",
+        credentials: "include",
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed to get link token");
+      setLinkToken(json.linkToken);
+    } catch (err: any) {
+      toast.error(err.message || "Plaid not configured — add PLAID_CLIENT_ID and PLAID_SECRET to enable bank linking.");
+    }
+  };
+
+  const onPlaidSuccess = useCallback(async (publicToken: string, metadata: any) => {
+    try {
+      const res = await fetch("/api/plaid/exchange-token", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          publicToken,
+          bankAccountId: account.id,
+          institutionName: metadata?.institution?.name || null,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed to link bank");
+      toast.success(`${account.name} linked with Plaid!`);
+      onSuccess();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to link bank account");
+    }
+  }, [account.id, account.name, onSuccess]);
+
+  const { open: openPlaid, ready: plaidReady } = usePlaidLink({
+    token: linkToken || "",
+    onSuccess: onPlaidSuccess,
+  });
+
+  const handleConnect = async () => {
+    if (linkToken && plaidReady) {
+      openPlaid();
+      return;
+    }
+    await fetchToken();
+  };
+
+  const handleSync = async () => {
+    setSyncing(true);
+    try {
+      const res = await fetch(`/api/plaid/sync/${account.id}`, {
+        method: "POST",
+        credentials: "include",
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Sync failed");
+      toast.success(`Synced ${json.imported} transactions`);
+    } catch (err: any) {
+      toast.error(err.message || "Sync failed");
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const handleUnlink = async () => {
+    if (!confirm(`Unlink ${account.name} from Plaid?`)) return;
+    try {
+      await fetch(`/api/plaid/unlink/${account.id}`, { method: "DELETE", credentials: "include" });
+      toast.success("Unlinked from Plaid");
+      onSuccess();
+    } catch {
+      toast.error("Failed to unlink");
+    }
+  };
+
+  if (account.isPlaidLinked) {
+    return (
+      <div className="flex gap-1 flex-wrap">
+        <Badge variant="outline" className="text-xs text-blue-600 border-blue-200 bg-blue-50">
+          <Building2 className="w-3 h-3 mr-1" />
+          {account.plaidInstitutionName || "Plaid Linked"}
+        </Badge>
+        <Button variant="ghost" size="sm" className="h-6 text-xs px-2" onClick={handleSync} disabled={syncing}>
+          <RefreshCw className={`w-3 h-3 mr-1 ${syncing ? "animate-spin" : ""}`} />
+          {syncing ? "Syncing..." : "Sync"}
+        </Button>
+        <Button variant="ghost" size="sm" className="h-6 text-xs px-2 text-muted-foreground hover:text-destructive" onClick={handleUnlink}>
+          <Link2Off className="w-3 h-3 mr-1" />
+          Unlink
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      className="h-7 text-xs text-blue-600 border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+      onClick={handleConnect}
+    >
+      <Link2 className="w-3 h-3 mr-1" />
+      Link Bank via Plaid
+    </Button>
+  );
+}
 
 export default function BankAccountsPage() {
+  const queryClient = useQueryClient();
   const { data: bankAccounts = [], isLoading } = useGetBankAccounts();
   const createBankAccount = useCreateBankAccount();
   const deleteBankAccount = useDeleteBankAccount();
@@ -33,6 +280,10 @@ export default function BankAccountsPage() {
     } catch (err: any) {
       toast.error(err.message || "Failed to create bank account");
     }
+  };
+
+  const refreshAccounts = () => {
+    queryClient.invalidateQueries({ queryKey: ["/api/bank-accounts"] });
   };
 
   return (
@@ -114,10 +365,18 @@ export default function BankAccountsPage() {
                     {formatCurrency(account.currentBalance)}
                   </p>
                 </div>
-                <div className="mt-3 flex gap-2">
-                  <span className={`inline-flex items-center px-2 py-1 rounded-md text-xs font-medium ${account.isActive ? "bg-emerald-100 text-emerald-700" : "bg-muted text-muted-foreground"}`}>
-                    {account.isActive ? "Active" : "Inactive"}
-                  </span>
+                <div className="mt-3 flex flex-col gap-2">
+                  <div className="flex gap-2 flex-wrap">
+                    <span className={`inline-flex items-center px-2 py-1 rounded-md text-xs font-medium ${account.isActive ? "bg-emerald-100 text-emerald-700" : "bg-muted text-muted-foreground"}`}>
+                      {account.isActive ? "Active" : "Inactive"}
+                    </span>
+                  </div>
+                  <PlaidLinkButtonWithToken account={account} onSuccess={refreshAccounts} />
+                  {account.isPlaidLinked && account.plaidLastSyncedAt && (
+                    <p className="text-xs text-muted-foreground">
+                      Last synced: {new Date(account.plaidLastSyncedAt).toLocaleDateString()}
+                    </p>
+                  )}
                 </div>
               </CardContent>
             </Card>

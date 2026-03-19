@@ -11,6 +11,11 @@ export const bankAccounts = pgTable("bank_accounts", {
   currentBalance: real("current_balance").notNull().default(0),
   glAccountId: text("gl_account_id"),
   isActive: boolean("is_active").notNull().default(true),
+  plaidAccessToken: text("plaid_access_token"),
+  plaidItemId: text("plaid_item_id"),
+  plaidInstitutionName: text("plaid_institution_name"),
+  isPlaidLinked: boolean("is_plaid_linked").notNull().default(false),
+  plaidLastSyncedAt: timestamp("plaid_last_synced_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

@@ -3,7 +3,8 @@ import {
   LayoutDashboard, Heart, Receipt, Wallet, BookOpen, Building2,
   FileText, HandHeart, LogOut, BarChart3, Building,
   Banknote, ClipboardList, RefreshCcw, Wand2, Scale, CalendarCheck,
-  ChevronDown, ArrowLeftRight, Shield, AlertTriangle, CheckCircle2
+  ChevronDown, ArrowLeftRight, Shield, AlertTriangle, CheckCircle2,
+  CreditCard
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
@@ -53,6 +54,12 @@ const navGroups = [
     label: "Contacts",
     items: [
       { href: "/vendors", label: "Vendors", icon: Building2 },
+    ]
+  },
+  {
+    label: "Account",
+    items: [
+      { href: "/billing", label: "Billing", icon: CreditCard },
     ]
   }
 ];
