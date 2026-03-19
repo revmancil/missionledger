@@ -18,6 +18,7 @@ export const bankTransactions = pgTable("bank_transactions", {
   fundId: text("fund_id"),
   accountId: text("account_id"),
   journalEntryId: text("journal_entry_id"),
+  plaidTransactionId: text("plaid_transaction_id"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

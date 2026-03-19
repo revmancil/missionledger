@@ -212,7 +212,10 @@ function PlaidLinkButtonWithToken({ account, onSuccess }: { account: any; onSucc
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Sync failed");
-      toast.success(`Synced ${json.imported} transactions`);
+      const msg = json.imported > 0
+        ? `Imported ${json.imported} new transaction${json.imported !== 1 ? "s" : ""}${json.skipped > 0 ? ` (${json.skipped} already existed)` : ""}`
+        : `All ${json.total} transactions already up to date`;
+      toast.success(msg);
     } catch (err: any) {
       toast.error(err.message || "Sync failed");
     } finally {

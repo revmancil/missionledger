@@ -6,8 +6,8 @@ import {
   Products,
   CountryCode,
 } from "plaid";
-import { db, bankAccounts } from "@workspace/db";
-import { eq, and } from "drizzle-orm";
+import { db, bankAccounts, bankTransactions } from "@workspace/db";
+import { eq, and, inArray, count } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
 
 const router = Router();
@@ -115,18 +115,69 @@ router.post("/sync/:bankAccountId", requireAuth, requireAdmin, async (req, res) 
 
     const plaid = getPlaidClient();
 
-    const startDate = account.plaidLastSyncedAt
+    // If no transactions exist for this account yet, always do a full 90-day sync
+    // (handles case where a previous sync ran but failed to save, resetting plaidLastSyncedAt)
+    const [{ value: existingCount }] = await db
+      .select({ value: count() })
+      .from(bankTransactions)
+      .where(eq(bankTransactions.bankAccountId, bankAccountId));
+
+    const forceFullSync = Number(existingCount) === 0;
+    const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+    const startDate = (!forceFullSync && account.plaidLastSyncedAt)
       ? account.plaidLastSyncedAt.toISOString().slice(0, 10)
-      : new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      : ninetyDaysAgo;
     const endDate = new Date().toISOString().slice(0, 10);
 
-    const txResponse = await plaid.transactionsGet({
-      access_token: account.plaidAccessToken,
-      start_date: startDate,
-      end_date: endDate,
-    });
+    // Fetch all pages from Plaid
+    let allTransactions: any[] = [];
+    let offset = 0;
+    while (true) {
+      const txResponse = await plaid.transactionsGet({
+        access_token: account.plaidAccessToken,
+        start_date: startDate,
+        end_date: endDate,
+        options: { count: 500, offset },
+      });
+      const batch = txResponse.data.transactions;
+      allTransactions = allTransactions.concat(batch);
+      if (allTransactions.length >= txResponse.data.total_transactions) break;
+      offset += batch.length;
+    }
 
-    const transactions = txResponse.data.transactions;
+    // Deduplicate: skip any plaid transaction IDs already in the DB
+    const plaidIds = allTransactions.map((t) => t.transaction_id);
+    const existing = plaidIds.length > 0
+      ? await db.select({ plaidTransactionId: bankTransactions.plaidTransactionId })
+          .from(bankTransactions)
+          .where(
+            and(
+              eq(bankTransactions.bankAccountId, bankAccountId),
+              inArray(bankTransactions.plaidTransactionId as any, plaidIds)
+            )
+          )
+      : [];
+    const existingIds = new Set(existing.map((e) => e.plaidTransactionId));
+    const newTransactions = allTransactions.filter((t) => !existingIds.has(t.transaction_id));
+
+    // Insert new transactions
+    // Plaid: positive amount = debit (money out), negative = credit (money in)
+    if (newTransactions.length > 0) {
+      await db.insert(bankTransactions).values(
+        newTransactions.map((t) => ({
+          companyId,
+          bankAccountId,
+          date: new Date(t.date),
+          description: t.name || t.merchant_name || "Plaid Transaction",
+          merchantName: t.merchant_name || null,
+          amount: Math.abs(t.amount),
+          type: t.amount >= 0 ? "DEBIT" : "CREDIT",
+          status: t.pending ? "PENDING" : "POSTED",
+          plaidTransactionId: t.transaction_id,
+        } as any))
+      );
+    }
 
     await db.update(bankAccounts).set({
       plaidLastSyncedAt: new Date(),
@@ -134,17 +185,11 @@ router.post("/sync/:bankAccountId", requireAuth, requireAdmin, async (req, res) 
     }).where(eq(bankAccounts.id, bankAccountId));
 
     res.json({
-      imported: transactions.length,
+      imported: newTransactions.length,
+      skipped: existingIds.size,
+      total: allTransactions.length,
       startDate,
       endDate,
-      transactions: transactions.map((t) => ({
-        plaidTransactionId: t.transaction_id,
-        date: t.date,
-        description: t.name,
-        amount: t.amount,
-        category: t.category,
-        merchantName: t.merchant_name,
-      })),
     });
   } catch (err: any) {
     console.error("Plaid sync error:", err.message);
