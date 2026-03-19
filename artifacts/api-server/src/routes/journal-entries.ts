@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, journalEntries, journalEntryLines, accounts } from "@workspace/db";
+import { db, journalEntries, journalEntryLines, accounts, glEntries, funds } from "@workspace/db";
 import { eq, and, desc } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
 
@@ -65,7 +65,7 @@ router.get("/:id", requireAuth, async (req, res) => {
 router.post("/", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId, email } = (req as any).user;
-    const { date, description, memo, lines } = req.body ?? {};
+    const { date, description, memo, referenceNumber, lines } = req.body ?? {};
     if (!date || !description || !lines?.length) return res.status(400).json({ error: "Missing required fields" });
 
     const totalDebit = lines.reduce((s: number, l: any) => s + (parseFloat(l.debit) || 0), 0);
@@ -82,6 +82,7 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
       date: new Date(date),
       description,
       memo: memo || null,
+      referenceNumber: referenceNumber || null,
       status: "DRAFT",
       createdBy: email || null,
     }).returning();
@@ -108,7 +109,7 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
 router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
-    const { date, description, memo, lines } = req.body ?? {};
+    const { date, description, memo, referenceNumber, lines } = req.body ?? {};
 
     const existing = await db.select().from(journalEntries).where(and(eq(journalEntries.id, req.params.id), eq(journalEntries.companyId, companyId))).limit(1);
     if (!existing.length) return res.status(404).json({ error: "Not found" });
@@ -118,6 +119,7 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
       date: date ? new Date(date) : undefined,
       description,
       memo: memo || null,
+      referenceNumber: referenceNumber || null,
       updatedAt: new Date(),
     }).where(eq(journalEntries.id, req.params.id)).returning();
 
@@ -160,14 +162,70 @@ router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
 router.post("/:id/post", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
+
+    const [entry] = await db.select().from(journalEntries)
+      .where(and(eq(journalEntries.id, req.params.id), eq(journalEntries.companyId, companyId)));
+    if (!entry) return res.status(404).json({ error: "Not found" });
+    if (entry.status === "POSTED") return res.status(400).json({ error: "Already posted" });
+
+    const lines = await db.select().from(journalEntryLines)
+      .where(eq(journalEntryLines.journalEntryId, entry.id));
+
+    const allAccounts = await db.select().from(accounts).where(eq(accounts.companyId, companyId));
+    const accountMap = Object.fromEntries(allAccounts.map(a => [a.id, a]));
+
+    const allFunds = await db.select().from(funds).where(eq(funds.companyId, companyId));
+    const fundMap = Object.fromEntries(allFunds.map(f => [f.id, f]));
+
+    for (const line of lines) {
+      const account = accountMap[line.accountId];
+      if (!account) continue;
+      const fund = line.fundId ? fundMap[line.fundId] : null;
+
+      if ((line.debit ?? 0) > 0) {
+        await db.insert(glEntries).values({
+          companyId,
+          journalEntryId: entry.id,
+          sourceType: "MANUAL_JE",
+          accountId: account.id,
+          accountCode: account.code,
+          accountName: account.name,
+          fundId: line.fundId ?? null,
+          fundName: fund?.name ?? null,
+          entryType: "DEBIT",
+          amount: line.debit ?? 0,
+          description: line.description || entry.description,
+          date: entry.date,
+        });
+      }
+
+      if ((line.credit ?? 0) > 0) {
+        await db.insert(glEntries).values({
+          companyId,
+          journalEntryId: entry.id,
+          sourceType: "MANUAL_JE",
+          accountId: account.id,
+          accountCode: account.code,
+          accountName: account.name,
+          fundId: line.fundId ?? null,
+          fundName: fund?.name ?? null,
+          entryType: "CREDIT",
+          amount: line.credit ?? 0,
+          description: line.description || entry.description,
+          date: entry.date,
+        });
+      }
+    }
+
     const [updated] = await db.update(journalEntries).set({
       status: "POSTED",
       postedAt: new Date(),
       updatedAt: new Date(),
-    }).where(and(eq(journalEntries.id, req.params.id), eq(journalEntries.companyId, companyId))).returning();
-    if (!updated) return res.status(404).json({ error: "Not found" });
+    }).where(eq(journalEntries.id, req.params.id)).returning();
+
     res.json(await enrichEntry(updated, companyId));
   } catch (error) {
+    console.error("Post JE error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });

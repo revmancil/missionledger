@@ -4,7 +4,7 @@ import {
   FileText, HandHeart, LogOut, BarChart3, Building,
   Banknote, ClipboardList, RefreshCcw, Wand2, Scale, CalendarCheck,
   ChevronDown, ArrowLeftRight, Shield, AlertTriangle, CheckCircle2,
-  CreditCard
+  CreditCard, PenLine
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
@@ -44,6 +44,7 @@ const navGroups = [
       { href: "/reconciliation", label: "Reconciliation", icon: RefreshCcw },
       { href: "/bank-accounts", label: "Bank Accounts", icon: Banknote },
       { href: "/accounts", label: "Chart of Accounts", icon: BookOpen },
+      { href: "/journal-entries", label: "Journal Entries", icon: PenLine },
       { href: "/opening-balance", label: "Opening Balances", icon: Wand2 },
       { href: "/trial-balance", label: "Trial Balance", icon: Scale },
       { href: "/period-close", label: "Period Close", icon: CalendarCheck },

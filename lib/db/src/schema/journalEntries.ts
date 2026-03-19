@@ -11,6 +11,7 @@ export const journalEntries = pgTable("journal_entries", {
   date: timestamp("date").notNull(),
   description: text("description").notNull(),
   memo: text("memo"),
+  referenceNumber: text("reference_number"),
   status: journalEntryStatusEnum("status").notNull().default("DRAFT"),
   createdBy: text("created_by"),
   postedAt: timestamp("posted_at"),

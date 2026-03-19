@@ -56,7 +56,19 @@ async function ensureSchema() {
     `);
     console.log("Schema check: plaid_transaction_id columns OK");
   } catch (err: any) {
-    console.error("Schema migration error:", err.message);
+    console.error("Schema migration error (plaid cols):", err.message);
+  }
+  try {
+    await pool.query(`ALTER TYPE gl_source_type ADD VALUE IF NOT EXISTS 'MANUAL_JE'`);
+    console.log("Schema check: gl_source_type MANUAL_JE OK");
+  } catch (err: any) {
+    console.error("Schema migration error (gl_source_type):", err.message);
+  }
+  try {
+    await pool.query(`ALTER TABLE journal_entries ADD COLUMN IF NOT EXISTS reference_number TEXT`);
+    console.log("Schema check: journal_entries.reference_number OK");
+  } catch (err: any) {
+    console.error("Schema migration error (reference_number):", err.message);
   }
 }
 

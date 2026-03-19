@@ -21,6 +21,7 @@ import BankAccountsPage from "@/pages/bank-accounts";
 import BankRegisterPage from "@/pages/bank-register";
 import ReconciliationPage from "@/pages/reconciliation";
 import OpeningBalancePage from "@/pages/opening-balance";
+import JournalEntriesPage from "@/pages/journal-entries";
 import TrialBalancePage from "@/pages/trial-balance";
 import PeriodClosePage from "@/pages/period-close";
 import ReportsPage from "@/pages/reports";
@@ -63,6 +64,7 @@ function Router() {
       <Route path="/bank-register"><ProtectedRoute component={BankRegisterPage} /></Route>
       <Route path="/reconciliation"><ProtectedRoute component={ReconciliationPage} /></Route>
       <Route path="/opening-balance"><ProtectedRoute component={OpeningBalancePage} /></Route>
+      <Route path="/journal-entries"><ProtectedRoute component={JournalEntriesPage} /></Route>
       <Route path="/trial-balance"><ProtectedRoute component={TrialBalancePage} /></Route>
       <Route path="/period-close"><ProtectedRoute component={PeriodClosePage} /></Route>
       <Route path="/reports"><ProtectedRoute component={ReportsPage} /></Route>

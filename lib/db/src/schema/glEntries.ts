@@ -7,6 +7,7 @@ export const glSourceTypeEnum = pgEnum("gl_source_type", [
   "TRANSACTION",
   "JOURNAL_ENTRY",
   "OPENING_BALANCE",
+  "MANUAL_JE",
 ]);
 
 export const glEntries = pgTable("gl_entries", {
