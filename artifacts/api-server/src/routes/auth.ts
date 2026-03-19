@@ -310,4 +310,57 @@ router.post("/switch-org", requireAuth, async (req, res) => {
   }
 });
 
+// POST /auth/admin-login — dedicated platform admin login (email + password only, no company code)
+// Hard security: only accepts users with isPlatformAdmin = true
+router.post("/admin-login", async (req, res) => {
+  try {
+    const { email, password } = req.body ?? {};
+    if (!email || !password) {
+      return res.status(400).json({ error: "Email and password are required." });
+    }
+
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(and(eq(users.email, email.trim().toLowerCase()), eq(users.isPlatformAdmin, true)))
+      .limit(1);
+
+    if (!user) {
+      return res.status(401).json({
+        error: "ACCESS_DENIED",
+        message: "Platform Administrator credentials not recognized.",
+      });
+    }
+
+    const valid = await comparePassword(password, user.password);
+    if (!valid) {
+      return res.status(401).json({
+        error: "ACCESS_DENIED",
+        message: "Platform Administrator credentials not recognized.",
+      });
+    }
+
+    const [company] = user.companyId
+      ? await db.select().from(companies).where(eq(companies.id, user.companyId)).limit(1)
+      : [null];
+
+    const authUser: AuthUser = {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      companyId: company?.id ?? "",
+      companyName: company?.name ?? "Platform Admin",
+      companyCode: company?.companyCode ?? "ADMIN",
+      organizationType: company?.organizationType ?? "NONPROFIT",
+      isPlatformAdmin: true,
+    };
+
+    setCookieAndRespond(res, authUser);
+  } catch (err) {
+    console.error("Admin login error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 export default router;

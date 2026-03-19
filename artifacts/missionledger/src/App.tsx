@@ -28,6 +28,9 @@ import ReportsPage from "@/pages/reports";
 import MasterAdminPage from "@/pages/master-admin";
 import BillingPage from "@/pages/billing";
 import NotFound from "@/pages/not-found";
+import AdminCommandCenter from "@/pages/admin/index";
+import AdminLoginPage from "@/pages/admin/login";
+import AdminGlobalCoaPage from "@/pages/admin/global-coa";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -70,6 +73,10 @@ function Router() {
       <Route path="/reports"><ProtectedRoute component={ReportsPage} /></Route>
       <Route path="/master-admin"><ProtectedRoute component={MasterAdminPage} /></Route>
       <Route path="/billing"><ProtectedRoute component={BillingPage} /></Route>
+
+      <Route path="/admin/login" component={AdminLoginPage} />
+      <Route path="/admin/global-coa" component={AdminGlobalCoaPage} />
+      <Route path="/admin" component={AdminCommandCenter} />
 
       <Route component={NotFound} />
     </Switch>

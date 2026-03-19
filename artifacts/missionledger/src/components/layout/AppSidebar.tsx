@@ -181,18 +181,13 @@ export function AppSidebar() {
               Platform
             </h3>
             <div className="space-y-1">
-              <Link
-                href="/master-admin"
-                className={cn(
-                  "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200",
-                  location === "/master-admin"
-                    ? "bg-primary/10 text-primary"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                )}
+              <a
+                href={`${import.meta.env.BASE_URL.replace(/\/$/, "")}/admin`}
+                className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 text-muted-foreground hover:bg-muted hover:text-foreground"
               >
-                <Shield className={cn("w-5 h-5", location === "/master-admin" ? "text-primary" : "text-muted-foreground")} />
-                Admin Console
-              </Link>
+                <Shield className="w-5 h-5 text-muted-foreground" />
+                Admin Command Center
+              </a>
             </div>
           </div>
         )}
