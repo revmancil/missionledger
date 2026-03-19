@@ -244,7 +244,7 @@ function AddVendorModal({
             <Label className="text-xs">Vendor Name *</Label>
             <Input placeholder="e.g. Office Depot" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <Label className="text-xs">Email</Label>
               <Input placeholder="Optional" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
@@ -307,7 +307,7 @@ function AddAccountModal({
         </DialogHeader>
         <div className="space-y-3 py-2">
           {err && <p className="text-sm text-red-600">{err}</p>}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <Label className="text-xs">Account Number *</Label>
               <Input placeholder="e.g. 4150 or 8250" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} />
@@ -943,7 +943,7 @@ export default function BankRegisterPage() {
             </div>
 
             {/* Payee + Vendor */}
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <Label className="text-xs">Payee Name *</Label>
                 <Input
@@ -966,7 +966,7 @@ export default function BankRegisterPage() {
             </div>
 
             {/* Bank + Fund */}
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <Label className="text-xs">Bank Account</Label>
                 <Select

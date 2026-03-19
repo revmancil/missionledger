@@ -60,7 +60,7 @@ export default function VendorsPage() {
                 <label className="text-sm font-medium">Vendor Name</label>
                 <Input name="name" required />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-sm font-medium">Email</label>
                   <Input name="email" type="email" />
@@ -89,6 +89,7 @@ export default function VendorsPage() {
       </div>
 
       <div className="bg-card rounded-xl border border-border shadow-sm overflow-hidden">
+        <div className="overflow-x-auto">
         <Table>
           <TableHeader className="bg-muted/50">
             <TableRow>
@@ -131,6 +132,7 @@ export default function VendorsPage() {
             ))}
           </TableBody>
         </Table>
+        </div>
       </div>
     </AppLayout>
   );

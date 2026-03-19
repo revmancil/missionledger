@@ -198,16 +198,16 @@ export default function Dashboard() {
   return (
     <AppLayout title="Executive Dashboard">
       {/* ── Header ─────────────────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between -mt-2 mb-1">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 -mt-2 mb-1">
         <div>
-          <h2 className="text-2xl font-bold text-[hsl(210,60%,25%)]">Executive Dashboard</h2>
+          <h2 className="text-xl sm:text-2xl font-bold text-[hsl(210,60%,25%)]">Executive Dashboard</h2>
           <p className="text-sm text-muted-foreground mt-0.5">
             Financial overview · {format(new Date(), "MMMM yyyy")}
           </p>
         </div>
         <button
           onClick={load} disabled={loading}
-          className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 transition-colors"
+          className="self-start sm:self-auto flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 transition-colors"
         >
           <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
           Refresh

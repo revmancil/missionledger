@@ -40,7 +40,7 @@ export default function RegisterPage() {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1">
                 <label className="text-sm font-medium">Organization Name</label>
                 <Input required value={formData.organizationName} onChange={e => setFormData(p => ({...p, organizationName: e.target.value}))} />
@@ -64,7 +64,7 @@ export default function RegisterPage() {
               </select>
             </div>
 
-            <div className="border-t border-border pt-4 mt-4 grid grid-cols-2 gap-4">
+            <div className="border-t border-border pt-4 mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1">
                 <label className="text-sm font-medium">Admin Name</label>
                 <Input required value={formData.adminName} onChange={e => setFormData(p => ({...p, adminName: e.target.value}))} />

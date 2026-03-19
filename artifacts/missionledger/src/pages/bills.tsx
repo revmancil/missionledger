@@ -70,7 +70,7 @@ export default function BillsPage() {
                 <label className="text-sm font-medium">Description</label>
                 <Input name="description" required />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-sm font-medium">Amount ($)</label>
                   <Input name="amount" type="number" step="0.01" min="0" required />
@@ -105,6 +105,7 @@ export default function BillsPage() {
       </div>
 
       <div className="bg-card rounded-xl border border-border shadow-sm overflow-hidden">
+        <div className="overflow-x-auto">
         <Table>
           <TableHeader className="bg-muted/50">
             <TableRow>
@@ -149,6 +150,7 @@ export default function BillsPage() {
             ))}
           </TableBody>
         </Table>
+        </div>
       </div>
     </AppLayout>
   );

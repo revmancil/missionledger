@@ -45,7 +45,7 @@ export default function AccountsPage() {
 
   return (
     <AppLayout title="Chart of Accounts">
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-6">
         <p className="text-muted-foreground">Manage your General Ledger accounts.</p>
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
@@ -54,7 +54,7 @@ export default function AccountsPage() {
           <DialogContent>
             <DialogHeader><DialogTitle>New GL Account</DialogTitle></DialogHeader>
             <form onSubmit={handleSubmit} className="space-y-4 pt-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-sm font-medium">Account Code</label>
                   <Input name="code" required placeholder="e.g. 4000" />
@@ -93,6 +93,7 @@ export default function AccountsPage() {
                   <BookOpen className="w-4 h-4 text-muted-foreground" />
                   {type}
                 </div>
+                <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -116,6 +117,7 @@ export default function AccountsPage() {
                     ))}
                   </TableBody>
                 </Table>
+                </div>
               </div>
             );
           })

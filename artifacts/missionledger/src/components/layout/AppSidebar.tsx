@@ -4,7 +4,7 @@ import {
   FileText, HandHeart, LogOut, BarChart3, Building,
   Banknote, ClipboardList, RefreshCcw, Wand2, Scale, CalendarCheck,
   ChevronDown, ArrowLeftRight, Shield, AlertTriangle, CheckCircle2,
-  CreditCard, PenLine
+  CreditCard, PenLine, X,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
@@ -65,7 +65,12 @@ const navGroups = [
   }
 ];
 
-export function AppSidebar() {
+interface AppSidebarProps {
+  isOpen: boolean;
+  onClose: () => void;
+}
+
+export function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
   const [location] = useLocation();
   const { user, logout, myOrgs, switchOrg, isPlatformAdmin, isImpersonating, exitImpersonation } = useAuth();
   const [switching, setSwitching] = useState(false);
@@ -91,11 +96,15 @@ export function AppSidebar() {
     }
   };
 
-  return (
-    <aside className="w-64 border-r border-border bg-card flex flex-col hidden md:flex h-screen sticky top-0 shrink-0">
+  const handleNavClick = () => {
+    onClose();
+  };
+
+  const sidebarContent = (
+    <>
       {/* Impersonation Banner */}
       {isImpersonating && (
-        <div className="bg-amber-500 text-white px-3 py-2 text-xs font-medium flex items-center gap-2">
+        <div className="bg-amber-500 text-white px-3 py-2 text-xs font-medium flex items-center gap-2 shrink-0">
           <AlertTriangle className="w-3 h-3 shrink-0" />
           <span className="flex-1 truncate">Viewing as {user?.companyName}</span>
           <button
@@ -107,19 +116,26 @@ export function AppSidebar() {
         </div>
       )}
 
-      {/* Logo */}
-      <div className="p-6 border-b border-border flex items-center gap-3">
-        <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-primary-foreground shadow-sm">
+      {/* Logo + mobile close button */}
+      <div className="p-6 border-b border-border flex items-center gap-3 shrink-0">
+        <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-primary-foreground shadow-sm shrink-0">
           <Building className="w-5 h-5" />
         </div>
-        <div>
+        <div className="flex-1 min-w-0">
           <h2 className="font-display font-bold text-lg leading-none text-foreground">MissionLedger</h2>
         </div>
+        <button
+          onClick={onClose}
+          className="md:hidden p-1 rounded-md hover:bg-muted text-muted-foreground"
+          aria-label="Close menu"
+        >
+          <X className="w-5 h-5" />
+        </button>
       </div>
 
       {/* Org Switcher — only shown if user has multiple orgs */}
       {myOrgs.length > 1 && (
-        <div className="px-3 pt-3">
+        <div className="px-3 pt-3 shrink-0">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
@@ -186,6 +202,7 @@ export function AppSidebar() {
                   <Link
                     key={item.href}
                     href={item.href}
+                    onClick={handleNavClick}
                     className={cn(
                       "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200",
                       isActive
@@ -193,7 +210,7 @@ export function AppSidebar() {
                         : "text-muted-foreground hover:bg-muted hover:text-foreground"
                     )}
                   >
-                    <item.icon className={cn("w-5 h-5", isActive ? "text-primary" : "text-muted-foreground")} />
+                    <item.icon className={cn("w-5 h-5 shrink-0", isActive ? "text-primary" : "text-muted-foreground")} />
                     {item.label}
                   </Link>
                 );
@@ -204,9 +221,9 @@ export function AppSidebar() {
       </div>
 
       {/* User Footer */}
-      <div className="p-4 border-t border-border">
+      <div className="p-4 border-t border-border shrink-0">
         <div className="flex items-center gap-3 mb-4 px-2">
-          <div className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center border border-border">
+          <div className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center border border-border shrink-0">
             <span className="text-sm font-bold text-secondary-foreground">
               {user?.name?.charAt(0) || user?.email?.charAt(0) || "U"}
             </span>
@@ -230,6 +247,34 @@ export function AppSidebar() {
           Sign Out
         </Button>
       </div>
-    </aside>
+    </>
+  );
+
+  return (
+    <>
+      {/* Mobile: backdrop overlay */}
+      {isOpen && (
+        <div
+          className="fixed inset-0 bg-black/50 z-40 md:hidden"
+          onClick={onClose}
+        />
+      )}
+
+      {/* Desktop: sticky sidebar (always visible) */}
+      <aside className="hidden md:flex w-64 border-r border-border bg-card flex-col h-screen sticky top-0 shrink-0 z-30">
+        {sidebarContent}
+      </aside>
+
+      {/* Mobile: slide-over drawer */}
+      <aside
+        className={cn(
+          "md:hidden fixed inset-y-0 left-0 z-50 w-72 bg-card border-r border-border flex flex-col",
+          "transition-transform duration-300 ease-in-out",
+          isOpen ? "translate-x-0" : "-translate-x-full"
+        )}
+      >
+        {sidebarContent}
+      </aside>
+    </>
   );
 }
