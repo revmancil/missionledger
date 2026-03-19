@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { useLocation } from "wouter";
 import { Shield, Lock, AlertTriangle, Eye, EyeOff, Terminal } from "lucide-react";
 
@@ -11,18 +11,6 @@ export default function AdminLoginPage() {
   const [showPw, setShowPw]     = useState(false);
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState("");
-  const [checking, setChecking] = useState(true);
-
-  // If already logged in as platform admin, redirect straight to /admin
-  useEffect(() => {
-    fetch(`${BASE}/api/auth/me`, { credentials: "include" })
-      .then(r => r.ok ? r.json() : null)
-      .then(user => {
-        if (user?.isPlatformAdmin) setLocation("/admin");
-      })
-      .catch(() => {})
-      .finally(() => setChecking(false));
-  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -46,14 +34,6 @@ export default function AdminLoginPage() {
     } finally {
       setLoading(false);
     }
-  }
-
-  if (checking) {
-    return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
-        <div className="w-6 h-6 border-2 border-red-500 border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
   }
 
   return (
