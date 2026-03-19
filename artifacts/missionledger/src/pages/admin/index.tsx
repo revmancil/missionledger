@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useLocation } from "wouter";
 import { AdminLayout } from "@/components/admin/AdminLayout";
 import { format } from "date-fns";
@@ -93,10 +94,31 @@ function DbHealthIndicator({ plaidActive, stripeActive }: { plaidActive: boolean
   );
 }
 
-// ── Status Selector ────────────────────────────────────────────────────────────
+// ── Status Selector (portal-based, opens upward) ───────────────────────────────
 function StatusSelector({ org, onUpdate }: { org: OrgRow; onUpdate: () => void }) {
-  const [open, setOpen]     = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [open, setOpen]       = useState(false);
+  const [saving, setSaving]   = useState(false);
+  const [menuStyle, setMenuStyle] = useState<React.CSSProperties>({});
+  const btnRef = useRef<HTMLButtonElement>(null);
+
+  function openMenu() {
+    if (!btnRef.current) return;
+    const rect = btnRef.current.getBoundingClientRect();
+    const menuHeight = 120; // approx height of the 3-option menu
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const openUpward = spaceBelow < menuHeight + 8;
+
+    setMenuStyle({
+      position: "fixed",
+      width: 160,
+      zIndex: 9999,
+      right: window.innerWidth - rect.right,
+      ...(openUpward
+        ? { bottom: window.innerHeight - rect.top + 4 }
+        : { top: rect.bottom + 4 }),
+    });
+    setOpen(true);
+  }
 
   async function setStatus(newStatus: OrgStatus) {
     setOpen(false);
@@ -122,26 +144,37 @@ function StatusSelector({ org, onUpdate }: { org: OrgRow; onUpdate: () => void }
   ];
 
   return (
-    <div className="relative">
+    <>
       <button
-        onClick={() => setOpen(p => !p)}
+        ref={btnRef}
+        onClick={openMenu}
         disabled={saving}
         className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 border border-slate-700 transition-colors disabled:opacity-50"
       >
         {saving ? <RefreshCw className="h-3 w-3 animate-spin" /> : <ChevronDown className="h-3 w-3" />}
         Status
       </button>
-      {open && (
+
+      {open && createPortal(
         <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-full mt-1 z-50 w-40 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl overflow-hidden">
+          {/* Full-screen backdrop to catch outside clicks */}
+          <div
+            className="fixed inset-0"
+            style={{ zIndex: 9998 }}
+            onClick={() => setOpen(false)}
+          />
+          {/* Dropdown menu — rendered at body level, floats above everything */}
+          <div
+            style={menuStyle}
+            className="bg-slate-800 border border-slate-700 rounded-xl shadow-2xl overflow-hidden"
+          >
             {options.map(({ value, label, icon: Icon, color }) => (
               <button
                 key={value}
                 onClick={() => setStatus(value)}
                 disabled={org.status === value}
                 className={cn(
-                  "w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-300 hover:bg-slate-700 transition-colors",
+                  "w-full flex items-center gap-2 px-3 py-2.5 text-xs text-slate-300 hover:bg-slate-700 transition-colors",
                   org.status === value && "bg-slate-700 font-bold"
                 )}
               >
@@ -151,9 +184,10 @@ function StatusSelector({ org, onUpdate }: { org: OrgRow; onUpdate: () => void }
               </button>
             ))}
           </div>
-        </>
+        </>,
+        document.body
       )}
-    </div>
+    </>
   );
 }
 
