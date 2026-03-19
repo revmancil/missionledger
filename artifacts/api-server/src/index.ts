@@ -52,8 +52,9 @@ async function ensureSchema() {
   try {
     await pool.query(`
       ALTER TABLE bank_transactions ADD COLUMN IF NOT EXISTS plaid_transaction_id TEXT;
+      ALTER TABLE transactions ADD COLUMN IF NOT EXISTS plaid_transaction_id TEXT;
     `);
-    console.log("Schema check: bank_transactions.plaid_transaction_id OK");
+    console.log("Schema check: plaid_transaction_id columns OK");
   } catch (err: any) {
     console.error("Schema migration error:", err.message);
   }

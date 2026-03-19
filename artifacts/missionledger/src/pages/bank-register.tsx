@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { format, parseISO } from "date-fns";
+import { toast } from "sonner";
 import {
   Plus, ChevronDown, ChevronUp, CheckCircle, Circle,
   Ban, RefreshCw, Edit, Wallet, Scissors, Trash2, Search,
@@ -30,7 +31,7 @@ function apiFetch(url: string, init?: RequestInit) {
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-interface BankAccount { id: string; name: string; accountNumber: string; currentBalance: number; }
+interface BankAccount { id: string; name: string; accountNumber: string; currentBalance: number; isPlaidLinked?: boolean; plaidInstitutionName?: string; }
 interface ChartAccount { id: string; code: string; name: string; type: string; }
 interface Fund { id: string; name: string; fundType?: string; }
 const FUND_TYPE_SHORT: Record<string, string> = {
@@ -362,6 +363,7 @@ export default function BankRegisterPage() {
   const [deleteTarget, setDeleteTarget] = useState<Transaction | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [showAddVendor, setShowAddVendor] = useState(false);
   const [showAddAccount, setShowAddAccount] = useState(false);
   const [formError, setFormError] = useState("");
@@ -553,6 +555,24 @@ export default function BankRegisterPage() {
     await loadAll();
   }
 
+  async function handlePlaidSync(bankAccountId: string) {
+    setSyncing(true);
+    try {
+      const res = await apiFetch(`${BASE}api/plaid/sync/${bankAccountId}`, { method: "POST" });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Sync failed");
+      const msg = json.imported > 0
+        ? `Imported ${json.imported} new transaction${json.imported !== 1 ? "s" : ""}${json.skipped > 0 ? ` (${json.skipped} already existed)` : ""}`
+        : `All ${json.total} transactions already up to date`;
+      toast.success(msg);
+      await loadAll();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to sync transactions");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <AppLayout>
@@ -612,10 +632,24 @@ export default function BankRegisterPage() {
                 </button>
               ))}
             </div>
-            <button onClick={loadAll} disabled={loading}
-              className="ml-auto text-muted-foreground hover:text-foreground p-1 rounded" title="Refresh">
-              <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
-            </button>
+            <div className="ml-auto flex items-center gap-2">
+              {selectedBank !== "ALL" && selectedBankObj?.isPlaidLinked && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs text-blue-600 border-blue-200 hover:bg-blue-50"
+                  onClick={() => handlePlaidSync(selectedBank)}
+                  disabled={syncing || loading}
+                >
+                  <RefreshCw className={cn("h-3 w-3 mr-1", syncing && "animate-spin")} />
+                  {syncing ? "Syncing…" : `Sync ${selectedBankObj.plaidInstitutionName || "Bank"}`}
+                </Button>
+              )}
+              <button onClick={loadAll} disabled={loading}
+                className="text-muted-foreground hover:text-foreground p-1 rounded" title="Refresh">
+                <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
+              </button>
+            </div>
           </div>
 
           {selectedBankObj && (

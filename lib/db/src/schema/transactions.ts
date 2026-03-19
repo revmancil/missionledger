@@ -22,6 +22,7 @@ export const transactions = pgTable("transactions", {
   referenceNumber: text("reference_number"),
   fundId: text("fund_id"),
   journalEntryId: text("journal_entry_id"),
+  plaidTransactionId: text("plaid_transaction_id"),
   isVoid: boolean("is_void").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),

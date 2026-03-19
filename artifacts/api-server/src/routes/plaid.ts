@@ -6,7 +6,7 @@ import {
   Products,
   CountryCode,
 } from "plaid";
-import { db, bankAccounts, bankTransactions } from "@workspace/db";
+import { db, bankAccounts, transactions } from "@workspace/db";
 import { eq, and, inArray, count } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
 
@@ -116,11 +116,15 @@ router.post("/sync/:bankAccountId", requireAuth, requireAdmin, async (req, res) 
     const plaid = getPlaidClient();
 
     // If no transactions exist for this account yet, always do a full 90-day sync
-    // (handles case where a previous sync ran but failed to save, resetting plaidLastSyncedAt)
     const [{ value: existingCount }] = await db
       .select({ value: count() })
-      .from(bankTransactions)
-      .where(eq(bankTransactions.bankAccountId, bankAccountId));
+      .from(transactions)
+      .where(
+        and(
+          eq(transactions.bankAccountId, bankAccountId),
+          eq(transactions.companyId, companyId)
+        )
+      );
 
     const forceFullSync = Number(existingCount) === 0;
     const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
@@ -131,7 +135,7 @@ router.post("/sync/:bankAccountId", requireAuth, requireAdmin, async (req, res) 
     const endDate = new Date().toISOString().slice(0, 10);
 
     // Fetch all pages from Plaid
-    let allTransactions: any[] = [];
+    let allPlaidTx: any[] = [];
     let offset = 0;
     while (true) {
       const txResponse = await plaid.transactionsGet({
@@ -141,39 +145,41 @@ router.post("/sync/:bankAccountId", requireAuth, requireAdmin, async (req, res) 
         options: { count: 500, offset },
       });
       const batch = txResponse.data.transactions;
-      allTransactions = allTransactions.concat(batch);
-      if (allTransactions.length >= txResponse.data.total_transactions) break;
+      allPlaidTx = allPlaidTx.concat(batch);
+      if (allPlaidTx.length >= txResponse.data.total_transactions) break;
       offset += batch.length;
     }
 
-    // Deduplicate: skip any plaid transaction IDs already in the DB
-    const plaidIds = allTransactions.map((t) => t.transaction_id);
+    // Deduplicate: check plaid_transaction_id in the transactions table
+    const plaidIds = allPlaidTx.map((t) => t.transaction_id);
     const existing = plaidIds.length > 0
-      ? await db.select({ plaidTransactionId: bankTransactions.plaidTransactionId })
-          .from(bankTransactions)
+      ? await db
+          .select({ plaidTransactionId: (transactions as any).plaidTransactionId })
+          .from(transactions)
           .where(
             and(
-              eq(bankTransactions.bankAccountId, bankAccountId),
-              inArray(bankTransactions.plaidTransactionId as any, plaidIds)
+              eq(transactions.companyId, companyId),
+              eq(transactions.bankAccountId, bankAccountId),
+              inArray((transactions as any).plaidTransactionId, plaidIds)
             )
           )
       : [];
-    const existingIds = new Set(existing.map((e) => e.plaidTransactionId));
-    const newTransactions = allTransactions.filter((t) => !existingIds.has(t.transaction_id));
+    const existingIds = new Set(existing.map((e: any) => e.plaidTransactionId));
+    const newTx = allPlaidTx.filter((t) => !existingIds.has(t.transaction_id));
 
-    // Insert new transactions
+    // Insert into the transactions table (what the Bank Register reads)
     // Plaid: positive amount = debit (money out), negative = credit (money in)
-    if (newTransactions.length > 0) {
-      await db.insert(bankTransactions).values(
-        newTransactions.map((t) => ({
+    if (newTx.length > 0) {
+      await db.insert(transactions).values(
+        newTx.map((t) => ({
           companyId,
           bankAccountId,
           date: new Date(t.date),
-          description: t.name || t.merchant_name || "Plaid Transaction",
-          merchantName: t.merchant_name || null,
+          payee: t.merchant_name || t.name || "Plaid Import",
           amount: Math.abs(t.amount),
           type: t.amount >= 0 ? "DEBIT" : "CREDIT",
-          status: t.pending ? "PENDING" : "POSTED",
+          status: t.pending ? "UNCLEARED" : "UNCLEARED",
+          memo: t.name !== t.merchant_name ? t.name : null,
           plaidTransactionId: t.transaction_id,
         } as any))
       );
@@ -185,9 +191,9 @@ router.post("/sync/:bankAccountId", requireAuth, requireAdmin, async (req, res) 
     }).where(eq(bankAccounts.id, bankAccountId));
 
     res.json({
-      imported: newTransactions.length,
+      imported: newTx.length,
       skipped: existingIds.size,
-      total: allTransactions.length,
+      total: allPlaidTx.length,
       startDate,
       endDate,
     });
