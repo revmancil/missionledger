@@ -83,6 +83,9 @@ export async function getStripeSync(): Promise<StripeSync> {
         max: 2,
       },
       stripeSecretKey: secretKey,
+      ...(process.env.STRIPE_WEBHOOK_SECRET
+        ? { stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET }
+        : {}),
     });
   }
   return stripeSyncInstance;
