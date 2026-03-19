@@ -14,7 +14,7 @@ MissionLedger is a full-stack nonprofit financial management SaaS app for church
 - **Vendors**: Vendor management with contact info and tax ID
 - **Bills**: Accounts payable with partial payment tracking
 - **Pledges**: Multi-year pledge tracking with frequency and fulfillment status
-- **Bank Accounts**: Track checking/savings accounts with balances
+- **Bank Accounts**: Track checking/savings accounts with balances; each account can be linked to a real bank via Plaid for automated transaction sync
 - **Bank Register**: QuickBooks-style double-row transaction register — Row 1 (Date, Check#, Payee, Payment, Deposit, Balance, Status), Row 2 (Account/Category, Fund, Memo). Supports filtering by bank account and status, inline clear/void actions, running balance column, footer totals.
 - **Chart of Accounts (new)**: Dedicated `chart_of_accounts` table with 56 pre-seeded accounts: 4000-series Income (Individual Contributions, Grants, Membership Dues, etc.) and 8000-series Expense (Personnel, Occupancy, Program, Admin, Professional Services, Travel, Marketing, etc.). Auto-seeded per company on registration.
 - **Transactions**: Full `transactions` table for the bank register: soft-void only (no deletes), DEBIT/CREDIT types, UNCLEARED/CLEARED/RECONCILED/VOID statuses.
@@ -22,6 +22,8 @@ MissionLedger is a full-stack nonprofit financial management SaaS app for church
 - **Bank Reconciliation**: 4-phase module (history → setup → workspace → done); two-column cleared/uncleared table, live math footer, Difference badge, locks cleared transactions as RECONCILED
 - **Executive Dashboard**: KPI cards (Total Cash, Net Monthly Income, Budget %, Monthly Deposits), spending by category donut, 6-month income/expenses bar chart, budget tracker with over-budget alerts, recent activity feed
 - **Opening Balance Wizard**: Three-column wizard (Assets 1000s / Liabilities 2000s / Equity 3000s); accounting equation check Assets = Liabilities + Equity; Cash/Accrual toggle (Cash hides Liabilities column); creates a posted journal entry on finalize; stores `accountingMethod` on the company record; "Edit Balances" re-voids and replaces the prior entry
+- **Stripe Billing** (`/billing`): Subscription management page showing current plan status (TRIAL/ACTIVE/etc.) and three pricing tiers (Starter $19/mo, Professional $49/mo, Enterprise $99/mo). Checkout via Stripe Checkout sessions; billing portal for existing subscribers. Stripe products seeded via `src/seeds/stripe-products.ts`. Uses Replit native Stripe connector for credentials.
+- **Plaid Bank Linking**: Each bank account card on `/bank-accounts` has a "Link Bank via Plaid" button. On click, fetches a Plaid Link token (`POST /api/plaid/create-link-token`), opens Plaid Link modal, exchanges the public token (`POST /api/plaid/exchange-token`), stores `plaidAccessToken` + `plaidItemId` + `plaidInstitutionName` + `isPlaidLinked` on the bank account. Sync button (`POST /api/plaid/sync/:id`) fetches 90 days of transactions. Unlink via `DELETE /api/plaid/unlink/:id`. Uses sandbox credentials.
 - **Authentication**: Cookie-based JWT sessions with company code + email + password
 - **Multi-Tenant Architecture**: Every table uses `company_id` as the tenant firewall. All queries are filtered by `companyId` from the JWT. Application-level RLS is enforced on every route.
 - **Organization Users (`organization_users`)**: Join table enabling a single user to belong to multiple organizations. Used by the Org Switcher to let users switch context without re-logging in.

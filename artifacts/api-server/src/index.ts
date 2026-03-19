@@ -17,9 +17,10 @@ if (Number.isNaN(port) || port <= 0) {
 }
 
 async function initStripe() {
-  const secretKey = process.env.STRIPE_SECRET_KEY;
-  if (!secretKey) {
-    console.log("Stripe not configured — skipping Stripe initialization (STRIPE_SECRET_KEY not set)");
+  const hasConnector = !!process.env.REPLIT_CONNECTORS_HOSTNAME;
+  const hasFallbackKey = !!process.env.STRIPE_SECRET_KEY;
+  if (!hasConnector && !hasFallbackKey) {
+    console.log("Stripe not configured — skipping initialization (no connector or STRIPE_SECRET_KEY)");
     return;
   }
   const databaseUrl = process.env.DATABASE_URL!;

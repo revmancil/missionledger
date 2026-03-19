@@ -277,6 +277,7 @@ export default function BankAccountsPage() {
       toast.success("Bank account added successfully");
       setOpen(false);
       (e.target as HTMLFormElement).reset();
+      queryClient.invalidateQueries({ queryKey: ["/api/bank-accounts"] });
     } catch (err: any) {
       toast.error(err.message || "Failed to create bank account");
     }
