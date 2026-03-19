@@ -144,22 +144,25 @@ function PlaidLinkButton({ account, onSuccess }: { account: any; onSuccess: () =
 
 function PlaidLinkButtonWithToken({ account, onSuccess }: { account: any; onSuccess: () => void }) {
   const [linkToken, setLinkToken] = useState<string | null>(null);
-  const [ready, setReady] = useState(false);
+  const [tokenError, setTokenError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
 
-  const fetchToken = async () => {
-    try {
-      const res = await fetch("/api/plaid/create-link-token", {
-        method: "POST",
-        credentials: "include",
+  // Pre-fetch the token as soon as the card renders so it's ready on first click
+  useEffect(() => {
+    let cancelled = false;
+    if (account.isPlaidLinked) return;
+    fetch("/api/plaid/create-link-token", { method: "POST", credentials: "include" })
+      .then((res) => res.json())
+      .then((json) => {
+        if (cancelled) return;
+        if (json.linkToken) setLinkToken(json.linkToken);
+        else setTokenError(json.error || "Failed to get Plaid token");
+      })
+      .catch((err) => {
+        if (!cancelled) setTokenError(err.message || "Plaid unavailable");
       });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Failed to get link token");
-      setLinkToken(json.linkToken);
-    } catch (err: any) {
-      toast.error(err.message || "Plaid not configured — add PLAID_CLIENT_ID and PLAID_SECRET to enable bank linking.");
-    }
-  };
+    return () => { cancelled = true; };
+  }, [account.id, account.isPlaidLinked]);
 
   const onPlaidSuccess = useCallback(async (publicToken: string, metadata: any) => {
     try {
@@ -187,18 +190,17 @@ function PlaidLinkButtonWithToken({ account, onSuccess }: { account: any; onSucc
     onSuccess: onPlaidSuccess,
   });
 
-  useEffect(() => {
-    if (plaidReady && linkToken) {
-      openPlaid();
-    }
-  }, [plaidReady, linkToken, openPlaid]);
-
-  const handleConnect = async () => {
-    if (linkToken && plaidReady) {
-      openPlaid();
+  // Direct user-gesture click → open immediately (token already pre-fetched)
+  const handleConnect = () => {
+    if (tokenError) {
+      toast.error(tokenError);
       return;
     }
-    await fetchToken();
+    if (plaidReady) {
+      openPlaid();
+    } else {
+      toast.info("Plaid is still loading, please try again in a moment.");
+    }
   };
 
   const handleSync = async () => {
@@ -254,9 +256,14 @@ function PlaidLinkButtonWithToken({ account, onSuccess }: { account: any; onSucc
       size="sm"
       className="h-7 text-xs text-blue-600 border-blue-200 hover:bg-blue-50 hover:text-blue-700"
       onClick={handleConnect}
+      disabled={!plaidReady && !tokenError}
+      title={tokenError || (!plaidReady ? "Preparing Plaid…" : "Link your bank account")}
     >
-      <Link2 className="w-3 h-3 mr-1" />
-      Link Bank via Plaid
+      {!plaidReady && !tokenError ? (
+        <><RefreshCw className="w-3 h-3 mr-1 animate-spin" /> Preparing…</>
+      ) : (
+        <><Link2 className="w-3 h-3 mr-1" /> Link Bank via Plaid</>
+      )}
     </Button>
   );
 }

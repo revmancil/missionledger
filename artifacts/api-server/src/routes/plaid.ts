@@ -50,8 +50,22 @@ router.post("/create-link-token", requireAuth, async (req, res) => {
     });
     res.json({ linkToken: response.data.link_token });
   } catch (err: any) {
-    console.error("Plaid link token error:", err.message);
-    res.status(503).json({ error: "Plaid not configured. Please add PLAID_CLIENT_ID and PLAID_SECRET." });
+    const plaidError = err?.response?.data;
+    console.error("Plaid link token error:", {
+      message: err.message,
+      plaidErrorCode: plaidError?.error_code,
+      plaidErrorType: plaidError?.error_type,
+      plaidErrorMessage: plaidError?.error_message,
+      plaidDisplayMessage: plaidError?.display_message,
+      env: process.env.PLAID_ENV,
+      hasClientId: !!process.env.PLAID_CLIENT_ID,
+      hasSecret: !!process.env.PLAID_SECRET,
+    });
+    const userMessage = plaidError?.display_message
+      || plaidError?.error_message
+      || err.message
+      || "Plaid not configured";
+    res.status(503).json({ error: userMessage, plaidCode: plaidError?.error_code });
   }
 });
 
