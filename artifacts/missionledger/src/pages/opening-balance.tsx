@@ -28,6 +28,10 @@ interface CoaAccount {
   name: string;
   type: "ASSET" | "LIABILITY" | "EQUITY" | "INCOME" | "EXPENSE";
   isSystem: boolean;
+  isLinkedBankAccount?: boolean;
+  linkedBankName?: string;
+  linkedAccountType?: string;
+  isPlaidLinked?: boolean;
 }
 
 interface FundRecord {
@@ -51,14 +55,30 @@ function fmt(n: number) {
 function parseAmt(s: string) { return parseFloat(s.replace(/[^0-9.-]/g, "")) || 0; }
 function uid() { return crypto.randomUUID(); }
 
-/** Classify ASSET accounts as "bank/cash" or "other assets" by code convention */
+/**
+ * Classify ASSET accounts as "bank/cash" or "other assets".
+ * Priority: explicit bank-account annotation from the API (covers Plaid),
+ * then code range 1000-1099, then name keywords.
+ */
 function isBankAccount(acct: CoaAccount) {
+  if (acct.isLinkedBankAccount) return true;
   const code = parseInt(acct.code, 10);
   if (!isNaN(code) && code >= 1000 && code <= 1099) return true;
   const nameLower = acct.name.toLowerCase();
-  return nameLower.includes("cash") || nameLower.includes("bank") ||
-    nameLower.includes("checking") || nameLower.includes("savings") ||
-    nameLower.includes("money market") || nameLower.includes("petty cash");
+  return (
+    nameLower.includes("cash") ||
+    nameLower.includes("bank") ||
+    nameLower.includes("checking") ||
+    nameLower.includes("savings") ||
+    nameLower.includes("money market") ||
+    nameLower.includes("petty cash")
+  );
+}
+
+/** Friendly display label for an account in the dropdown */
+function accountLabel(acct: CoaAccount): string {
+  const displayName = acct.linkedBankName ?? acct.name;
+  return `${acct.code} - ${displayName}`;
 }
 
 // ── Method Toggle ─────────────────────────────────────────────────────────────
@@ -143,7 +163,7 @@ function RowTable({
                     <option value="">— Select account —</option>
                     {availableAccounts.map((a) => (
                       <option key={a.id} value={a.id}>
-                        {a.code} · {a.name}
+                        {accountLabel(a)}{a.isPlaidLinked ? " ⟳" : ""}
                       </option>
                     ))}
                   </select>
@@ -771,7 +791,7 @@ export default function OpeningBalancePage() {
           {tabs.map((tab) => (
             <button
               key={tab.key}
-              onClick={() => setActiveTab(tab.key)}
+              onClick={() => { setActiveTab(tab.key); if (allCoa.length === 0) load(); }}
               className={cn(
                 "flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-t-lg border-b-2 transition-all -mb-px",
                 activeTab === tab.key
@@ -799,8 +819,17 @@ export default function OpeningBalancePage() {
             <div className="space-y-3">
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Wallet className="h-4 w-4 text-blue-500" />
-                Checking, savings, petty cash — accounts in the 1000–1099 range
+                Checking, savings, petty cash — accounts in the 1000–1099 range or linked bank accounts
               </div>
+              {bankAccounts.length === 0 && !loading && (
+                <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-800">
+                  <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                  <span>
+                    No bank or cash accounts found in your Chart of Accounts.
+                    Go to <strong>Chart of Accounts</strong> and add a Bank or Cash account (code 1000–1099) first, or link a bank account via Plaid.
+                  </span>
+                </div>
+              )}
               <RowTable
                 rows={bankRows}
                 accounts={bankAccounts}
@@ -819,8 +848,17 @@ export default function OpeningBalancePage() {
             <div className="space-y-3">
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Building2 className="h-4 w-4 text-blue-500" />
-                Equipment, vehicles, buildings, receivables — 1100-series and above
+                Equipment, vehicles, buildings, receivables — excludes bank/cash accounts
               </div>
+              {otherAssets.length === 0 && !loading && (
+                <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-800">
+                  <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                  <span>
+                    No other asset accounts found. Go to <strong>Chart of Accounts</strong> and add accounts like
+                    Accounts Receivable (1100), Pledges Receivable (1200), or Property &amp; Equipment (1500).
+                  </span>
+                </div>
+              )}
               <RowTable
                 rows={assetRows}
                 accounts={otherAssets}

@@ -1,6 +1,6 @@
 import { Router } from "express";
-import { db, companies, chartOfAccounts, funds, journalEntries, journalEntryLines } from "@workspace/db";
-import { eq, and, asc, desc, like, inArray } from "drizzle-orm";
+import { db, companies, chartOfAccounts, bankAccounts, funds, journalEntries, journalEntryLines } from "@workspace/db";
+import { eq, and, asc, desc, like, inArray, isNull } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
 
 const router = Router();
@@ -73,11 +73,79 @@ router.get("/", requireAuth, async (req, res) => {
     const [company] = await db.select().from(companies).where(eq(companies.id, companyId));
     if (!company) return res.status(404).json({ error: "Company not found" });
 
-    const coa = await db
+    let coa = await db
       .select()
       .from(chartOfAccounts)
       .where(eq(chartOfAccounts.companyId, companyId))
       .orderBy(asc(chartOfAccounts.code));
+
+    // ── Bank account enrichment ──────────────────────────────────────────────
+    // Fetch all bank accounts for this company so we can:
+    // 1. Auto-create COA entries for Plaid-linked accounts missing a GL account
+    // 2. Annotate COA accounts with their linked bank account name
+    const companyBankAccounts = await db
+      .select()
+      .from(bankAccounts)
+      .where(and(eq(bankAccounts.companyId, companyId), eq(bankAccounts.isActive, true)));
+
+    // For any Plaid/bank account with no GL account, auto-create one
+    for (const ba of companyBankAccounts) {
+      if (ba.glAccountId) continue; // already linked
+
+      // Pick a free code in the 1010-1099 range for bank accounts
+      const usedCodes = new Set(coa.map((a) => a.code));
+      let newCode = "1010";
+      for (let n = 1010; n <= 1099; n += 10) {
+        const candidate = String(n);
+        if (!usedCodes.has(candidate)) { newCode = candidate; break; }
+      }
+
+      const [created] = await db
+        .insert(chartOfAccounts)
+        .values({
+          companyId,
+          code: newCode,
+          name: ba.name,
+          type: "ASSET",
+          description: `Bank account: ${ba.accountType}. bankAccountId:${ba.id}`,
+          isSystem: false,
+          isActive: true,
+          sortOrder: parseInt(newCode),
+        })
+        .returning();
+
+      // Link the bank account to its new COA entry
+      await db
+        .update(bankAccounts)
+        .set({ glAccountId: created.id, updatedAt: new Date() })
+        .where(eq(bankAccounts.id, ba.id));
+
+      // Refresh COA list to include the new account
+      ba.glAccountId = created.id;
+      coa.push(created);
+    }
+
+    // Build a lookup: coaId → bank account info (for annotation)
+    const coaToBankAccount = new Map<string, { bankName: string; accountType: string; isPlaid: boolean }>();
+    for (const ba of companyBankAccounts) {
+      if (ba.glAccountId) {
+        coaToBankAccount.set(ba.glAccountId, {
+          bankName: ba.plaidInstitutionName
+            ? `${ba.name} (${ba.plaidInstitutionName})`
+            : ba.name,
+          accountType: ba.accountType,
+          isPlaid: ba.isPlaidLinked,
+        });
+      }
+    }
+
+    // Annotate COA accounts with bank linkage info
+    const annotatedCoa = coa.map((a) => {
+      const bankInfo = coaToBankAccount.get(a.id);
+      return bankInfo
+        ? { ...a, isLinkedBankAccount: true, linkedBankName: bankInfo.bankName, linkedAccountType: bankInfo.accountType, isPlaidLinked: bankInfo.isPlaid }
+        : a;
+    });
 
     const activeFunds = await db
       .select()
@@ -135,9 +203,9 @@ router.get("/", requireAuth, async (req, res) => {
     }
 
     const grouped = {
-      ASSET:     coa.filter((a) => a.type === "ASSET"),
-      LIABILITY: coa.filter((a) => a.type === "LIABILITY"),
-      EQUITY:    coa.filter((a) => a.type === "EQUITY"),
+      ASSET:     annotatedCoa.filter((a) => a.type === "ASSET"),
+      LIABILITY: annotatedCoa.filter((a) => a.type === "LIABILITY"),
+      EQUITY:    annotatedCoa.filter((a) => a.type === "EQUITY"),
     };
 
     res.json({
