@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { format } from "date-fns";
 import {
-  CheckCircle2, AlertTriangle, Landmark, Scale, BookOpen,
-  RefreshCw, Lock, RotateCcw, Info, Plus, Trash2, Layers,
-  Building2, CreditCard, Wallet, ChevronRight, Calendar, X, TrendingUp,
+  CheckCircle2, AlertTriangle, RefreshCw, Lock, RotateCcw,
+  Info, Plus, Trash2, Layers, Calendar, X, ArrowLeftRight,
+  Search, ChevronDown,
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
@@ -20,17 +20,16 @@ const api = (url: string, init?: RequestInit) =>
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type Method = "CASH" | "ACCRUAL";
-type TabKey = "bank" | "assets" | "liabilities" | "equity";
+type EntryType = "DEBIT" | "CREDIT";
 
 interface CoaAccount {
   id: string;
   code: string;
   name: string;
   type: "ASSET" | "LIABILITY" | "EQUITY" | "INCOME" | "EXPENSE";
-  isSystem: boolean;
+  isSystem?: boolean;
   isLinkedBankAccount?: boolean;
   linkedBankName?: string;
-  linkedAccountType?: string;
   isPlaidLinked?: boolean;
 }
 
@@ -40,35 +39,185 @@ interface FundRecord {
   fundType?: string;
 }
 
-interface BalanceRow {
+interface GridRow {
   id: string;
   accountId: string;
   fundId: string;
   amount: string;
+  entryType: EntryType;
   memo: string;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-function fmt(n: number) {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
-}
-function parseAmt(s: string) { return parseFloat(s.replace(/[^0-9.-]/g, "")) || 0; }
-function uid() { return crypto.randomUUID(); }
+const fmt = (n: number) =>
+  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
 
-function isBankAccount(acct: CoaAccount) {
-  if (acct.isLinkedBankAccount) return true;
-  const code = parseInt(acct.code, 10);
-  if (!isNaN(code) && code >= 1000 && code <= 1099) return true;
-  const n = acct.name.toLowerCase();
+const uid = () => crypto.randomUUID();
+
+function defaultEntryType(acctType?: string): EntryType {
+  if (acctType === "ASSET" || acctType === "EXPENSE") return "DEBIT";
+  return "CREDIT";
+}
+
+function rowDebit(r: GridRow): number {
+  const n = parseFloat(r.amount) || 0;
+  if (n === 0) return 0;
+  return r.entryType === "DEBIT" ? Math.abs(n) : 0;
+}
+
+function rowCredit(r: GridRow): number {
+  const n = parseFloat(r.amount) || 0;
+  if (n === 0) return 0;
+  return r.entryType === "CREDIT" ? Math.abs(n) : 0;
+}
+
+const ACCT_TYPE_COLORS: Record<string, string> = {
+  ASSET:     "bg-blue-100 text-blue-800",
+  LIABILITY: "bg-orange-100 text-orange-800",
+  EQUITY:    "bg-violet-100 text-violet-800",
+  INCOME:    "bg-green-100 text-green-800",
+  EXPENSE:   "bg-red-100 text-red-800",
+};
+
+// ── Account Combobox ──────────────────────────────────────────────────────────
+function AccountCombobox({
+  accounts,
+  value,
+  onChange,
+  onAddNew,
+}: {
+  accounts: CoaAccount[];
+  value: string;
+  onChange: (id: string) => void;
+  onAddNew: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const selected = accounts.find((a) => a.id === value);
+
+  const filtered = useMemo(() => {
+    if (!query.trim()) return accounts.slice(0, 40);
+    const q = query.toLowerCase();
+    return accounts
+      .filter((a) =>
+        a.code.toLowerCase().includes(q) || a.name.toLowerCase().includes(q)
+      )
+      .slice(0, 40);
+  }, [accounts, query]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  const displayValue = open
+    ? query
+    : selected
+    ? `${selected.code} — ${selected.linkedBankName ?? selected.name}`
+    : "";
+
   return (
-    n.includes("cash") || n.includes("bank") || n.includes("checking") ||
-    n.includes("savings") || n.includes("money market") || n.includes("petty cash")
+    <div ref={containerRef} className="relative w-full min-w-[220px]">
+      <div className="relative">
+        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+        <input
+          ref={inputRef}
+          value={displayValue}
+          placeholder="Search account…"
+          className={cn(
+            "w-full h-9 pl-8 pr-8 text-sm border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[hsl(210,60%,40%)]",
+            !value ? "border-amber-300" : "border-gray-200"
+          )}
+          onFocus={() => { setOpen(true); setQuery(""); }}
+          onChange={(e) => setQuery(e.target.value)}
+          onBlur={() => setTimeout(() => setOpen(false), 150)}
+        />
+        {value && !open && (
+          <button
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            onMouseDown={(e) => { e.preventDefault(); onChange(""); }}
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        )}
+        {!value && (
+          <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+        )}
+      </div>
+
+      {open && (
+        <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-xl max-h-56 overflow-y-auto">
+          {filtered.map((a) => (
+            <button
+              key={a.id}
+              className={cn(
+                "w-full text-left px-3 py-2 text-sm hover:bg-blue-50 flex items-center gap-2 transition-colors",
+                a.id === value && "bg-blue-50"
+              )}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                onChange(a.id);
+                setOpen(false);
+                setQuery("");
+              }}
+            >
+              <span className="font-mono text-xs text-muted-foreground w-12 shrink-0">{a.code}</span>
+              <span className="flex-1 truncate">{a.linkedBankName ?? a.name}</span>
+              <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0", ACCT_TYPE_COLORS[a.type] ?? "bg-gray-100 text-gray-600")}>
+                {a.type}
+              </span>
+            </button>
+          ))}
+          {filtered.length === 0 && (
+            <div className="px-3 py-2 text-sm text-muted-foreground">No accounts match</div>
+          )}
+          <div className="border-t border-gray-100 px-3 py-2">
+            <button
+              className="text-sm text-[hsl(210,60%,35%)] font-semibold hover:underline flex items-center gap-1"
+              onMouseDown={(e) => { e.preventDefault(); setOpen(false); onAddNew(); }}
+            >
+              <Plus className="h-3.5 w-3.5" /> Add new account…
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
-function accountLabel(acct: CoaAccount): string {
-  const displayName = acct.linkedBankName ?? acct.name;
-  return `${acct.code} - ${displayName}`;
+// ── DR/CR Toggle ──────────────────────────────────────────────────────────────
+function DrCrToggle({ value, onChange }: { value: EntryType; onChange: (v: EntryType) => void }) {
+  return (
+    <div className="inline-flex rounded-lg border border-gray-200 overflow-hidden text-xs font-bold shrink-0">
+      <button
+        onClick={() => onChange("DEBIT")}
+        className={cn(
+          "px-2.5 py-1.5 transition-colors",
+          value === "DEBIT" ? "bg-blue-700 text-white" : "bg-white text-gray-400 hover:bg-gray-50"
+        )}
+      >
+        DR
+      </button>
+      <button
+        onClick={() => onChange("CREDIT")}
+        className={cn(
+          "px-2.5 py-1.5 transition-colors",
+          value === "CREDIT" ? "bg-emerald-700 text-white" : "bg-white text-gray-400 hover:bg-gray-50"
+        )}
+      >
+        CR
+      </button>
+    </div>
+  );
 }
 
 // ── Method Toggle ─────────────────────────────────────────────────────────────
@@ -80,7 +229,7 @@ function MethodToggle({ value, onChange }: { value: Method; onChange: (v: Method
           key={m}
           onClick={() => onChange(m)}
           className={cn(
-            "px-5 py-2 text-sm font-semibold transition-all duration-150",
+            "px-4 py-1.5 text-sm font-semibold transition-all duration-150",
             value === m
               ? m === "CASH"
                 ? "bg-[hsl(210,60%,25%)] text-white shadow-sm"
@@ -95,37 +244,29 @@ function MethodToggle({ value, onChange }: { value: Method; onChange: (v: Method
   );
 }
 
-// ── Add New Account Modal ─────────────────────────────────────────────────────
+// ── Add Account Modal ─────────────────────────────────────────────────────────
 function AddAccountModal({
   open,
   onClose,
-  defaultType,
-  defaultCodePrefix,
   onCreated,
 }: {
   open: boolean;
   onClose: () => void;
-  defaultType: "ASSET" | "LIABILITY";
-  defaultCodePrefix: string;
   onCreated: (account: CoaAccount) => void;
 }) {
-  const [code, setCode]         = useState(defaultCodePrefix);
-  const [name, setName]         = useState("");
-  const [type, setType]         = useState<"ASSET" | "LIABILITY">(defaultType);
-  const [saving, setSaving]     = useState(false);
-  const [error, setError]       = useState("");
+  const [code, setCode] = useState("");
+  const [name, setName] = useState("");
+  const [type, setType] = useState<"ASSET" | "LIABILITY" | "EQUITY">("ASSET");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
   const nameRef = useRef<HTMLInputElement>(null);
 
-  // Reset when opened
   useEffect(() => {
     if (open) {
-      setCode(defaultCodePrefix);
-      setName("");
-      setType(defaultType);
-      setError("");
+      setCode(""); setName(""); setType("ASSET"); setError("");
       setTimeout(() => nameRef.current?.focus(), 80);
     }
-  }, [open, defaultCodePrefix, defaultType]);
+  }, [open]);
 
   async function handleSave() {
     setError("");
@@ -136,19 +277,12 @@ function AddAccountModal({
       const res = await api(`${BASE}api/chart-of-accounts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          code: code.trim(),
-          name: name.trim(),
-          type,
-          sortOrder: parseInt(code.trim()) || 0,
-        }),
+        body: JSON.stringify({ code: code.trim(), name: name.trim(), type, sortOrder: parseInt(code.trim()) || 0 }),
       });
       const data = await res.json();
       if (!res.ok) { setError(data.error ?? "Failed to create account."); return; }
       onCreated(data as CoaAccount);
-    } finally {
-      setSaving(false);
-    }
+    } finally { setSaving(false); }
   }
 
   return (
@@ -159,61 +293,34 @@ function AddAccountModal({
             <Plus className="h-4 w-4" /> Add New Account
           </DialogTitle>
         </DialogHeader>
-
         <div className="space-y-4 py-1">
           {error && (
             <div className="flex items-center gap-2 p-2.5 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700">
               <AlertTriangle className="h-4 w-4 shrink-0" /> {error}
             </div>
           )}
-
           <div className="grid grid-cols-[1fr_2fr] gap-3">
             <div>
               <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Code</Label>
-              <Input
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                placeholder="e.g. 1050"
-                className="mt-1 h-9 font-mono"
-              />
+              <Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="e.g. 1050" className="mt-1 h-9 font-mono" />
             </div>
             <div>
               <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Account Name</Label>
-              <Input
-                ref={nameRef}
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Main Operating Checking"
-                className="mt-1 h-9"
-                onKeyDown={(e) => e.key === "Enter" && handleSave()}
-              />
+              <Input ref={nameRef} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Checking Account" className="mt-1 h-9" onKeyDown={(e) => e.key === "Enter" && handleSave()} />
             </div>
           </div>
-
           <div>
             <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Account Type</Label>
-            <select
-              value={type}
-              onChange={(e) => setType(e.target.value as "ASSET" | "LIABILITY")}
-              className="mt-1 w-full h-9 px-3 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[hsl(210,60%,40%)]"
-            >
-              <option value="ASSET">Asset</option>
-              <option value="LIABILITY">Liability</option>
+            <select value={type} onChange={(e) => setType(e.target.value as any)} className="mt-1 w-full h-9 px-3 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[hsl(210,60%,40%)]">
+              <option value="ASSET">Asset (1000–1999)</option>
+              <option value="LIABILITY">Liability (2000–2999)</option>
+              <option value="EQUITY">Equity / Net Assets (3000–3999)</option>
             </select>
           </div>
-
-          <p className="text-[11px] text-muted-foreground">
-            The new account will be added to your Chart of Accounts and immediately available in this wizard.
-          </p>
         </div>
-
         <DialogFooter className="gap-2">
           <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
-          <Button
-            onClick={handleSave}
-            disabled={saving || !code.trim() || !name.trim()}
-            className="bg-[hsl(210,60%,25%)] hover:bg-[hsl(210,60%,20%)] text-white gap-2"
-          >
+          <Button onClick={handleSave} disabled={saving || !code.trim() || !name.trim()} className="bg-[hsl(210,60%,25%)] hover:bg-[hsl(210,60%,20%)] text-white gap-2">
             {saving ? <><RefreshCw className="h-4 w-4 animate-spin" /> Saving…</> : <><Plus className="h-4 w-4" /> Add Account</>}
           </Button>
         </DialogFooter>
@@ -222,228 +329,50 @@ function AddAccountModal({
   );
 }
 
-// ── Row Table ─────────────────────────────────────────────────────────────────
-function RowTable({
-  rows, accounts, funds, defaultFundId, accountType,
-  onAddRow, onUpdateRow, onDeleteRow,
-  onSelectAddNew,
-  emptyLabel,
-  accountColLabel,
-  amountColLabel,
-}: {
-  rows: BalanceRow[];
-  accounts: CoaAccount[];
-  funds: FundRecord[];
-  defaultFundId: string;
-  accountType: "ASSET" | "LIABILITY";
-  onAddRow: () => void;
-  onUpdateRow: (id: string, field: keyof BalanceRow, val: string) => void;
-  onDeleteRow: (id: string) => void;
-  onSelectAddNew: (rowId: string) => void;
-  emptyLabel: string;
-  accountColLabel: string;
-  amountColLabel: string;
-}) {
-  const usedAccountIds = new Set(rows.map((r) => r.accountId).filter(Boolean));
-
-  return (
-    <div className="rounded-xl border border-gray-200 overflow-hidden">
-      {/* Table header */}
-      <div className="grid grid-cols-[2.2fr_1.4fr_1.2fr_1fr_auto] gap-0 bg-gray-50 border-b">
-        <div className="px-4 py-2.5 text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">{accountColLabel}</div>
-        <div className="px-4 py-2.5 text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Fund</div>
-        <div className="px-4 py-2.5 text-[10px] font-semibold text-muted-foreground uppercase tracking-wide text-right">{amountColLabel}</div>
-        <div className="px-4 py-2.5 text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Memo</div>
-        <div className="px-4 py-2.5 w-10" />
-      </div>
-
-      {/* Rows */}
-      {rows.length === 0 ? (
-        <div className="px-5 py-8 text-center text-sm text-muted-foreground italic">{emptyLabel}</div>
-      ) : (
-        <div className="divide-y divide-gray-50">
-          {rows.map((row) => {
-            const availableAccounts = accounts.filter(
-              (a) => !usedAccountIds.has(a.id) || a.id === row.accountId
-            );
-            const hasAmount = parseAmt(row.amount) > 0;
-            const hasFund   = !!row.fundId;
-            const rowValid  = hasAmount && hasFund && !!row.accountId;
-
-            return (
-              <div
-                key={row.id}
-                className={cn(
-                  "grid grid-cols-[2.2fr_1.4fr_1.2fr_1fr_auto] gap-0 items-center px-0 py-1.5 group",
-                  rowValid ? "bg-white" : "bg-amber-50/30"
-                )}
-              >
-                {/* Account — native select with "+ Add New" sentinel option */}
-                <div className="px-3">
-                  <select
-                    value={row.accountId}
-                    onChange={(e) => {
-                      if (e.target.value === "__add_new__") {
-                        e.target.value = row.accountId; // reset visual selection
-                        onSelectAddNew(row.id);
-                      } else {
-                        onUpdateRow(row.id, "accountId", e.target.value);
-                      }
-                    }}
-                    className="w-full h-8 text-sm border border-gray-200 rounded-md px-2 bg-white focus:outline-none focus:ring-1 focus:ring-[hsl(210,60%,40%)]"
-                  >
-                    <option value="">— Select account —</option>
-                    <option value="__add_new__">+ Add New Account…</option>
-                    {availableAccounts.length > 0 && (
-                      <option disabled>────────────────</option>
-                    )}
-                    {availableAccounts.map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {accountLabel(a)}{a.isPlaidLinked ? " ⟳" : ""}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Fund */}
-                <div className="px-2">
-                  <select
-                    value={row.fundId}
-                    onChange={(e) => onUpdateRow(row.id, "fundId", e.target.value)}
-                    className={cn(
-                      "w-full h-8 text-sm border rounded-md px-2 bg-white focus:outline-none focus:ring-1 focus:ring-violet-400",
-                      !row.fundId ? "border-amber-300" : "border-gray-200"
-                    )}
-                  >
-                    <option value="">— Select fund —</option>
-                    {funds.map((f) => (
-                      <option key={f.id} value={f.id}>{f.name}</option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Amount */}
-                <div className="px-2">
-                  <div className="relative">
-                    <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground text-sm pointer-events-none">$</span>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      placeholder="0.00"
-                      value={row.amount}
-                      onChange={(e) => onUpdateRow(row.id, "amount", e.target.value)}
-                      className={cn(
-                        "pl-6 h-8 text-sm text-right font-mono tabular-nums",
-                        hasAmount ? "border-blue-300 bg-white" : ""
-                      )}
-                    />
-                  </div>
-                </div>
-
-                {/* Memo */}
-                <div className="px-2">
-                  <Input
-                    type="text"
-                    placeholder="Optional…"
-                    value={row.memo}
-                    onChange={(e) => onUpdateRow(row.id, "memo", e.target.value)}
-                    className="h-8 text-sm"
-                  />
-                </div>
-
-                {/* Delete */}
-                <div className="px-2 flex justify-center">
-                  <button
-                    onClick={() => onDeleteRow(row.id)}
-                    className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity p-1 rounded"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Add Row footer */}
-      <div className="border-t bg-gray-50 px-4 py-2 flex items-center justify-between">
-        <button
-          onClick={onAddRow}
-          className="flex items-center gap-1.5 text-sm text-[hsl(210,60%,35%)] hover:text-[hsl(210,60%,25%)] font-medium transition-colors"
-        >
-          <Plus className="h-3.5 w-3.5" />
-          Add row
-        </button>
-        {rows.length > 0 && (
-          <span className="text-sm font-semibold tabular-nums text-foreground">
-            {fmt(rows.reduce((s, r) => s + parseAmt(r.amount), 0))}
-          </span>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ── Confirmation Modal ─────────────────────────────────────────────────────────
+// ── Confirm Modal ─────────────────────────────────────────────────────────────
 function ConfirmModal({
-  open, onClose, onConfirm, saving, error,
-  bankRows, assetRows, liabilityRows,
-  bankAccounts, allAssets, liabilityAccounts,
-  funds, asOfDate, method,
+  open,
+  onClose,
+  onConfirm,
+  saving,
+  error,
+  rows,
+  allCoa,
+  funds,
+  asOfDate,
+  method,
 }: {
   open: boolean;
   onClose: () => void;
   onConfirm: () => void;
   saving: boolean;
   error: string;
-  bankRows: BalanceRow[];
-  assetRows: BalanceRow[];
-  liabilityRows: BalanceRow[];
-  bankAccounts: CoaAccount[];
-  allAssets: CoaAccount[];
-  liabilityAccounts: CoaAccount[];
+  rows: GridRow[];
+  allCoa: CoaAccount[];
   funds: FundRecord[];
   asOfDate: string;
   method: Method;
 }) {
-  const acctMap = Object.fromEntries([...bankAccounts, ...allAssets, ...liabilityAccounts].map((a) => [a.id, a]));
+  const acctMap = Object.fromEntries(allCoa.map((a) => [a.id, a]));
   const fundMap = Object.fromEntries(funds.map((f) => [f.id, f]));
-
-  const allAssetRows = [...bankRows, ...assetRows];
-  const totalAssets      = allAssetRows.reduce((s, r) => s + parseAmt(r.amount), 0);
-  const totalLiabilities = liabilityRows.reduce((s, r) => s + parseAmt(r.amount), 0);
-  const totalNetAssets   = totalAssets - totalLiabilities;
-
-  const fundIds = [...new Set([...allAssetRows, ...liabilityRows].map((r) => r.fundId).filter(Boolean))];
-  const fundSummary = fundIds.map((fid) => {
-    const fa = allAssetRows.filter((r) => r.fundId === fid).reduce((s, r) => s + parseAmt(r.amount), 0);
-    const fl = liabilityRows.filter((r) => r.fundId === fid).reduce((s, r) => s + parseAmt(r.amount), 0);
-    return { fund: fundMap[fid], assets: fa, liabilities: fl, netAssets: fa - fl };
-  });
-
-  const allRows = [
-    ...allAssetRows.map((r) => ({ ...r, accountType: "ASSET" as const })),
-    ...liabilityRows.map((r) => ({ ...r, accountType: "LIABILITY" as const })),
-  ].filter((r) => parseAmt(r.amount) > 0 && r.accountId && r.fundId);
+  const active = rows.filter((r) => parseFloat(r.amount) > 0 && r.accountId && r.fundId);
+  const totalDebits = active.reduce((s, r) => s + rowDebit(r), 0);
+  const totalCredits = active.reduce((s, r) => s + rowCredit(r), 0);
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="text-[hsl(210,60%,25%)]">Confirm Opening Balances</DialogTitle>
+          <DialogTitle className="flex items-center gap-2 text-[hsl(210,60%,25%)]">
+            <ArrowLeftRight className="h-5 w-5" /> Review Opening Balance Entry
+          </DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-4 py-2">
-          <div className="flex items-start gap-3 p-3 rounded-xl bg-amber-50 border border-amber-200 text-sm text-amber-800">
-            <Info className="h-4 w-4 shrink-0 mt-0.5" />
-            <span>
-              You are about to establish <strong>{fmt(totalAssets)}</strong> in Assets
-              {totalLiabilities > 0 && <> and <strong>{fmt(totalLiabilities)}</strong> in Liabilities</>}
-              {" "}across <strong>{fundIds.length} fund{fundIds.length !== 1 ? "s" : ""}</strong>.
-              A journal entry will be posted and <strong>cannot be edited</strong> (only replaced).
-            </span>
+        <div className="space-y-4 py-1">
+          <div className="flex flex-wrap gap-4 text-sm">
+            <div><span className="text-muted-foreground">Date:</span> <strong>{asOfDate ? format(new Date(asOfDate), "MMMM d, yyyy") : "—"}</strong></div>
+            <div><span className="text-muted-foreground">Method:</span> <strong>{method === "CASH" ? "Cash Basis" : "Accrual Basis"}</strong></div>
+            <div><span className="text-muted-foreground">Lines:</span> <strong>{active.length}</strong></div>
           </div>
 
           {error && (
@@ -452,110 +381,64 @@ function ConfirmModal({
             </div>
           )}
 
-          {/* Fund breakdown */}
           <div className="rounded-xl border border-gray-200 overflow-hidden">
-            <div className="px-4 py-2.5 bg-gray-50 border-b">
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
-                <Layers className="h-3.5 w-3.5 text-violet-500" /> Fund Summary
-              </p>
-            </div>
-            <div className="divide-y">
-              {fundSummary.map(({ fund, assets, liabilities, netAssets }) => (
-                <div key={fund?.id} className="px-4 py-2.5 flex items-center justify-between text-sm">
-                  <span className="font-medium">{fund?.name ?? "Unknown Fund"}</span>
-                  <div className="flex items-center gap-6 text-right">
-                    {assets > 0 && <span className="text-blue-700">Assets {fmt(assets)}</span>}
-                    {liabilities > 0 && <span className="text-orange-700">Liabilities {fmt(liabilities)}</span>}
-                    <span className={cn("font-semibold", netAssets >= 0 ? "text-violet-700" : "text-red-600")}>
-                      Net {fmt(netAssets)}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div className="px-4 py-2.5 bg-gray-50 border-t flex items-center justify-between text-sm font-bold">
-              <span>Total Net Assets</span>
-              <span className={cn("tabular-nums", totalNetAssets >= 0 ? "text-violet-700" : "text-red-600")}>{fmt(totalNetAssets)}</span>
-            </div>
-          </div>
-
-          {/* JE Preview */}
-          <div className="rounded-xl border border-gray-200 overflow-hidden">
-            <div className="px-4 py-2.5 bg-[hsl(210,40%,97%)] border-b flex items-center justify-between">
-              <p className="text-xs font-semibold text-[hsl(210,60%,25%)]">Journal Entry Preview</p>
-              <span className="text-[10px] bg-amber-100 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-full font-semibold">
-                As of {asOfDate ? format(new Date(asOfDate), "MMM d, yyyy") : "—"}
-              </span>
-            </div>
-            <table className="w-full text-xs">
-              <thead className="bg-gray-50 border-b">
-                <tr>
-                  <th className="text-left px-4 py-2 font-semibold text-muted-foreground uppercase tracking-wide">Account</th>
-                  <th className="text-left px-4 py-2 font-semibold text-muted-foreground uppercase tracking-wide">Fund</th>
-                  <th className="text-right px-4 py-2 font-semibold text-muted-foreground uppercase tracking-wide w-24">Debit</th>
-                  <th className="text-right px-4 py-2 font-semibold text-muted-foreground uppercase tracking-wide w-24">Credit</th>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-200">
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Account</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Fund</th>
+                  <th className="text-right px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide w-28">Debit</th>
+                  <th className="text-right px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide w-28">Credit</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {allRows.map((row) => {
+                {active.map((row) => {
                   const acct = acctMap[row.accountId];
                   const fund = fundMap[row.fundId];
-                  const amt  = parseAmt(row.amount);
-                  const isAsset = row.accountType === "ASSET";
+                  const debit = rowDebit(row);
+                  const credit = rowCredit(row);
                   return (
-                    <React.Fragment key={row.id}>
-                      <tr className={isAsset ? "bg-blue-50/20" : "bg-orange-50/20"}>
-                        <td className="px-4 py-1.5">
-                          <span className="font-mono text-muted-foreground mr-1.5">{acct?.code}</span>
-                          {acct?.name ?? "—"}
-                        </td>
-                        <td className="px-4 py-1.5 text-violet-600 text-[11px]">{fund?.name}</td>
-                        <td className="px-4 py-1.5 text-right tabular-nums font-semibold text-blue-700">
-                          {isAsset ? fmt(amt) : "—"}
-                        </td>
-                        <td className="px-4 py-1.5 text-right tabular-nums font-semibold text-orange-700">
-                          {!isAsset ? fmt(amt) : "—"}
-                        </td>
-                      </tr>
-                      <tr className="bg-violet-50/20">
-                        <td className="px-4 py-1.5 pl-8 text-muted-foreground italic text-[11px]">
-                          Net Assets — {fund?.name ?? "Fund"}
-                          <span className="ml-1.5 text-violet-400">(auto)</span>
-                        </td>
-                        <td className="px-4 py-1.5 text-violet-600 text-[11px]">{fund?.name}</td>
-                        <td className="px-4 py-1.5 text-right tabular-nums text-muted-foreground">
-                          {!isAsset ? fmt(amt) : "—"}
-                        </td>
-                        <td className="px-4 py-1.5 text-right tabular-nums font-semibold text-violet-700">
-                          {isAsset ? fmt(amt) : "—"}
-                        </td>
-                      </tr>
-                    </React.Fragment>
+                    <tr key={row.id} className="hover:bg-gray-50/50">
+                      <td className="px-4 py-2.5">
+                        <span className="font-mono text-xs text-muted-foreground mr-2">{acct?.code}</span>
+                        <span className="font-medium">{acct?.linkedBankName ?? acct?.name ?? "—"}</span>
+                        {row.memo && <div className="text-xs text-muted-foreground mt-0.5 italic">{row.memo}</div>}
+                      </td>
+                      <td className="px-4 py-2.5 text-muted-foreground">{fund?.name ?? "—"}</td>
+                      <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-blue-700">
+                        {debit > 0 ? fmt(debit) : ""}
+                      </td>
+                      <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-emerald-700">
+                        {credit > 0 ? fmt(credit) : ""}
+                      </td>
+                    </tr>
                   );
                 })}
               </tbody>
-              <tfoot className="border-t-2 border-gray-200 bg-gray-50">
-                <tr>
-                  <td colSpan={2} className="px-4 py-2 font-bold text-sm">Totals</td>
-                  <td className="px-4 py-2 text-right font-bold tabular-nums text-blue-700">{fmt(totalAssets * 2)}</td>
-                  <td className="px-4 py-2 text-right font-bold tabular-nums text-violet-700">{fmt(totalAssets * 2)}</td>
+              <tfoot>
+                <tr className="border-t-2 border-gray-200 bg-gray-50 font-bold">
+                  <td className="px-4 py-2.5 text-sm" colSpan={2}>Total</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums text-blue-700">{fmt(totalDebits)}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums text-emerald-700">{fmt(totalCredits)}</td>
                 </tr>
               </tfoot>
             </table>
+          </div>
+
+          <div className="flex items-center gap-2 p-3 rounded-lg bg-blue-50 border border-blue-100 text-sm text-blue-800">
+            <Info className="h-4 w-4 shrink-0" />
+            This will post journal entry <strong>{active.length} lines</strong> to the General Ledger with
+            source type <code className="bg-blue-100 px-1 rounded text-xs">OPENING_BALANCE</code>.
+            Any existing opening balance entry will be voided and replaced.
           </div>
         </div>
 
         <DialogFooter className="gap-2">
           <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
-          <Button
-            onClick={onConfirm}
-            disabled={saving}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2 px-6"
-          >
+          <Button onClick={onConfirm} disabled={saving} className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2 min-w-[160px]">
             {saving
               ? <><RefreshCw className="h-4 w-4 animate-spin" /> Posting…</>
-              : <><Lock className="h-4 w-4" /> Confirm & Post Entry</>
-            }
+              : <><CheckCircle2 className="h-4 w-4" /> Post Opening Balances</>}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -564,143 +447,110 @@ function ConfirmModal({
 }
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
-type Phase = "wizard" | "done";
-
-interface AddAccountModalState {
-  rowId: string;
-  tab: TabKey;
-  accountType: "ASSET" | "LIABILITY";
-  defaultCodePrefix: string;
-}
-
 export default function OpeningBalancePage() {
   const [loading, setLoading]   = useState(true);
   const [saving, setSaving]     = useState(false);
   const [error, setError]       = useState("");
-  const [phase, setPhase]       = useState<Phase>("wizard");
+  const [phase, setPhase]       = useState<"wizard" | "done">("wizard");
   const [method, setMethod]     = useState<Method>("CASH");
   const [asOfDate, setAsOfDate] = useState(format(new Date(), "yyyy-MM-dd"));
-  const [activeTab, setActiveTab] = useState<TabKey>("bank");
   const [defaultFundId, setDefaultFundId] = useState("");
   const [showConfirm, setShowConfirm] = useState(false);
+  const [showAddAccount, setShowAddAccount] = useState(false);
+  const [addAccountTargetRowId, setAddAccountTargetRowId] = useState<string | null>(null);
 
-  const [allCoa, setAllCoa]         = useState<CoaAccount[]>([]);
-  const [funds, setFunds]           = useState<FundRecord[]>([]);
+  const [allCoa, setAllCoa]   = useState<CoaAccount[]>([]);
+  const [funds, setFunds]     = useState<FundRecord[]>([]);
   const [existingEntryId, setExistingEntryId] = useState<string | null>(null);
-  const [createdEntry, setCreatedEntry] = useState<any>(null);
+  const [createdEntry, setCreatedEntry] = useState<any | null>(null);
 
-  // Row state per tab
-  const [bankRows, setBankRows]           = useState<BalanceRow[]>([]);
-  const [assetRows, setAssetRows]         = useState<BalanceRow[]>([]);
-  const [liabilityRows, setLiabilityRows] = useState<BalanceRow[]>([]);
+  const [rows, setRows] = useState<GridRow[]>([]);
 
-  // Add New Account modal state
-  const [addAcctModal, setAddAcctModal] = useState<AddAccountModalState | null>(null);
-
-  // ── Derived account lists ──────────────────────────────────────────────────
-  const bankAccounts   = useMemo(() => allCoa.filter((a) => a.type === "ASSET" && isBankAccount(a)), [allCoa]);
-  const otherAssets    = useMemo(() => allCoa.filter((a) => a.type === "ASSET" && !isBankAccount(a)), [allCoa]);
-  const liabilityAccts = useMemo(() => allCoa.filter((a) => a.type === "LIABILITY"), [allCoa]);
-
-  // ── Load ──────────────────────────────────────────────────────────────────
+  // ── Load ────────────────────────────────────────────────────────────────────
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const res = await api(`${BASE}api/opening-balance`);
       if (!res.ok) return;
       const data = await res.json();
+
       setMethod(data.accountingMethod ?? "CASH");
-      setAllCoa([
-        ...(data.coa?.ASSET ?? []),
-        ...(data.coa?.LIABILITY ?? []),
-        ...(data.coa?.EQUITY ?? []),
-      ]);
+      setAllCoa(data.coa ?? []);
       setFunds(data.funds ?? []);
       setExistingEntryId(data.openingBalanceEntryId ?? null);
       if (data.openingBalanceDate) setAsOfDate(data.openingBalanceDate.slice(0, 10));
 
-      if ((data.funds ?? []).length > 0 && !defaultFundId) {
-        setDefaultFundId(data.funds[0].id);
-      }
+      const firstFundId = (data.funds ?? [])[0]?.id ?? "";
+      if (firstFundId && !defaultFundId) setDefaultFundId(firstFundId);
 
       if (data.existingRows?.length) {
-        const bankCoaIds = new Set(
-          [...(data.coa?.ASSET ?? [])].filter(isBankAccount).map((a: CoaAccount) => a.id)
-        );
-        const newBankRows: BalanceRow[] = [];
-        const newAssetRows: BalanceRow[] = [];
-        const newLiabilityRows: BalanceRow[] = [];
-
-        for (const row of data.existingRows) {
-          const entry: BalanceRow = {
-            id: uid(),
-            accountId: row.accountId,
-            fundId: row.fundId ?? "",
-            amount: String(row.amount),
-            memo: row.memo ?? "",
-          };
-          if (row.accountType === "ASSET") {
-            if (bankCoaIds.has(row.accountId)) newBankRows.push(entry);
-            else newAssetRows.push(entry);
-          } else if (row.accountType === "LIABILITY") {
-            newLiabilityRows.push(entry);
-          }
-        }
-        if (newBankRows.length) setBankRows(newBankRows);
-        if (newAssetRows.length) setAssetRows(newAssetRows);
-        if (newLiabilityRows.length) setLiabilityRows(newLiabilityRows);
-        if (data.openingBalanceEntryId) setPhase("wizard");
+        const reconstructed: GridRow[] = data.existingRows.map((r: any) => ({
+          id: uid(),
+          accountId: r.accountId ?? "",
+          fundId: r.fundId ?? firstFundId,
+          amount: String(r.amount ?? ""),
+          entryType: r.entryType ?? "DEBIT",
+          memo: r.memo ?? "",
+        }));
+        setRows(reconstructed);
+      } else {
+        setRows([
+          { id: uid(), accountId: "", fundId: firstFundId, amount: "", entryType: "DEBIT", memo: "" },
+          { id: uid(), accountId: "", fundId: firstFundId, amount: "", entryType: "CREDIT", memo: "" },
+        ]);
       }
     } finally { setLoading(false); }
   }, []);
 
   useEffect(() => { load(); }, [load]);
 
-  // ── Row operations ────────────────────────────────────────────────────────
-  function makeNewRow(): BalanceRow {
-    return { id: uid(), accountId: "", fundId: defaultFundId, amount: "", memo: "" };
+  // ── Row Operations ──────────────────────────────────────────────────────────
+  function makeNewRow(): GridRow {
+    return { id: uid(), accountId: "", fundId: defaultFundId, amount: "", entryType: "DEBIT", memo: "" };
   }
 
-  function addRow(tab: TabKey) {
-    const row = makeNewRow();
-    if (tab === "bank") setBankRows((r) => [...r, row]);
-    else if (tab === "assets") setAssetRows((r) => [...r, row]);
-    else setLiabilityRows((r) => [...r, row]);
+  function addRow() { setRows((prev) => [...prev, makeNewRow()]); }
+  function deleteRow(id: string) { setRows((prev) => { if (prev.length <= 2) return prev; return prev.filter((r) => r.id !== id); }); }
+
+  function updateRow(id: string, patch: Partial<Omit<GridRow, "id">>) {
+    setRows((prev) => prev.map((r) => r.id === id ? { ...r, ...patch } : r));
   }
 
-  function updateRow(tab: TabKey, id: string, field: keyof BalanceRow, val: string) {
-    const updater = (rows: BalanceRow[]) =>
-      rows.map((r) => r.id === id ? { ...r, [field]: val } : r);
-    if (tab === "bank") setBankRows(updater);
-    else if (tab === "assets") setAssetRows(updater);
-    else setLiabilityRows(updater);
+  function handleAccountSelect(rowId: string, accountId: string) {
+    const acct = allCoa.find((a) => a.id === accountId);
+    const entryType = defaultEntryType(acct?.type);
+    updateRow(rowId, { accountId, entryType });
   }
 
-  function deleteRow(tab: TabKey, id: string) {
-    const updater = (rows: BalanceRow[]) => rows.filter((r) => r.id !== id);
-    if (tab === "bank") setBankRows(updater);
-    else if (tab === "assets") setAssetRows(updater);
-    else setLiabilityRows(updater);
+  function handleAmountChange(rowId: string, val: string) {
+    updateRow(rowId, { amount: val });
   }
 
-  // ── Add New Account inline ─────────────────────────────────────────────────
-  function openAddAccount(rowId: string, tab: TabKey) {
-    const accountType: "ASSET" | "LIABILITY" = tab === "liabilities" ? "LIABILITY" : "ASSET";
-    const defaultCodePrefix = tab === "bank" ? "1050" : tab === "assets" ? "1150" : "2050";
-    setAddAcctModal({ rowId, tab, accountType, defaultCodePrefix });
+  function handleAmountBlur(rowId: string, val: string) {
+    const n = parseFloat(val);
+    if (!isNaN(n) && n < 0) {
+      setRows((prev) => prev.map((r) => {
+        if (r.id !== rowId) return r;
+        return { ...r, amount: String(Math.abs(n)), entryType: r.entryType === "DEBIT" ? "CREDIT" : "DEBIT" };
+      }));
+    }
+  }
+
+  function handleAddNew(rowId: string) {
+    setAddAccountTargetRowId(rowId);
+    setShowAddAccount(true);
   }
 
   function handleAccountCreated(newAcct: CoaAccount) {
-    // Add to allCoa so it appears in all dropdowns immediately
     setAllCoa((prev) => [...prev, newAcct]);
-    // Select it in the row that triggered the modal
-    if (addAcctModal) {
-      updateRow(addAcctModal.tab, addAcctModal.rowId, "accountId", newAcct.id);
+    if (addAccountTargetRowId) {
+      handleAccountSelect(addAccountTargetRowId, newAcct.id);
     }
-    setAddAcctModal(null);
+    setShowAddAccount(false);
+    setAddAccountTargetRowId(null);
   }
 
-  // ── Accounting method change ───────────────────────────────────────────────
+  // ── Accounting method change ─────────────────────────────────────────────────
   async function handleMethodChange(m: Method) {
     setMethod(m);
     await api(`${BASE}api/opening-balance/method`, {
@@ -710,76 +560,33 @@ export default function OpeningBalancePage() {
     });
   }
 
-  // ── Totals ────────────────────────────────────────────────────────────────
-  const totalBankCash    = useMemo(() => bankRows.reduce((s, r) => s + parseAmt(r.amount), 0), [bankRows]);
-  const totalOtherAssets = useMemo(() => assetRows.reduce((s, r) => s + parseAmt(r.amount), 0), [assetRows]);
-  const totalAssets      = totalBankCash + totalOtherAssets;
-  const totalLiabilities = useMemo(() => liabilityRows.reduce((s, r) => s + parseAmt(r.amount), 0), [liabilityRows]);
-  const totalNetAssets   = totalAssets - totalLiabilities;
-
-  // Live per-fund equity summary (computed from all tabs)
-  const fundEquitySummary = useMemo(() => {
-    const assetEntries = [
-      ...bankRows.map((r) => ({ ...r, aType: "ASSET" as const })),
-      ...assetRows.map((r) => ({ ...r, aType: "ASSET" as const })),
-    ].filter((r) => parseAmt(r.amount) > 0 && r.fundId);
-    const liabEntries = (method === "ACCRUAL" ? liabilityRows : [])
-      .filter((r) => parseAmt(r.amount) > 0 && r.fundId);
-    const allFundIds = [...new Set([
-      ...assetEntries.map((r) => r.fundId),
-      ...liabEntries.map((r) => r.fundId),
-    ])];
-    return allFundIds.map((fid) => {
-      const fund = funds.find((f) => f.id === fid);
-      const assets = assetEntries.filter((r) => r.fundId === fid).reduce((s, r) => s + parseAmt(r.amount), 0);
-      const liabilities = liabEntries.filter((r) => r.fundId === fid).reduce((s, r) => s + parseAmt(r.amount), 0);
-      return { fund, fundId: fid, assets, liabilities, netAssets: assets - liabilities };
-    }).sort((a, b) => (a.fund?.name ?? "").localeCompare(b.fund?.name ?? ""));
-  }, [bankRows, assetRows, liabilityRows, funds, method]);
-
-  // ── Validation ────────────────────────────────────────────────────────────
-  const allRows = [
-    ...bankRows.map((r) => ({ ...r, accountType: "ASSET" as const })),
-    ...assetRows.map((r) => ({ ...r, accountType: "ASSET" as const })),
-    ...(method === "ACCRUAL" ? liabilityRows.map((r) => ({ ...r, accountType: "LIABILITY" as const })) : []),
-  ].filter((r) => parseAmt(r.amount) > 0);
+  // ── Computed totals ──────────────────────────────────────────────────────────
+  const totalDebits  = useMemo(() => rows.reduce((s, r) => s + rowDebit(r), 0), [rows]);
+  const totalCredits = useMemo(() => rows.reduce((s, r) => s + rowCredit(r), 0), [rows]);
+  const outOfBalance = Math.abs(totalDebits - totalCredits);
+  const isBalanced   = outOfBalance < 0.01 && totalDebits > 0;
 
   const futureDateError = asOfDate > format(new Date(), "yyyy-MM-dd");
-  const missingFund     = allRows.some((r) => !r.fundId);
-  const missingAccount  = allRows.some((r) => !r.accountId);
-  const hasData         = allRows.length > 0;
-  const canFinish       = hasData && !futureDateError && !missingFund && !missingAccount;
+  const activeRows      = rows.filter((r) => parseFloat(r.amount) > 0);
+  const missingAccount  = activeRows.some((r) => !r.accountId);
+  const missingFund     = activeRows.some((r) => !r.fundId);
+  const hasData         = activeRows.length >= 2;
 
-  function handleReviewClick() {
-    setError("");
-    if (futureDateError) { setError("As-of date cannot be in the future."); return; }
-    if (!hasData) { setError("Please add at least one balance row before finishing."); return; }
-    if (missingFund) { setError("Every row must have a Fund selected."); return; }
-    if (missingAccount) { setError("Every row must have an Account selected."); return; }
-    setShowConfirm(true);
-  }
+  const canPost = isBalanced && hasData && !futureDateError && !missingAccount && !missingFund;
 
-  // ── Submit ────────────────────────────────────────────────────────────────
+  // ── Submit ───────────────────────────────────────────────────────────────────
   async function handleFinalize() {
     setSaving(true); setError("");
     try {
-      const submitRows = [
-        ...bankRows.filter((r) => parseAmt(r.amount) > 0 && r.accountId && r.fundId)
-          .map((r) => ({ ...r, accountType: "ASSET" })),
-        ...assetRows.filter((r) => parseAmt(r.amount) > 0 && r.accountId && r.fundId)
-          .map((r) => ({ ...r, accountType: "ASSET" })),
-        ...(method === "ACCRUAL"
-          ? liabilityRows.filter((r) => parseAmt(r.amount) > 0 && r.accountId && r.fundId)
-              .map((r) => ({ ...r, accountType: "LIABILITY" }))
-          : []),
-      ].map((r) => ({
-        accountId: r.accountId,
-        accountType: r.accountType,
-        fundId: r.fundId,
-        fundName: funds.find((f) => f.id === r.fundId)?.name ?? "Fund",
-        amount: parseAmt(r.amount),
-        memo: r.memo,
-      }));
+      const submitRows = rows
+        .filter((r) => parseFloat(r.amount) > 0 && r.accountId && r.fundId)
+        .map((r) => ({
+          accountId: r.accountId,
+          fundId: r.fundId,
+          amount: Math.abs(parseFloat(r.amount)),
+          entryType: r.entryType,
+          memo: r.memo || null,
+        }));
 
       const res = await api(`${BASE}api/opening-balance/finalize`, {
         method: "POST",
@@ -794,7 +601,13 @@ export default function OpeningBalancePage() {
     } finally { setSaving(false); }
   }
 
-  // ── Loading ───────────────────────────────────────────────────────────────
+  // ── Sorted COA (must be before any early returns — Rules of Hooks) ──────────
+  const sortedCoa = useMemo(() =>
+    [...allCoa].sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true })),
+    [allCoa]
+  );
+
+  // ── Loading ──────────────────────────────────────────────────────────────────
   if (loading) {
     return (
       <AppLayout title="Opening Balance Wizard">
@@ -805,7 +618,7 @@ export default function OpeningBalancePage() {
     );
   }
 
-  // ── DONE phase ────────────────────────────────────────────────────────────
+  // ── Done ─────────────────────────────────────────────────────────────────────
   if (phase === "done" && createdEntry) {
     return (
       <AppLayout title="Opening Balance Wizard">
@@ -814,48 +627,37 @@ export default function OpeningBalancePage() {
             <CheckCircle2 className="h-10 w-10 text-emerald-500" />
           </div>
           <div>
-            <h2 className="text-2xl font-bold text-[hsl(210,60%,25%)]">Opening Balances Set!</h2>
+            <h2 className="text-2xl font-bold text-[hsl(210,60%,25%)]">Opening Balances Posted!</h2>
             <p className="text-muted-foreground mt-1">
-              Journal Entry <strong>{createdEntry.entryNumber}</strong> has been posted as of{" "}
+              Journal Entry <strong>{createdEntry.entryNumber}</strong> has been posted to the General Ledger as of{" "}
               <strong>{format(new Date(asOfDate), "MMMM d, yyyy")}</strong>.
             </p>
           </div>
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 text-left space-y-3">
             <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">Total Assets</span>
-              <span className="font-semibold text-blue-700">{fmt(createdEntry.totalAssets)}</span>
+              <span className="text-muted-foreground">Total Debits</span>
+              <span className="font-bold text-blue-700">{fmt(createdEntry.totalDebits)}</span>
             </div>
-            {createdEntry.totalLiabilities > 0 && (
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Total Liabilities</span>
-                <span className="font-semibold text-orange-700">{fmt(createdEntry.totalLiabilities)}</span>
-              </div>
-            )}
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">Total Credits</span>
+              <span className="font-bold text-emerald-700">{fmt(createdEntry.totalCredits)}</span>
+            </div>
             <div className="flex justify-between text-sm border-t pt-3">
-              <span className="text-muted-foreground font-semibold">Total Net Assets</span>
-              <span className="font-bold text-violet-700">{fmt(createdEntry.totalNetAssets)}</span>
+              <span className="text-muted-foreground">Lines Posted</span>
+              <span className="font-semibold">{createdEntry.lineCount}</span>
             </div>
-            {createdEntry.fundSummary?.length > 0 && (
-              <div className="border-t pt-3 space-y-1.5">
-                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
-                  <Layers className="h-3 w-3 text-violet-500" /> By Fund
-                </p>
-                {createdEntry.fundSummary.map((fs: any) => (
-                  <div key={fs.fundId} className="flex justify-between text-sm pl-3">
-                    <span className="text-muted-foreground">{fs.fundName}</span>
-                    <span className="font-semibold text-violet-600">{fmt(fs.netAssets)}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-            <div className="border-t pt-3 flex justify-between text-sm">
+            <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">Accounting Method</span>
               <span className="font-semibold">{method === "CASH" ? "Cash Basis" : "Accrual Basis"}</span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">Source Type</span>
+              <code className="text-xs bg-gray-100 px-2 py-0.5 rounded font-mono">OPENING_BALANCE</code>
             </div>
           </div>
           <div className="flex items-center justify-center gap-2 text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3">
             <Lock className="h-4 w-4 shrink-0" />
-            Journal entry <strong>{createdEntry.entryNumber}</strong> is posted and locked in the ledger
+            {createdEntry.entryNumber} is posted and locked in the General Ledger
           </div>
           <Button variant="outline" className="gap-2" onClick={() => { setPhase("wizard"); setCreatedEntry(null); load(); }}>
             <RotateCcw className="h-4 w-4" /> Edit Balances
@@ -865,57 +667,7 @@ export default function OpeningBalancePage() {
     );
   }
 
-  // ── Tab definitions ───────────────────────────────────────────────────────
-  const tabs: {
-    key: TabKey;
-    label: string;
-    icon: React.ReactNode;
-    count: number;
-    total: number;
-    accountColLabel: string;
-    amountColLabel: string;
-  }[] = [
-    {
-      key: "bank",
-      label: "Bank / Cash",
-      icon: <Wallet className="h-4 w-4" />,
-      count: bankRows.filter((r) => parseAmt(r.amount) > 0).length,
-      total: totalBankCash,
-      accountColLabel: "Account Name",
-      amountColLabel: "Ending Balance",
-    },
-    {
-      key: "assets",
-      label: "Other Assets",
-      icon: <Building2 className="h-4 w-4" />,
-      count: assetRows.filter((r) => parseAmt(r.amount) > 0).length,
-      total: totalOtherAssets,
-      accountColLabel: "Asset Name",
-      amountColLabel: "Original Value",
-    },
-    {
-      key: "liabilities",
-      label: "Liabilities",
-      icon: <CreditCard className="h-4 w-4" />,
-      count: liabilityRows.filter((r) => parseAmt(r.amount) > 0).length,
-      total: totalLiabilities,
-      accountColLabel: "Liability Name",
-      amountColLabel: "Balance Owed",
-    },
-    {
-      key: "equity",
-      label: "Equity / Net Assets",
-      icon: <TrendingUp className="h-4 w-4" />,
-      count: fundEquitySummary.length,
-      total: totalNetAssets,
-      accountColLabel: "",
-      amountColLabel: "",
-    },
-  ];
-
-  const activeTabDef = tabs.find((t) => t.key === activeTab)!;
-
-  // ── WIZARD phase ──────────────────────────────────────────────────────────
+  // ── Wizard ───────────────────────────────────────────────────────────────────
   return (
     <AppLayout title="Opening Balance Wizard">
       <div className="space-y-5 max-w-5xl mx-auto">
@@ -925,94 +677,70 @@ export default function OpeningBalancePage() {
           <div>
             <h2 className="text-2xl font-bold text-[hsl(210,60%,25%)]">Opening Balance Wizard</h2>
             <p className="text-sm text-muted-foreground mt-0.5">
-              Set your organization's starting balances — every entry is allocated to a specific Fund
+              Enter your starting balances as explicit Debits and Credits — the entry must balance before posting.
             </p>
           </div>
-          <div className="shrink-0">
-            <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Accounting Method</Label>
-            <div className="mt-1"><MethodToggle value={method} onChange={handleMethodChange} /></div>
-          </div>
+          <MethodToggle value={method} onChange={handleMethodChange} />
         </div>
 
-        {/* ── As of Date — prominent card ── */}
-        <div className={cn(
-          "flex flex-wrap items-center gap-5 p-4 rounded-xl border-2 transition-colors",
-          futureDateError
-            ? "border-red-300 bg-red-50"
-            : "border-[hsl(210,60%,82%)] bg-[hsl(210,60%,97%)]"
-        )}>
-          <div className="flex items-center gap-3">
-            <div className={cn(
-              "w-10 h-10 rounded-xl flex items-center justify-center shrink-0",
-              futureDateError ? "bg-red-100" : "bg-[hsl(210,60%,90%)]"
-            )}>
+        {/* Date + Default Fund row */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Date */}
+          <div className={cn(
+            "flex items-center gap-4 p-4 rounded-xl border-2 transition-colors",
+            futureDateError ? "border-red-300 bg-red-50" : "border-[hsl(210,60%,82%)] bg-[hsl(210,60%,97%)]"
+          )}>
+            <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center shrink-0", futureDateError ? "bg-red-100" : "bg-[hsl(210,60%,90%)]")}>
               <Calendar className={cn("h-5 w-5", futureDateError ? "text-red-500" : "text-[hsl(210,60%,35%)]")} />
             </div>
-            <div>
+            <div className="flex-1 min-w-0">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Opening Balance Date</p>
-              <p className="text-[11px] text-muted-foreground mt-0.5">
-                All journal entries will be dated on this day
-              </p>
+              <input
+                type="date"
+                value={asOfDate}
+                max={format(new Date(), "yyyy-MM-dd")}
+                onChange={(e) => setAsOfDate(e.target.value)}
+                className={cn(
+                  "mt-1 h-9 px-3 w-full rounded-lg border-2 text-sm font-semibold focus:outline-none bg-white",
+                  futureDateError ? "border-red-400 text-red-700" : "border-[hsl(210,60%,70%)] text-[hsl(210,60%,20%)]"
+                )}
+              />
+              {futureDateError && <p className="text-xs text-red-600 mt-1 flex items-center gap-1"><AlertTriangle className="h-3 w-3" /> Date cannot be in the future</p>}
+              {!futureDateError && asOfDate && <p className="text-xs text-[hsl(210,60%,40%)] mt-1 font-medium">{format(new Date(asOfDate), "EEEE, MMMM d, yyyy")}</p>}
             </div>
           </div>
-          <div className="flex items-center gap-3 ml-auto flex-wrap">
-            <input
-              type="date"
-              value={asOfDate}
-              max={format(new Date(), "yyyy-MM-dd")}
-              onChange={(e) => setAsOfDate(e.target.value)}
-              className={cn(
-                "h-10 px-4 rounded-xl border-2 text-base font-semibold focus:outline-none focus:ring-2 focus:ring-[hsl(210,60%,40%)] bg-white",
-                futureDateError ? "border-red-400 text-red-700" : "border-[hsl(210,60%,70%)] text-[hsl(210,60%,20%)]"
+
+          {/* Default Fund */}
+          <div className="flex items-center gap-4 p-4 rounded-xl border border-violet-100 bg-violet-50">
+            <div className="w-10 h-10 rounded-xl bg-violet-100 flex items-center justify-center shrink-0">
+              <Layers className="h-5 w-5 text-violet-500" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-semibold text-violet-700 uppercase tracking-wide">Default Fund</p>
+              <p className="text-[11px] text-violet-600 mb-1">Applied to new rows (override per row)</p>
+              {funds.length > 0 ? (
+                <select
+                  value={defaultFundId}
+                  onChange={(e) => setDefaultFundId(e.target.value)}
+                  className="w-full h-9 px-3 rounded-lg border border-violet-200 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 bg-white text-violet-900"
+                >
+                  <option value="">— No default —</option>
+                  {funds.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+                </select>
+              ) : (
+                <p className="text-xs text-amber-700 font-medium">No funds found — create one in Funds first.</p>
               )}
-            />
-            {futureDateError && (
-              <span className="text-sm text-red-600 font-medium flex items-center gap-1">
-                <AlertTriangle className="h-4 w-4" /> Date cannot be in the future
-              </span>
-            )}
-            {!futureDateError && asOfDate && (
-              <span className="text-sm font-semibold text-[hsl(210,60%,35%)]">
-                {format(new Date(asOfDate), "EEEE, MMMM d, yyyy")}
-              </span>
-            )}
-          </div>
-        </div>
-
-        {/* Default Fund + explainer */}
-        <div className="flex flex-wrap items-start gap-4 p-4 rounded-xl border border-violet-100 bg-violet-50">
-          <div className="flex items-start gap-2 text-sm text-violet-800 flex-1 min-w-0">
-            <Layers className="h-4 w-4 mt-0.5 shrink-0 text-violet-500" />
-            <span>
-              <strong>Fund-first accounting:</strong> Every balance is allocated to a specific Fund. The system
-              automatically creates a balancing <em>Net Assets — [Fund Name]</em> entry so your Statement of Financial
-              Position is correct from day one.
-            </span>
-          </div>
-          {funds.length > 0 && (
-            <div className="shrink-0">
-              <Label className="text-xs font-semibold text-violet-700 uppercase tracking-wide">Default Fund</Label>
-              <select
-                value={defaultFundId}
-                onChange={(e) => setDefaultFundId(e.target.value)}
-                className="mt-1 block h-9 px-3 rounded-lg border border-violet-200 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 bg-white text-violet-900"
-              >
-                <option value="">— None —</option>
-                {funds.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
-              </select>
             </div>
-          )}
+          </div>
         </div>
 
+        {/* Warnings */}
         {funds.length === 0 && (
           <div className="flex items-start gap-3 p-4 rounded-xl border border-amber-200 bg-amber-50 text-sm text-amber-800">
             <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
-            <span>
-              <strong>No funds found.</strong> Please create at least one Fund (e.g., "General Fund") in the Funds module before setting opening balances.
-            </span>
+            <span><strong>No funds found.</strong> Please create at least one Fund (e.g., "General Fund") in the Funds module before setting opening balances.</span>
           </div>
         )}
-
         {existingEntryId && (
           <div className="flex items-center gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-800">
             <Info className="h-4 w-4 shrink-0" />
@@ -1020,355 +748,222 @@ export default function OpeningBalancePage() {
           </div>
         )}
 
-        {/* Tab bar */}
-        <div className="flex gap-1 border-b border-gray-200 pb-0">
-          {tabs.map((tab) => (
-            <button
-              key={tab.key}
-              onClick={() => { setActiveTab(tab.key); if (allCoa.length === 0) load(); }}
-              className={cn(
-                "flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-t-lg border-b-2 transition-all -mb-px",
-                activeTab === tab.key
-                  ? "bg-white border-[hsl(210,60%,25%)] text-[hsl(210,60%,25%)]"
-                  : "border-transparent text-muted-foreground hover:text-foreground hover:bg-gray-50"
-              )}
-            >
-              {tab.icon}
-              {tab.label}
-              {tab.count > 0 && (
-                <span className={cn(
-                  "text-[10px] font-bold px-1.5 py-0.5 rounded-full",
-                  activeTab === tab.key ? "bg-[hsl(210,60%,25%)] text-white" : "bg-gray-200 text-gray-600"
-                )}>
-                  {tab.count}
-                </span>
-              )}
-              {tab.total > 0 && (
-                <span className={cn(
-                  "text-[10px] tabular-nums px-1.5 py-0.5 rounded-full",
-                  activeTab === tab.key ? "bg-[hsl(210,60%,90%)] text-[hsl(210,60%,25%)]" : "text-muted-foreground"
-                )}>
-                  {fmt(tab.total)}
-                </span>
-              )}
-            </button>
-          ))}
+        {/* Instruction banner */}
+        <div className="flex items-start gap-3 p-4 rounded-xl border border-blue-100 bg-blue-50 text-sm text-blue-800">
+          <ArrowLeftRight className="h-4 w-4 shrink-0 mt-0.5 text-blue-500" />
+          <div>
+            <strong>Double-entry opening balances:</strong> Enter each starting balance as a Debit (DR) or Credit (CR). 
+            Assets start with DR. Liabilities and Equity (Net Assets) start with CR. 
+            The entry posts only when <strong>Total Debits = Total Credits</strong>.
+            Entering a <strong>negative number</strong> automatically flips the DR/CR toggle.
+          </div>
         </div>
 
-        {/* Tab content */}
-        <div className="pt-1">
-          {activeTab === "bank" && (
-            <div className="space-y-3">
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Wallet className="h-4 w-4 text-blue-500" />
-                Checking, savings, petty cash — linked bank accounts and 1000–1099 series
-              </div>
-              {bankAccounts.length === 0 && !loading && (
-                <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-800">
-                  <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
-                  <span>
-                    No bank or cash accounts found. Use <strong>+ Add New Account</strong> in a row's dropdown to create one,
-                    or go to <strong>Chart of Accounts</strong> and add a Bank/Cash account (code 1000–1099).
-                  </span>
-                </div>
-              )}
-              <RowTable
-                rows={bankRows}
-                accounts={bankAccounts}
-                funds={funds}
-                defaultFundId={defaultFundId}
-                accountType="ASSET"
-                accountColLabel="Account Name"
-                amountColLabel="Ending Balance"
-                onAddRow={() => addRow("bank")}
-                onUpdateRow={(id, f, v) => updateRow("bank", id, f, v)}
-                onDeleteRow={(id) => deleteRow("bank", id)}
-                onSelectAddNew={(rowId) => openAddAccount(rowId, "bank")}
-                emptyLabel="No bank accounts entered yet. Click 'Add row' to enter your checking or savings account balance."
-              />
-            </div>
-          )}
+        {/* ── The Grid ─────────────────────────────────────────────────────────── */}
+        <div className="rounded-xl border border-gray-200 overflow-hidden">
+          {/* Column headers */}
+          <div className="grid gap-2 px-4 py-2.5 bg-gray-50 border-b border-gray-200 text-[10px] font-semibold text-muted-foreground uppercase tracking-wide"
+            style={{ gridTemplateColumns: "1fr 160px 120px 70px 140px 36px" }}>
+            <div>Account</div>
+            <div>Fund</div>
+            <div className="text-right">Balance</div>
+            <div className="text-center">Type</div>
+            <div>Memo</div>
+            <div />
+          </div>
 
-          {activeTab === "assets" && (
-            <div className="space-y-3">
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Building2 className="h-4 w-4 text-blue-500" />
-                Fixed assets, buildings, equipment, accounts receivable — 1100-series and above
-              </div>
-              {otherAssets.length === 0 && !loading && (
-                <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-800">
-                  <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
-                  <span>
-                    No asset accounts found. Use <strong>+ Add New Account</strong> in a row's dropdown to create one (e.g., Buildings, Equipment, Accounts Receivable).
-                  </span>
-                </div>
-              )}
-              <RowTable
-                rows={assetRows}
-                accounts={otherAssets}
-                funds={funds}
-                defaultFundId={defaultFundId}
-                accountType="ASSET"
-                accountColLabel="Asset Name"
-                amountColLabel="Original Value"
-                onAddRow={() => addRow("assets")}
-                onUpdateRow={(id, f, v) => updateRow("assets", id, f, v)}
-                onDeleteRow={(id) => deleteRow("assets", id)}
-                onSelectAddNew={(rowId) => openAddAccount(rowId, "assets")}
-                emptyLabel="No assets entered yet. Add buildings, equipment, vehicles, accounts receivable, etc."
-              />
-            </div>
-          )}
+          {/* Rows */}
+          <div className="divide-y divide-gray-100">
+            {rows.map((row, idx) => {
+              const acct = allCoa.find((a) => a.id === row.accountId);
+              const hasAmount = parseFloat(row.amount) > 0;
+              const rowValid  = row.accountId && row.fundId && hasAmount;
 
-          {activeTab === "liabilities" && (
-            <div className="space-y-3">
-              {method === "CASH" && (
-                <div className="flex items-center gap-2 p-3 rounded-lg bg-blue-50 border border-blue-100 text-sm text-blue-800">
-                  <Info className="h-4 w-4 shrink-0" />
-                  <span>Liabilities are not tracked in <strong>Cash Basis</strong> accounting. Switch to <strong>Accrual Basis</strong> to enter loans, credit cards, and accounts payable.</span>
-                </div>
-              )}
-              {method === "ACCRUAL" && (
-                <>
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <CreditCard className="h-4 w-4 text-orange-500" />
-                    Loans, mortgages, credit cards, accounts payable — 2000-series
-                  </div>
-                  <RowTable
-                    rows={liabilityRows}
-                    accounts={liabilityAccts}
-                    funds={funds}
-                    defaultFundId={defaultFundId}
-                    accountType="LIABILITY"
-                    accountColLabel="Liability Name"
-                    amountColLabel="Balance Owed"
-                    onAddRow={() => addRow("liabilities")}
-                    onUpdateRow={(id, f, v) => updateRow("liabilities", id, f, v)}
-                    onDeleteRow={(id) => deleteRow("liabilities", id)}
-                    onSelectAddNew={(rowId) => openAddAccount(rowId, "liabilities")}
-                    emptyLabel="No liabilities entered yet. Add loans, mortgages, credit cards, or accounts payable."
+              return (
+                <div
+                  key={row.id}
+                  className={cn(
+                    "grid gap-2 px-4 py-2 items-center transition-colors",
+                    !rowValid && hasAmount ? "bg-amber-50/40" : "hover:bg-gray-50/50"
+                  )}
+                  style={{ gridTemplateColumns: "1fr 160px 120px 70px 140px 36px" }}
+                >
+                  {/* Account */}
+                  <AccountCombobox
+                    accounts={sortedCoa}
+                    value={row.accountId}
+                    onChange={(id) => handleAccountSelect(row.id, id)}
+                    onAddNew={() => handleAddNew(row.id)}
                   />
-                </>
-              )}
-            </div>
-          )}
 
-          {activeTab === "equity" && (
-            <div className="space-y-4">
-              {/* Explainer */}
-              <div className="flex items-start gap-3 p-4 rounded-xl border border-violet-200 bg-violet-50 text-sm text-violet-900">
-                <TrendingUp className="h-5 w-5 shrink-0 mt-0.5 text-violet-500" />
-                <div className="space-y-1">
-                  <p className="font-semibold text-violet-800">Equity is automatically computed — you don't enter it here.</p>
-                  <p className="text-violet-700 leading-relaxed">
-                    For each fund, the wizard automatically creates a <em>Net Assets — [Fund Name]</em> equity account
-                    and posts the balancing entry. The Net Assets balance for each fund equals that fund's
-                    <strong> Total Assets minus Total Liabilities</strong>.
-                  </p>
-                  <p className="text-violet-700 leading-relaxed">
-                    To apply fund-level balances, use the <strong>Fund</strong> column on each row in the
-                    Bank/Cash, Assets, and Liabilities tabs. Each dollar you enter is allocated to the fund you select.
-                  </p>
-                </div>
-              </div>
+                  {/* Fund */}
+                  <select
+                    value={row.fundId}
+                    onChange={(e) => updateRow(row.id, { fundId: e.target.value })}
+                    className={cn(
+                      "h-9 w-full px-2 text-sm border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[hsl(210,60%,40%)]",
+                      !row.fundId ? "border-amber-300" : "border-gray-200"
+                    )}
+                  >
+                    <option value="">— Fund —</option>
+                    {funds.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+                  </select>
 
-              {/* Equation card */}
-              <div className="flex flex-wrap items-center gap-4 p-4 rounded-xl border border-gray-200 bg-gray-50 text-sm font-semibold">
-                <span className="px-3 py-1.5 rounded-lg bg-blue-100 text-blue-800">
-                  Total Assets&nbsp;&nbsp;{fmt(totalAssets)}
-                </span>
-                {method === "ACCRUAL" && (
-                  <>
-                    <span className="text-muted-foreground">−</span>
-                    <span className="px-3 py-1.5 rounded-lg bg-orange-100 text-orange-800">
-                      Total Liabilities&nbsp;&nbsp;{fmt(totalLiabilities)}
-                    </span>
-                    <span className="text-muted-foreground">=</span>
-                  </>
-                )}
-                <span className={cn(
-                  "px-3 py-1.5 rounded-lg font-bold",
-                  totalNetAssets < 0 ? "bg-red-100 text-red-800" : "bg-violet-100 text-violet-800"
-                )}>
-                  Total Net Assets (Equity)&nbsp;&nbsp;{fmt(totalNetAssets)}
-                </span>
-              </div>
+                  {/* Balance */}
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={row.amount}
+                    onChange={(e) => handleAmountChange(row.id, e.target.value)}
+                    onBlur={(e) => handleAmountBlur(row.id, e.target.value)}
+                    placeholder="0.00"
+                    className={cn(
+                      "h-9 w-full px-2 text-right text-sm border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[hsl(210,60%,40%)] tabular-nums font-mono",
+                      "border-gray-200",
+                      row.entryType === "DEBIT" && hasAmount ? "text-blue-700 font-semibold" : "",
+                      row.entryType === "CREDIT" && hasAmount ? "text-emerald-700 font-semibold" : ""
+                    )}
+                  />
 
-              {/* Per-fund breakdown */}
-              {fundEquitySummary.length === 0 ? (
-                <div className="flex items-start gap-2 p-4 rounded-xl border border-gray-200 bg-gray-50 text-sm text-muted-foreground">
-                  <Info className="h-4 w-4 shrink-0 mt-0.5" />
-                  <span>
-                    No fund balances yet. Enter amounts in the <strong>Bank/Cash</strong> or <strong>Assets</strong> tabs
-                    and assign each row to a fund — the equity summary will appear here automatically.
-                  </span>
-                </div>
-              ) : (
-                <div className="rounded-xl border border-gray-200 overflow-hidden">
-                  <div className="px-5 py-3 bg-gray-50 border-b border-gray-200 flex items-center gap-2">
-                    <Layers className="h-4 w-4 text-violet-500" />
-                    <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                      Fund-Level Equity Breakdown
-                    </span>
+                  {/* DR/CR Toggle */}
+                  <div className="flex justify-center">
+                    <DrCrToggle value={row.entryType} onChange={(v) => updateRow(row.id, { entryType: v })} />
                   </div>
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-gray-100">
-                        <th className="text-left px-5 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Fund</th>
-                        <th className="text-right px-5 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Assets</th>
-                        {method === "ACCRUAL" && (
-                          <th className="text-right px-5 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Liabilities</th>
-                        )}
-                        <th className="text-right px-5 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Net Assets (Equity)</th>
-                        <th className="text-left px-5 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Auto-created GL Account</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-50">
-                      {fundEquitySummary.map(({ fund, fundId, assets, liabilities, netAssets }) => (
-                        <tr key={fundId} className="hover:bg-gray-50/50">
-                          <td className="px-5 py-3 font-medium text-foreground">
-                            {fund?.name ?? "Unknown Fund"}
-                            {fund?.fundType && (
-                              <span className="ml-2 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700 uppercase tracking-wide">
-                                {fund.fundType === "UNRESTRICTED" ? "Unrestricted"
-                                  : fund.fundType === "RESTRICTED_TEMP" ? "Restricted"
-                                  : fund.fundType === "RESTRICTED_PERM" ? "Perm. Restricted"
-                                  : fund.fundType === "BOARD_DESIGNATED" ? "Board Designated"
-                                  : fund.fundType}
-                              </span>
-                            )}
-                          </td>
-                          <td className="px-5 py-3 text-right tabular-nums text-blue-700 font-semibold">{fmt(assets)}</td>
-                          {method === "ACCRUAL" && (
-                            <td className="px-5 py-3 text-right tabular-nums text-orange-700">{liabilities > 0 ? fmt(liabilities) : "—"}</td>
-                          )}
-                          <td className={cn(
-                            "px-5 py-3 text-right tabular-nums font-bold",
-                            netAssets < 0 ? "text-red-700" : "text-violet-700"
-                          )}>
-                            {fmt(netAssets)}
-                          </td>
-                          <td className="px-5 py-3">
-                            <span className="inline-flex items-center gap-1 text-[11px] font-mono bg-violet-50 border border-violet-200 text-violet-800 px-2 py-1 rounded-md">
-                              Net Assets — {fund?.name ?? "Fund"}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                    <tfoot>
-                      <tr className="border-t-2 border-gray-200 bg-gray-50">
-                        <td className="px-5 py-3 font-bold text-foreground">Total</td>
-                        <td className="px-5 py-3 text-right tabular-nums font-bold text-blue-700">{fmt(totalAssets)}</td>
-                        {method === "ACCRUAL" && (
-                          <td className="px-5 py-3 text-right tabular-nums font-bold text-orange-700">{totalLiabilities > 0 ? fmt(totalLiabilities) : "—"}</td>
-                        )}
-                        <td className={cn(
-                          "px-5 py-3 text-right tabular-nums font-bold",
-                          totalNetAssets < 0 ? "text-red-700" : "text-violet-700"
-                        )}>
-                          {fmt(totalNetAssets)}
-                        </td>
-                        <td className="px-5 py-3" />
-                      </tr>
-                    </tfoot>
-                  </table>
-                </div>
-              )}
 
-              {/* Tip on fund allocation */}
-              <div className="flex items-start gap-2 p-3 rounded-lg border border-blue-100 bg-blue-50 text-xs text-blue-800">
-                <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                <span>
-                  <strong>Tip:</strong> If one bank account holds money for multiple funds (a pooled account),
-                  add multiple rows for that same bank account — one row per fund — and split the balance between them.
-                  Each row will create a separate <em>Net Assets — [Fund]</em> credit entry in the ledger.
-                </span>
-              </div>
-            </div>
-          )}
+                  {/* Memo */}
+                  <input
+                    type="text"
+                    value={row.memo}
+                    onChange={(e) => updateRow(row.id, { memo: e.target.value })}
+                    placeholder="Note…"
+                    className="h-9 w-full px-2 text-sm border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[hsl(210,60%,40%)]"
+                  />
+
+                  {/* Delete */}
+                  <button
+                    onClick={() => deleteRow(row.id)}
+                    disabled={rows.length <= 2}
+                    className="h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-50 disabled:opacity-30 transition-colors"
+                    title="Remove row"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Add row */}
+          <div className="px-4 py-3 border-t border-gray-100 bg-gray-50">
+            <button
+              onClick={addRow}
+              className="flex items-center gap-1.5 text-sm font-medium text-[hsl(210,60%,35%)] hover:text-[hsl(210,60%,20%)] transition-colors"
+            >
+              <Plus className="h-4 w-4" /> Add row
+            </button>
+          </div>
         </div>
 
-        {/* Balance summary bar */}
+        {/* ── Balance Footer ────────────────────────────────────────────────────── */}
         <div className={cn(
-          "rounded-xl border-2 px-6 py-4 flex flex-wrap items-center justify-between gap-4 transition-all",
-          totalNetAssets < 0
+          "rounded-xl border-2 px-6 py-4 transition-all",
+          isBalanced
+            ? "border-emerald-200 bg-emerald-50"
+            : outOfBalance > 0
             ? "border-red-200 bg-red-50"
-            : totalAssets > 0
-              ? "border-emerald-200 bg-emerald-50"
-              : "border-gray-200 bg-gray-50"
+            : "border-gray-200 bg-gray-50"
         )}>
-          <div className="flex items-center gap-6 flex-wrap text-sm font-semibold">
-            <span className={cn("px-3 py-1.5 rounded-lg", totalAssets > 0 ? "bg-blue-100 text-blue-800" : "bg-gray-100 text-gray-400")}>
-              Assets&nbsp;&nbsp;{fmt(totalAssets)}
-            </span>
-            {method === "ACCRUAL" && totalLiabilities > 0 && (
-              <>
-                <span className="text-muted-foreground">−</span>
-                <span className="px-3 py-1.5 rounded-lg bg-orange-100 text-orange-800">
-                  Liabilities&nbsp;&nbsp;{fmt(totalLiabilities)}
+          <div className="flex flex-wrap items-center gap-6 justify-between">
+            {/* Totals */}
+            <div className="flex items-center gap-6 flex-wrap">
+              <div className="text-center">
+                <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Total Debits</div>
+                <div className="text-lg font-bold tabular-nums text-blue-700">{fmt(totalDebits)}</div>
+              </div>
+              <div className="text-muted-foreground font-light text-xl">=</div>
+              <div className="text-center">
+                <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Total Credits</div>
+                <div className="text-lg font-bold tabular-nums text-emerald-700">{fmt(totalCredits)}</div>
+              </div>
+              <div className="text-muted-foreground font-light text-xl">|</div>
+              <div className="text-center">
+                <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Out of Balance</div>
+                <div className={cn(
+                  "text-lg font-bold tabular-nums",
+                  isBalanced ? "text-emerald-700" : outOfBalance > 0 ? "text-red-700" : "text-muted-foreground"
+                )}>
+                  {isBalanced ? "✓ $0.00" : outOfBalance > 0 ? fmt(outOfBalance) : "$0.00"}
+                </div>
+              </div>
+            </div>
+
+            {/* Status + Post button */}
+            <div className="flex items-center gap-4">
+              {isBalanced ? (
+                <span className="text-sm font-semibold text-emerald-700 flex items-center gap-1.5">
+                  <CheckCircle2 className="h-4 w-4" /> Balanced — ready to post
                 </span>
-                <span className="text-muted-foreground">=</span>
-              </>
-            )}
-            <span className={cn(
-              "px-3 py-1.5 rounded-lg font-bold",
-              totalNetAssets < 0
-                ? "bg-red-100 text-red-800"
-                : totalNetAssets > 0
-                  ? "bg-violet-100 text-violet-800"
-                  : "bg-gray-100 text-gray-400"
-            )}>
-              Net Assets&nbsp;&nbsp;{fmt(totalNetAssets)}
-            </span>
+              ) : outOfBalance > 0 ? (
+                <span className="text-sm font-semibold text-red-700 flex items-center gap-1.5">
+                  <AlertTriangle className="h-4 w-4" /> Out of balance by {fmt(outOfBalance)}
+                </span>
+              ) : (
+                <span className="text-sm text-muted-foreground">Enter debits and credits to check balance</span>
+              )}
+
+              <Button
+                onClick={() => { setError(""); setShowConfirm(true); }}
+                disabled={!canPost || funds.length === 0}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2 px-6"
+              >
+                Review & Post <ArrowLeftRight className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
-          <div className="flex items-center gap-3">
-            {error && (
-              <span className="text-sm text-red-600 flex items-center gap-1">
-                <AlertTriangle className="h-4 w-4" /> {error}
-              </span>
-            )}
-            <Button
-              onClick={handleReviewClick}
-              disabled={!canFinish || funds.length === 0}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2 px-6"
-            >
-              Review & Finish <ChevronRight className="h-4 w-4" />
-            </Button>
-          </div>
+
+          {/* Validation hints */}
+          {!isBalanced && (missingAccount || missingFund || futureDateError) && (
+            <ul className="mt-3 space-y-0.5 border-t border-gray-200 pt-3">
+              {futureDateError && (
+                <li className="text-xs text-red-700 flex items-center gap-1.5">
+                  <span className="w-1 h-1 rounded-full bg-red-500 shrink-0" /> Opening balance date cannot be in the future
+                </li>
+              )}
+              {missingAccount && (
+                <li className="text-xs text-amber-700 flex items-center gap-1.5">
+                  <span className="w-1 h-1 rounded-full bg-amber-500 shrink-0" /> One or more rows is missing an account
+                </li>
+              )}
+              {missingFund && (
+                <li className="text-xs text-amber-700 flex items-center gap-1.5">
+                  <span className="w-1 h-1 rounded-full bg-amber-500 shrink-0" /> One or more rows is missing a fund
+                </li>
+              )}
+            </ul>
+          )}
         </div>
 
       </div>
 
-      {/* Confirmation Modal */}
+      {/* Modals */}
       <ConfirmModal
         open={showConfirm}
         onClose={() => setShowConfirm(false)}
         onConfirm={handleFinalize}
         saving={saving}
         error={error}
-        bankRows={bankRows}
-        assetRows={assetRows}
-        liabilityRows={liabilityRows}
-        bankAccounts={bankAccounts}
-        allAssets={[...bankAccounts, ...otherAssets]}
-        liabilityAccounts={liabilityAccts}
+        rows={rows}
+        allCoa={allCoa}
         funds={funds}
         asOfDate={asOfDate}
         method={method}
       />
 
-      {/* Add New Account Modal */}
-      {addAcctModal && (
-        <AddAccountModal
-          open={true}
-          onClose={() => setAddAcctModal(null)}
-          defaultType={addAcctModal.accountType}
-          defaultCodePrefix={addAcctModal.defaultCodePrefix}
-          onCreated={handleAccountCreated}
-        />
-      )}
-
+      <AddAccountModal
+        open={showAddAccount}
+        onClose={() => { setShowAddAccount(false); setAddAccountTargetRowId(null); }}
+        onCreated={handleAccountCreated}
+      />
     </AppLayout>
   );
 }
