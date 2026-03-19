@@ -18,6 +18,8 @@ export const glEntries = pgTable("gl_entries", {
   accountId: text("account_id").notNull(),
   accountCode: text("account_code").notNull(), // denormalised for fast queries
   accountName: text("account_name").notNull(), // denormalised
+  fundId: text("fund_id"),                     // fund this entry belongs to
+  fundName: text("fund_name"),                 // denormalised for fast queries
   entryType: glEntryTypeEnum("entry_type").notNull(),
   amount: real("amount").notNull(),            // always positive
   description: text("description"),

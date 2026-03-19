@@ -32,7 +32,16 @@ function apiFetch(url: string, init?: RequestInit) {
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface BankAccount { id: string; name: string; accountNumber: string; currentBalance: number; }
 interface ChartAccount { id: string; code: string; name: string; type: string; }
-interface Fund { id: string; name: string; }
+interface Fund { id: string; name: string; fundType?: string; }
+const FUND_TYPE_SHORT: Record<string, string> = {
+  UNRESTRICTED: "Unrestricted",
+  RESTRICTED_TEMP: "Restricted (Temp)",
+  RESTRICTED_PERM: "Restricted (Perm)",
+  BOARD_DESIGNATED: "Board Designated",
+};
+function fundLabel(f: Fund) {
+  return f.fundType ? `${f.name} — ${FUND_TYPE_SHORT[f.fundType] ?? f.fundType}` : f.name;
+}
 interface Vendor { id: string; name: string; email?: string; phone?: string; }
 interface SplitLine {
   id: string; // local key only
@@ -949,7 +958,7 @@ export default function BankRegisterPage() {
                   <SelectContent>
                     <SelectItem value="__none__">— None —</SelectItem>
                     {fundList.map((f) => (
-                      <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
+                      <SelectItem key={f.id} value={f.id}>{fundLabel(f)}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>

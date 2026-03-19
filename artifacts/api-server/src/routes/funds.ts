@@ -10,7 +10,6 @@ router.get("/", requireAuth, async (req, res) => {
     const { companyId } = (req as any).user;
     const all = await db.select().from(funds).where(eq(funds.companyId, companyId)).orderBy(desc(funds.createdAt));
 
-    // Calculate balances
     const allDonations = await db.select().from(donations).where(eq(donations.companyId, companyId));
     const allExpenses = await db.select().from(expenses).where(eq(expenses.companyId, companyId));
 
@@ -38,13 +37,14 @@ router.get("/", requireAuth, async (req, res) => {
 router.post("/", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
-    const { name, description, isActive } = req.body ?? {};
+    const { name, description, fundType, isActive } = req.body ?? {};
     if (!name) return res.status(400).json({ error: "Name is required" });
 
     const [created] = await db.insert(funds).values({
       companyId,
       name,
       description: description || null,
+      fundType: fundType || "UNRESTRICTED",
       isActive: isActive !== false,
     }).returning();
 
@@ -57,11 +57,12 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
 router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
-    const { name, description, isActive } = req.body ?? {};
+    const { name, description, fundType, isActive } = req.body ?? {};
 
     const [updated] = await db.update(funds).set({
       name,
       description: description || null,
+      fundType: fundType || "UNRESTRICTED",
       isActive,
       updatedAt: new Date(),
     }).where(and(eq(funds.id, req.params.id), eq(funds.companyId, companyId))).returning();

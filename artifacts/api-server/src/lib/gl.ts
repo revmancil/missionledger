@@ -10,6 +10,7 @@
  *    net entry equal to transaction.amount.
  *  - sum(debits) MUST equal sum(credits) for each transactionId.
  *  - Voided transactions: existing GL entries are soft-voided (isVoid = true).
+ *  - Fund linkage: fundId and fundName are denormalised onto every GL entry.
  */
 
 import {
@@ -19,6 +20,7 @@ import {
   chartOfAccounts,
   bankAccounts,
   glEntries,
+  funds,
 } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 
@@ -31,6 +33,8 @@ interface RawEntry {
   entryType: "DEBIT" | "CREDIT";
   amount: number; // always positive
   description: string | null;
+  fundId: string | null;
+  fundName: string | null;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -48,26 +52,14 @@ function categoryEntryType(
   coaType: string
 ): "DEBIT" | "CREDIT" {
   if (txType === "CREDIT") {
-    // Income/deposit — revenue accounts get CREDIT; expense accounts get DEBIT
     return coaType === "EXPENSE" ? "DEBIT" : "CREDIT";
   } else {
-    // Expense/payment — expense accounts get DEBIT; income accounts get CREDIT
     return coaType === "INCOME" ? "CREDIT" : "DEBIT";
   }
 }
 
 /**
  * Determine the GL entry type for a SPLIT line.
- *
- * Sign convention for split amounts:
- *  Positive  → normal direction for the account type
- *  Negative  → reversal (e.g. a fee offset against an income split)
- *
- * Normal directions:
- *  INCOME   → CREDIT (revenue increases)
- *  EXPENSE  → DEBIT  (cost increases)
- *  ASSET    → follows transaction type
- *  LIABILITY/EQUITY → follows opposite of transaction type
  */
 function splitEntryType(
   txType: "CREDIT" | "DEBIT",
@@ -115,10 +107,17 @@ export async function generateGlEntries(
 
   if (!tx) return;
 
-  // 3. Voided transactions get no GL entries (they were deleted in step 1)
+  // 3. Voided transactions get no GL entries
   if (tx.isVoid) return;
 
-  // 4. Load COA lookup
+  // 4. Resolve fund name (denormalised onto entries)
+  let txFundName: string | null = null;
+  if (tx.fundId) {
+    const [fund] = await db.select({ name: funds.name }).from(funds).where(eq(funds.id, tx.fundId));
+    txFundName = fund?.name ?? null;
+  }
+
+  // 5. Load COA lookup
   const allCoa = await db
     .select()
     .from(chartOfAccounts)
@@ -127,7 +126,7 @@ export async function generateGlEntries(
   const coaById = Object.fromEntries(allCoa.map((a) => [a.id, a]));
   const coaByCode = Object.fromEntries(allCoa.map((a) => [a.code, a]));
 
-  // 5. Resolve bank account's COA entry
+  // 6. Resolve bank account's COA entry
   let bankCoa: (typeof allCoa)[0] | null = null;
 
   if (tx.bankAccountId) {
@@ -166,6 +165,8 @@ export async function generateGlEntries(
         entryType: bankEntryType,
         amount: Math.abs(tx.amount),
         description: tx.payee,
+        fundId: tx.fundId ?? null,
+        fundName: txFundName,
       });
     }
 
@@ -179,6 +180,8 @@ export async function generateGlEntries(
         entryType: catType,
         amount: Math.abs(tx.amount),
         description: tx.payee,
+        fundId: tx.fundId ?? null,
+        fundName: txFundName,
       });
     }
   } else {
@@ -199,6 +202,8 @@ export async function generateGlEntries(
         entryType: bankEntryType,
         amount: Math.abs(tx.amount),
         description: tx.payee,
+        fundId: tx.fundId ?? null,
+        fundName: txFundName,
       });
     }
 
@@ -208,6 +213,14 @@ export async function generateGlEntries(
       const splitCoa = coaById[split.chartAccountId];
       if (!splitCoa) continue;
 
+      // Resolve per-split fund (falls back to transaction fund)
+      const splitFundId = (split as any).fundId ?? tx.fundId ?? null;
+      let splitFundName = txFundName;
+      if (splitFundId && splitFundId !== tx.fundId) {
+        const [sf] = await db.select({ name: funds.name }).from(funds).where(eq(funds.id, splitFundId));
+        splitFundName = sf?.name ?? null;
+      }
+
       const et = splitEntryType(tx.type, splitCoa.type, split.amount);
       rawEntries.push({
         accountId: splitCoa.id,
@@ -216,6 +229,8 @@ export async function generateGlEntries(
         entryType: et,
         amount: Math.abs(split.amount),
         description: split.memo ?? tx.payee,
+        fundId: splitFundId,
+        fundName: splitFundName,
       });
     }
   }
@@ -224,15 +239,12 @@ export async function generateGlEntries(
   const totalDebits  = rawEntries.filter((e) => e.entryType === "DEBIT" ).reduce((s, e) => s + e.amount, 0);
   const totalCredits = rawEntries.filter((e) => e.entryType === "CREDIT").reduce((s, e) => s + e.amount, 0);
 
-  if (rawEntries.length === 0) return; // nothing to post (e.g. uncategorised transaction)
+  if (rawEntries.length === 0) return;
 
   if (Math.abs(totalDebits - totalCredits) > 0.005) {
-    // One side is missing (e.g. no category assigned yet) — skip entirely so the
-    // ledger stays clean. Entries will be generated when the transaction is saved again.
     console.warn(
       `[GL] Skipping tx=${txId} — out of balance: debits=${totalDebits.toFixed(2)} credits=${totalCredits.toFixed(2)}`
     );
-    // Remove any partial entries already written
     await db.delete(glEntries).where(
       and(eq(glEntries.transactionId, txId), eq(glEntries.companyId, companyId))
     );
@@ -248,6 +260,8 @@ export async function generateGlEntries(
       accountId: e.accountId,
       accountCode: e.accountCode,
       accountName: e.accountName,
+      fundId: e.fundId,
+      fundName: e.fundName,
       entryType: e.entryType,
       amount: e.amount,
       description: e.description,
@@ -259,7 +273,6 @@ export async function generateGlEntries(
 
 /**
  * Soft-void all GL entries for a given transaction.
- * Called when a transaction is voided/deleted.
  */
 export async function voidGlEntries(txId: string, companyId: string): Promise<void> {
   await db

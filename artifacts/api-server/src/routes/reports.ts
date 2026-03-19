@@ -1,6 +1,6 @@
 import { Router } from "express";
-import { db, accounts, journalEntries, journalEntryLines, donations, expenses, budgets, budgetLines } from "@workspace/db";
-import { eq, and, gte, lte, inArray } from "drizzle-orm";
+import { db, accounts, journalEntries, journalEntryLines, donations, expenses, budgets, budgetLines, glEntries, funds } from "@workspace/db";
+import { eq, and, gte, lte, inArray, sql } from "drizzle-orm";
 import { requireAuth } from "../lib/auth";
 
 const router = Router();
@@ -26,7 +26,6 @@ router.get("/profit-loss", requireAuth, async (req, res) => {
       return date >= start && date <= end;
     });
 
-    // Group revenue by category (type)
     const revenueMap: Record<string, number> = {};
     for (const d of filteredDonations) {
       const key = `Donations - ${d.type}`;
@@ -177,6 +176,102 @@ router.get("/budget-vs-actual", requireAuth, async (req, res) => {
       items,
     });
   } catch (error) {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// GET /reports/general-ledger
+// Returns all non-voided GL entries with fund info, date-filtered.
+// Also computes per-fund running balances.
+router.get("/general-ledger", requireAuth, async (req, res) => {
+  try {
+    const { companyId } = (req as any).user;
+    const { startDate, endDate, fundId: filterFundId } = req.query;
+
+    const start = startDate ? new Date(startDate as string) : new Date(new Date().getFullYear(), 0, 1);
+    const end = endDate ? new Date(endDate as string) : new Date();
+
+    // Pull all non-voided GL entries in the date window
+    const rows = await db.execute(sql`
+      SELECT
+        g.id,
+        g.date,
+        g.source_type,
+        g.transaction_id,
+        g.journal_entry_id,
+        g.account_id,
+        g.account_code,
+        g.account_name,
+        g.fund_id,
+        g.fund_name,
+        g.entry_type,
+        g.amount,
+        g.description
+      FROM gl_entries g
+      WHERE g.company_id = ${companyId}
+        AND g.is_void = false
+        AND g.date >= ${start}
+        AND g.date <= ${end}
+        ${filterFundId && filterFundId !== "" ? sql`AND g.fund_id = ${filterFundId as string}` : sql``}
+      ORDER BY g.date ASC, g.created_at ASC
+    `);
+
+    const entries = (rows.rows as any[]).map(r => ({
+      id: r.id,
+      date: r.date instanceof Date ? r.date.toISOString() : r.date,
+      sourceType: r.source_type,
+      transactionId: r.transaction_id,
+      journalEntryId: r.journal_entry_id,
+      accountId: r.account_id,
+      accountCode: r.account_code,
+      accountName: r.account_name,
+      fundId: r.fund_id ?? null,
+      fundName: r.fund_name ?? null,
+      entryType: r.entry_type,
+      amount: parseFloat(r.amount) || 0,
+      description: r.description ?? null,
+    }));
+
+    // ── Per-fund running balances ─────────────────────────────────────────────
+    // For each fund, track net cash flow: income (CREDIT on income accts) minus
+    // expenses (DEBIT on expense accts). We use a simple net approach:
+    // CREDIT entries add to fund balance; DEBIT entries reduce it.
+    const allFunds = await db.select().from(funds).where(eq(funds.companyId, companyId));
+    const fundMap = Object.fromEntries(allFunds.map(f => [f.id, f]));
+
+    const fundBalances: Record<string, { fundId: string; fundName: string; fundType: string; netBalance: number; totalCredits: number; totalDebits: number }> = {};
+
+    for (const e of entries) {
+      const fid = e.fundId ?? "__unassigned__";
+      if (!fundBalances[fid]) {
+        const fundRecord = e.fundId ? fundMap[e.fundId] : null;
+        fundBalances[fid] = {
+          fundId: fid,
+          fundName: e.fundName ?? (fid === "__unassigned__" ? "Unassigned" : "Unknown Fund"),
+          fundType: fundRecord?.fundType ?? "UNRESTRICTED",
+          netBalance: 0,
+          totalCredits: 0,
+          totalDebits: 0,
+        };
+      }
+      if (e.entryType === "CREDIT") {
+        fundBalances[fid].totalCredits += e.amount;
+        fundBalances[fid].netBalance += e.amount;
+      } else {
+        fundBalances[fid].totalDebits += e.amount;
+        fundBalances[fid].netBalance -= e.amount;
+      }
+    }
+
+    res.json({
+      startDate: start.toISOString(),
+      endDate: end.toISOString(),
+      entries,
+      fundBalances: Object.values(fundBalances),
+      totalEntries: entries.length,
+    });
+  } catch (error) {
+    console.error("GL report error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });

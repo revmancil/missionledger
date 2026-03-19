@@ -11,6 +11,17 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { useFunds } from "@/hooks/use-funds";
 import { useAccounts } from "@/hooks/use-accounts";
 
+const FUND_TYPE_LABELS: Record<string, string> = {
+  UNRESTRICTED: "Unrestricted",
+  RESTRICTED_TEMP: "Restricted (Temp)",
+  RESTRICTED_PERM: "Restricted (Perm)",
+  BOARD_DESIGNATED: "Board Designated",
+};
+function fundLabel(f: any) {
+  const type = FUND_TYPE_LABELS[f.fundType] ?? "Unrestricted";
+  return `${f.name} — ${type}`;
+}
+
 export default function DonationsPage() {
   const { data: donations = [], isLoading } = useDonations();
   const createDonation = useCreateDonation();
@@ -100,7 +111,7 @@ export default function DonationsPage() {
                   <label className="text-sm font-medium">Fund (Optional)</label>
                   <select name="fundId" className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
                     <option value="">-- No Fund --</option>
-                    {funds.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+                    {funds.map(f => <option key={f.id} value={f.id}>{fundLabel(f)}</option>)}
                   </select>
                 </div>
               </div>

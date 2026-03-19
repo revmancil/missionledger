@@ -10,6 +10,17 @@ import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { useGetFunds, useGetAccounts, useGetVendors } from "@workspace/api-client-react";
 
+const FUND_TYPE_LABELS: Record<string, string> = {
+  UNRESTRICTED: "Unrestricted",
+  RESTRICTED_TEMP: "Restricted (Temp)",
+  RESTRICTED_PERM: "Restricted (Perm)",
+  BOARD_DESIGNATED: "Board Designated",
+};
+function fundLabel(f: any) {
+  const type = FUND_TYPE_LABELS[f.fundType] ?? "Unrestricted";
+  return `${f.name} — ${type}`;
+}
+
 const EXPENSE_CATEGORIES = [
   "Salaries", "Rent", "Utilities", "Office Supplies", "Marketing",
   "Travel", "Technology", "Program Expenses", "Professional Services", "Miscellaneous"
@@ -105,7 +116,7 @@ export default function ExpensesPage() {
                 <label className="text-sm font-medium">Fund (Optional)</label>
                 <select name="fundId" className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
                   <option value="">-- No Fund --</option>
-                  {funds.map((f: any) => <option key={f.id} value={f.id}>{f.name}</option>)}
+                  {funds.map((f: any) => <option key={f.id} value={f.id}>{fundLabel(f)}</option>)}
                 </select>
               </div>
               <div className="grid grid-cols-2 gap-4 bg-muted/50 p-3 rounded-lg border border-border">
