@@ -6,6 +6,7 @@ import {
   requireAuth,
   requirePlatformAdmin,
   signToken,
+  hashPassword,
   AuthUser,
   COOKIE_NAME_EXPORT as COOKIE_NAME,
 } from "../lib/auth";
@@ -271,6 +272,32 @@ router.delete("/global-coa/:code", async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     console.error("Global COA delete error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ── POST /master-admin/reset-password ─────────────────────────────────────────
+router.post("/reset-password", async (req, res) => {
+  try {
+    const { userId, newPassword } = req.body ?? {};
+    if (!userId || !newPassword) {
+      return res.status(400).json({ error: "userId and newPassword are required." });
+    }
+    if (newPassword.length < 8) {
+      return res.status(400).json({ error: "Password must be at least 8 characters." });
+    }
+
+    const [user] = await db.select({ id: users.id, email: users.email, companyId: users.companyId })
+      .from(users).where(eq(users.id, userId)).limit(1);
+    if (!user) return res.status(404).json({ error: "User not found." });
+
+    const hashed = await hashPassword(newPassword);
+    await db.update(users).set({ password: hashed } as any).where(eq(users.id, userId));
+
+    console.log(`[ADMIN] Password reset for user ${user.email} (${userId}) by platform admin`);
+    res.json({ success: true, message: `Password reset for ${user.email}` });
+  } catch (error) {
+    console.error("Reset password error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });
