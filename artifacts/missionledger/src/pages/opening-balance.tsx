@@ -3,7 +3,7 @@ import { format } from "date-fns";
 import {
   CheckCircle2, AlertTriangle, Landmark, Scale, BookOpen,
   RefreshCw, Lock, RotateCcw, Info, Plus, Trash2, Layers,
-  Building2, CreditCard, Wallet, ChevronRight, Calendar, X,
+  Building2, CreditCard, Wallet, ChevronRight, Calendar, X, TrendingUp,
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
@@ -20,7 +20,7 @@ const api = (url: string, init?: RequestInit) =>
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type Method = "CASH" | "ACCRUAL";
-type TabKey = "bank" | "assets" | "liabilities";
+type TabKey = "bank" | "assets" | "liabilities" | "equity";
 
 interface CoaAccount {
   id: string;
@@ -717,6 +717,26 @@ export default function OpeningBalancePage() {
   const totalLiabilities = useMemo(() => liabilityRows.reduce((s, r) => s + parseAmt(r.amount), 0), [liabilityRows]);
   const totalNetAssets   = totalAssets - totalLiabilities;
 
+  // Live per-fund equity summary (computed from all tabs)
+  const fundEquitySummary = useMemo(() => {
+    const assetEntries = [
+      ...bankRows.map((r) => ({ ...r, aType: "ASSET" as const })),
+      ...assetRows.map((r) => ({ ...r, aType: "ASSET" as const })),
+    ].filter((r) => parseAmt(r.amount) > 0 && r.fundId);
+    const liabEntries = (method === "ACCRUAL" ? liabilityRows : [])
+      .filter((r) => parseAmt(r.amount) > 0 && r.fundId);
+    const allFundIds = [...new Set([
+      ...assetEntries.map((r) => r.fundId),
+      ...liabEntries.map((r) => r.fundId),
+    ])];
+    return allFundIds.map((fid) => {
+      const fund = funds.find((f) => f.id === fid);
+      const assets = assetEntries.filter((r) => r.fundId === fid).reduce((s, r) => s + parseAmt(r.amount), 0);
+      const liabilities = liabEntries.filter((r) => r.fundId === fid).reduce((s, r) => s + parseAmt(r.amount), 0);
+      return { fund, fundId: fid, assets, liabilities, netAssets: assets - liabilities };
+    }).sort((a, b) => (a.fund?.name ?? "").localeCompare(b.fund?.name ?? ""));
+  }, [bankRows, assetRows, liabilityRows, funds, method]);
+
   // ── Validation ────────────────────────────────────────────────────────────
   const allRows = [
     ...bankRows.map((r) => ({ ...r, accountType: "ASSET" as const })),
@@ -881,6 +901,15 @@ export default function OpeningBalancePage() {
       total: totalLiabilities,
       accountColLabel: "Liability Name",
       amountColLabel: "Balance Owed",
+    },
+    {
+      key: "equity",
+      label: "Equity / Net Assets",
+      icon: <TrendingUp className="h-4 w-4" />,
+      count: fundEquitySummary.length,
+      total: totalNetAssets,
+      accountColLabel: "",
+      amountColLabel: "",
     },
   ];
 
@@ -1121,6 +1150,141 @@ export default function OpeningBalancePage() {
                   />
                 </>
               )}
+            </div>
+          )}
+
+          {activeTab === "equity" && (
+            <div className="space-y-4">
+              {/* Explainer */}
+              <div className="flex items-start gap-3 p-4 rounded-xl border border-violet-200 bg-violet-50 text-sm text-violet-900">
+                <TrendingUp className="h-5 w-5 shrink-0 mt-0.5 text-violet-500" />
+                <div className="space-y-1">
+                  <p className="font-semibold text-violet-800">Equity is automatically computed — you don't enter it here.</p>
+                  <p className="text-violet-700 leading-relaxed">
+                    For each fund, the wizard automatically creates a <em>Net Assets — [Fund Name]</em> equity account
+                    and posts the balancing entry. The Net Assets balance for each fund equals that fund's
+                    <strong> Total Assets minus Total Liabilities</strong>.
+                  </p>
+                  <p className="text-violet-700 leading-relaxed">
+                    To apply fund-level balances, use the <strong>Fund</strong> column on each row in the
+                    Bank/Cash, Assets, and Liabilities tabs. Each dollar you enter is allocated to the fund you select.
+                  </p>
+                </div>
+              </div>
+
+              {/* Equation card */}
+              <div className="flex flex-wrap items-center gap-4 p-4 rounded-xl border border-gray-200 bg-gray-50 text-sm font-semibold">
+                <span className="px-3 py-1.5 rounded-lg bg-blue-100 text-blue-800">
+                  Total Assets&nbsp;&nbsp;{fmt(totalAssets)}
+                </span>
+                {method === "ACCRUAL" && (
+                  <>
+                    <span className="text-muted-foreground">−</span>
+                    <span className="px-3 py-1.5 rounded-lg bg-orange-100 text-orange-800">
+                      Total Liabilities&nbsp;&nbsp;{fmt(totalLiabilities)}
+                    </span>
+                    <span className="text-muted-foreground">=</span>
+                  </>
+                )}
+                <span className={cn(
+                  "px-3 py-1.5 rounded-lg font-bold",
+                  totalNetAssets < 0 ? "bg-red-100 text-red-800" : "bg-violet-100 text-violet-800"
+                )}>
+                  Total Net Assets (Equity)&nbsp;&nbsp;{fmt(totalNetAssets)}
+                </span>
+              </div>
+
+              {/* Per-fund breakdown */}
+              {fundEquitySummary.length === 0 ? (
+                <div className="flex items-start gap-2 p-4 rounded-xl border border-gray-200 bg-gray-50 text-sm text-muted-foreground">
+                  <Info className="h-4 w-4 shrink-0 mt-0.5" />
+                  <span>
+                    No fund balances yet. Enter amounts in the <strong>Bank/Cash</strong> or <strong>Assets</strong> tabs
+                    and assign each row to a fund — the equity summary will appear here automatically.
+                  </span>
+                </div>
+              ) : (
+                <div className="rounded-xl border border-gray-200 overflow-hidden">
+                  <div className="px-5 py-3 bg-gray-50 border-b border-gray-200 flex items-center gap-2">
+                    <Layers className="h-4 w-4 text-violet-500" />
+                    <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                      Fund-Level Equity Breakdown
+                    </span>
+                  </div>
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-100">
+                        <th className="text-left px-5 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Fund</th>
+                        <th className="text-right px-5 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Assets</th>
+                        {method === "ACCRUAL" && (
+                          <th className="text-right px-5 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Liabilities</th>
+                        )}
+                        <th className="text-right px-5 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Net Assets (Equity)</th>
+                        <th className="text-left px-5 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Auto-created GL Account</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {fundEquitySummary.map(({ fund, fundId, assets, liabilities, netAssets }) => (
+                        <tr key={fundId} className="hover:bg-gray-50/50">
+                          <td className="px-5 py-3 font-medium text-foreground">
+                            {fund?.name ?? "Unknown Fund"}
+                            {fund?.fundType && (
+                              <span className="ml-2 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700 uppercase tracking-wide">
+                                {fund.fundType === "UNRESTRICTED" ? "Unrestricted"
+                                  : fund.fundType === "RESTRICTED_TEMP" ? "Restricted"
+                                  : fund.fundType === "RESTRICTED_PERM" ? "Perm. Restricted"
+                                  : fund.fundType === "BOARD_DESIGNATED" ? "Board Designated"
+                                  : fund.fundType}
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-5 py-3 text-right tabular-nums text-blue-700 font-semibold">{fmt(assets)}</td>
+                          {method === "ACCRUAL" && (
+                            <td className="px-5 py-3 text-right tabular-nums text-orange-700">{liabilities > 0 ? fmt(liabilities) : "—"}</td>
+                          )}
+                          <td className={cn(
+                            "px-5 py-3 text-right tabular-nums font-bold",
+                            netAssets < 0 ? "text-red-700" : "text-violet-700"
+                          )}>
+                            {fmt(netAssets)}
+                          </td>
+                          <td className="px-5 py-3">
+                            <span className="inline-flex items-center gap-1 text-[11px] font-mono bg-violet-50 border border-violet-200 text-violet-800 px-2 py-1 rounded-md">
+                              Net Assets — {fund?.name ?? "Fund"}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="border-t-2 border-gray-200 bg-gray-50">
+                        <td className="px-5 py-3 font-bold text-foreground">Total</td>
+                        <td className="px-5 py-3 text-right tabular-nums font-bold text-blue-700">{fmt(totalAssets)}</td>
+                        {method === "ACCRUAL" && (
+                          <td className="px-5 py-3 text-right tabular-nums font-bold text-orange-700">{totalLiabilities > 0 ? fmt(totalLiabilities) : "—"}</td>
+                        )}
+                        <td className={cn(
+                          "px-5 py-3 text-right tabular-nums font-bold",
+                          totalNetAssets < 0 ? "text-red-700" : "text-violet-700"
+                        )}>
+                          {fmt(totalNetAssets)}
+                        </td>
+                        <td className="px-5 py-3" />
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              )}
+
+              {/* Tip on fund allocation */}
+              <div className="flex items-start gap-2 p-3 rounded-lg border border-blue-100 bg-blue-50 text-xs text-blue-800">
+                <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                <span>
+                  <strong>Tip:</strong> If one bank account holds money for multiple funds (a pooled account),
+                  add multiple rows for that same bank account — one row per fund — and split the balance between them.
+                  Each row will create a separate <em>Net Assets — [Fund]</em> credit entry in the ledger.
+                </span>
+              </div>
             </div>
           )}
         </div>
