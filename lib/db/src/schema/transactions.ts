@@ -25,6 +25,7 @@ export const transactions = pgTable("transactions", {
   plaidTransactionId: text("plaid_transaction_id"),
   isVoid: boolean("is_void").notNull().default(false),
   functionalType: text("functional_type"), // 990 tag: PROGRAM_SERVICE | MANAGEMENT_GENERAL | FUNDRAISING
+  transactionFingerprint: text("transaction_fingerprint"), // duplicate-detection: "{amount}_{date}_{payee}"
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

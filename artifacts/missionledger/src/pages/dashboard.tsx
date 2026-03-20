@@ -12,6 +12,7 @@ import {
 import { AppLayout } from "@/components/layout/AppLayout";
 import { cn } from "@/lib/utils";
 import { useLocation } from "wouter";
+import { useFinancialSync } from "@/lib/financial-sync";
 
 const BASE = import.meta.env.BASE_URL;
 
@@ -177,6 +178,7 @@ interface Readiness990 {
 // ── Main Dashboard ────────────────────────────────────────────────────────────
 export default function Dashboard() {
   const [, navigate] = useLocation();
+  const { version } = useFinancialSync();
   const [data, setData] = useState<DashData | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
@@ -218,7 +220,8 @@ export default function Dashboard() {
     }
   }, [load]);
 
-  useEffect(() => { load(); }, [load]);
+  // Re-fetch whenever any component triggers a global refetch (e.g. after a transaction save)
+  useEffect(() => { load(); }, [load, version]);
 
   if (loading) {
     return (

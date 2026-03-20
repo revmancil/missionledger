@@ -23,6 +23,7 @@ import {
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
+import { useFinancialSync } from "@/lib/financial-sync";
 
 const BASE = import.meta.env.BASE_URL;
 
@@ -357,6 +358,7 @@ function AddAccountModal({
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function BankRegisterPage() {
+  const { refetch: globalRefetch } = useFinancialSync();
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
   const [coaList, setCoaList] = useState<ChartAccount[]>([]);
   const [fundList, setFundList] = useState<Fund[]>([]);
@@ -597,11 +599,16 @@ export default function BankRegisterPage() {
       });
       if (!res.ok) {
         const e = await res.json();
-        setFormError(e.error ?? "Error saving transaction");
+        if (e.code === "DUPLICATE_TRANSACTION") {
+          setFormError(e.error ?? "Duplicate Detected: This transaction is already in the Register.");
+        } else {
+          setFormError(e.error ?? "Error saving transaction");
+        }
         return;
       }
       setShowForm(false);
       await loadAll();
+      globalRefetch();
     } finally { setSaving(false); }
   }
 
@@ -609,6 +616,7 @@ export default function BankRegisterPage() {
     await apiFetch(`${BASE}api/transactions/${tx.id}`, { method: "DELETE" });
     setDeleteTarget(null);
     await loadAll();
+    globalRefetch();
   }
 
   async function toggleStatus(tx: Transaction) {
@@ -618,6 +626,7 @@ export default function BankRegisterPage() {
       body: JSON.stringify({ status: next }),
     });
     await loadAll();
+    globalRefetch();
   }
 
   async function handlePlaidSync(bankAccountId: string) {

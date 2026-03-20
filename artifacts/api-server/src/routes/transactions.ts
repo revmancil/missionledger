@@ -3,7 +3,7 @@ import {
   db, transactions, transactionSplits, chartOfAccounts,
   bankAccounts, funds, vendors, companies, journalEntryLines,
 } from "@workspace/db";
-import { eq, and, desc, inArray, sql } from "drizzle-orm";
+import { eq, and, desc, inArray, sql, ne } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
 import { generateGlEntries, voidGlEntries } from "../lib/gl";
 
@@ -36,6 +36,36 @@ function isInClosedPeriod(txDate: Date | string, closedUntil: Date | null): bool
 }
 
 const router = Router();
+
+// ── Fingerprint helpers ────────────────────────────────────────────────────────
+/** Builds a stable duplicate-detection key: "{amount}_{YYYY-MM-DD}_{payee}" */
+function buildFingerprint(amount: number, date: Date | string, payee: string): string {
+  const d = date instanceof Date ? date : new Date(date);
+  const dateStr = d.toISOString().substring(0, 10);
+  const payeeNorm = String(payee).trim().toLowerCase().replace(/\s+/g, " ");
+  return `${Number(amount).toFixed(2)}_${dateStr}_${payeeNorm}`;
+}
+
+/** Returns existing non-void transaction with same fingerprint for this company, excluding a given id. */
+async function findDuplicate(
+  companyId: string,
+  fingerprint: string,
+  excludeId?: string
+): Promise<{ id: string; date: Date; payee: string } | null> {
+  const rows = await db
+    .select({ id: transactions.id, date: transactions.date, payee: transactions.payee })
+    .from(transactions)
+    .where(
+      and(
+        eq(transactions.companyId, companyId),
+        eq(transactions.transactionFingerprint, fingerprint),
+        eq(transactions.isVoid, false),
+        ...(excludeId ? [ne(transactions.id, excludeId)] : [])
+      )
+    )
+    .limit(1);
+  return rows[0] ?? null;
+}
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 async function getLookups(companyId: string) {
@@ -180,29 +210,59 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
       }
     }
 
-    const [created] = await db
-      .insert(transactions)
-      .values({
-        companyId,
-        bankAccountId: bankAccountId ?? null,
-        date: new Date(date),
-        payee,
-        vendorId: vendorId ?? null,
-        amount: parseFloat(amount),
-        type: (type as any) ?? "DEBIT",
-        status: (status as any) ?? "UNCLEARED",
-        chartAccountId: isSplit ? null : (chartAccountId ?? null),
-        isSplit,
-        memo: memo ?? null,
-        checkNumber: checkNumber ?? null,
-        referenceNumber: referenceNumber ?? null,
-        fundId: fundId ?? null,
-        isVoid: false,
-        functionalType: isSplit ? null : (functionalType ?? null),
-      })
-      .returning();
+    // ── Duplicate detection ────────────────────────────────────────────────────
+    const txDate = new Date(date);
+    const fingerprint = buildFingerprint(parseFloat(amount), txDate, payee);
+    const dup = await findDuplicate(companyId, fingerprint);
+    if (dup) {
+      return res.status(409).json({
+        error: "Duplicate Detected: This transaction is already in the Register.",
+        code: "DUPLICATE_TRANSACTION",
+        existingId: dup.id,
+      });
+    }
 
-    if (isSplit) await upsertSplits(created.id, rawSplits);
+    // ── Atomic DB transaction ────────────────────────────────────────────────
+    const created = await db.transaction(async (trx) => {
+      const [row] = await trx
+        .insert(transactions)
+        .values({
+          companyId,
+          bankAccountId: bankAccountId ?? null,
+          date: txDate,
+          payee,
+          vendorId: vendorId ?? null,
+          amount: parseFloat(amount),
+          type: (type as any) ?? "DEBIT",
+          status: (status as any) ?? "UNCLEARED",
+          chartAccountId: isSplit ? null : (chartAccountId ?? null),
+          isSplit,
+          memo: memo ?? null,
+          checkNumber: checkNumber ?? null,
+          referenceNumber: referenceNumber ?? null,
+          fundId: fundId ?? null,
+          isVoid: false,
+          functionalType: isSplit ? null : (functionalType ?? null),
+          transactionFingerprint: fingerprint,
+        })
+        .returning();
+      if (isSplit) {
+        await trx.delete(transactionSplits).where(eq(transactionSplits.transactionId, row.id));
+        for (let i = 0; i < rawSplits.length; i++) {
+          const s = rawSplits[i];
+          await trx.insert(transactionSplits).values({
+            transactionId: row.id,
+            chartAccountId: s.chartAccountId ?? null,
+            vendorId: s.vendorId ?? null,
+            amount: s.amount,
+            memo: s.memo ?? null,
+            functionalType: s.functionalType ?? null,
+            sortOrder: s.sortOrder ?? i,
+          });
+        }
+      }
+      return row;
+    });
 
     // Generate double-entry GL records (fire-and-forget, non-blocking to response)
     generateGlEntries(created.id, companyId).catch((e) =>
@@ -329,29 +389,61 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
       }
     }
 
-    const [updated] = await db
-      .update(transactions)
-      .set({
-        date: date ? new Date(date) : undefined,
-        payee: payee ?? undefined,
-        vendorId: vendorId ?? null,
-        amount: amount !== undefined ? parseFloat(amount) : undefined,
-        type: (type as any) ?? undefined,
-        status: (status as any) ?? undefined,
-        chartAccountId: isSplit ? null : (chartAccountId ?? null),
-        isSplit,
-        memo: memo ?? null,
-        checkNumber: checkNumber ?? null,
-        referenceNumber: referenceNumber ?? null,
-        fundId: fundId ?? null,
-        bankAccountId: bankAccountId ?? null,
-        functionalType: isSplit ? null : (functionalType ?? null),
-        updatedAt: new Date(),
-      })
-      .where(eq(transactions.id, req.params.id))
-      .returning();
+    // ── Fingerprint update + duplicate check ────────────────────────────────
+    const effectiveAmount = amount !== undefined ? parseFloat(amount) : existing.amount;
+    const effectiveDateVal = date ? new Date(date) : existing.date;
+    const effectivePayee   = payee ?? existing.payee;
+    const newFingerprint = buildFingerprint(effectiveAmount, effectiveDateVal, effectivePayee);
+    const dup = await findDuplicate(companyId, newFingerprint, req.params.id);
+    if (dup) {
+      return res.status(409).json({
+        error: "Duplicate Detected: This transaction is already in the Register.",
+        code: "DUPLICATE_TRANSACTION",
+        existingId: dup.id,
+      });
+    }
 
-    await upsertSplits(updated.id, isSplit ? rawSplits : []);
+    // ── Atomic DB transaction ────────────────────────────────────────────────
+    const updated = await db.transaction(async (trx) => {
+      const [row] = await trx
+        .update(transactions)
+        .set({
+          date: date ? new Date(date) : undefined,
+          payee: payee ?? undefined,
+          vendorId: vendorId ?? null,
+          amount: amount !== undefined ? parseFloat(amount) : undefined,
+          type: (type as any) ?? undefined,
+          status: (status as any) ?? undefined,
+          chartAccountId: isSplit ? null : (chartAccountId ?? null),
+          isSplit,
+          memo: memo ?? null,
+          checkNumber: checkNumber ?? null,
+          referenceNumber: referenceNumber ?? null,
+          fundId: fundId ?? null,
+          bankAccountId: bankAccountId ?? null,
+          functionalType: isSplit ? null : (functionalType ?? null),
+          transactionFingerprint: newFingerprint,
+          updatedAt: new Date(),
+        })
+        .where(eq(transactions.id, req.params.id))
+        .returning();
+      await trx.delete(transactionSplits).where(eq(transactionSplits.transactionId, row.id));
+      if (isSplit) {
+        for (let i = 0; i < rawSplits.length; i++) {
+          const s = rawSplits[i];
+          await trx.insert(transactionSplits).values({
+            transactionId: row.id,
+            chartAccountId: s.chartAccountId ?? null,
+            vendorId: s.vendorId ?? null,
+            amount: s.amount,
+            memo: s.memo ?? null,
+            functionalType: s.functionalType ?? null,
+            sortOrder: s.sortOrder ?? i,
+          });
+        }
+      }
+      return row;
+    });
 
     // Regenerate GL entries to reflect changes
     generateGlEntries(updated.id, companyId).catch((e) =>

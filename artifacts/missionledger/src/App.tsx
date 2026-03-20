@@ -4,6 +4,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster as SonnerToaster } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
+import { FinancialSyncProvider } from "@/lib/financial-sync";
 
 // Pages
 import LandingPage from "@/pages/landing";
@@ -82,7 +83,9 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-          <Router />
+          <FinancialSyncProvider>
+            <Router />
+          </FinancialSyncProvider>
         </WouterRouter>
         <Toaster />
         <SonnerToaster position="top-right" richColors />
