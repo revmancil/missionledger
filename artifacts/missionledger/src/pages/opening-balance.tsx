@@ -3,7 +3,7 @@ import { format } from "date-fns";
 import {
   CheckCircle2, AlertTriangle, RefreshCw, Lock, RotateCcw,
   Info, Plus, Trash2, Layers, Calendar, X, ArrowLeftRight,
-  Search, ChevronDown, Download, Upload, Landmark, Scale,
+  Search, ChevronDown, Download, Upload, Landmark, Scale, TrendingUp,
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
@@ -15,7 +15,7 @@ import {
 import { cn } from "@/lib/utils";
 
 const BASE = import.meta.env.BASE_URL;
-const api = (url: string, init?: RequestInit) =>
+const api  = (url: string, init?: RequestInit) =>
   fetch(url, { credentials: "include", ...init });
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -30,17 +30,16 @@ interface CoaAccount {
   isSystem?: boolean;
   isLinkedBankAccount?: boolean;
   linkedBankName?: string;
-  isPlaidLinked?: boolean;
 }
 
 interface FundRecord {
   id: string;
   name: string;
-  fundType?: string;
+  fundType?: string; // UNRESTRICTED | RESTRICTED_TEMP | RESTRICTED_PERM | ...
 }
 
-// Bank/Cash row — always a DEBIT (asset balance)
-interface BankRow {
+// Asset row (always DEBIT)
+interface AssetRow {
   id: string;
   accountId: string;
   fundId: string;
@@ -48,13 +47,12 @@ interface BankRow {
   memo: string;
 }
 
-// Other row — ASSET (DEBIT) or LIABILITY (CREDIT)
-interface OtherRow {
+// Liability row (always CREDIT)
+interface LiabilityRow {
   id: string;
   accountId: string;
   fundId: string;
   amount: string;
-  entryType: EntryType;
   memo: string;
 }
 
@@ -64,19 +62,33 @@ const fmt = (n: number) =>
 
 const uid = () => crypto.randomUUID();
 
-// ── Account Combobox ──────────────────────────────────────────────────────────
-const GROUP_LABELS: Record<string, string> = {
-  ASSET:     "Assets",
-  LIABILITY: "Liabilities",
-  EQUITY:    "Net Assets / Equity",
-};
-const GROUP_ORDER = ["ASSET", "LIABILITY", "EQUITY"] as const;
-const GROUP_HEADER_CLS: Record<string, string> = {
-  ASSET:     "bg-blue-50 text-blue-700 border-blue-100",
-  LIABILITY: "bg-orange-50 text-orange-700 border-orange-100",
-  EQUITY:    "bg-violet-50 text-violet-700 border-violet-100",
-};
+// Auto-pick a default equity account for a fund based on its type
+function defaultEquityAccount(fundType: string | undefined, equityCoa: CoaAccount[]): string {
+  if (!equityCoa.length) return "";
+  const type = (fundType ?? "").toUpperCase();
 
+  if (type === "UNRESTRICTED") {
+    const match =
+      equityCoa.find((a) => /unrestricted/i.test(a.name)) ??
+      equityCoa.find((a) => /^3[12]/.test(a.code));
+    return match?.id ?? equityCoa[0].id;
+  }
+  if (type === "RESTRICTED_TEMP" || type === "TEMPORARILY_RESTRICTED") {
+    const match =
+      equityCoa.find((a) => /temporar|restricted/i.test(a.name)) ??
+      equityCoa.find((a) => /^32/.test(a.code));
+    return match?.id ?? equityCoa[0].id;
+  }
+  if (type === "RESTRICTED_PERM" || type === "PERMANENTLY_RESTRICTED") {
+    const match =
+      equityCoa.find((a) => /permanentl|restricted/i.test(a.name)) ??
+      equityCoa.find((a) => /^33/.test(a.code));
+    return match?.id ?? equityCoa[0].id;
+  }
+  return equityCoa[0].id;
+}
+
+// ── Account Combobox ──────────────────────────────────────────────────────────
 function AccountCombobox({
   accounts, value, onChange, onAddNew, placeholder = "Search account…",
 }: {
@@ -89,69 +101,39 @@ function AccountCombobox({
   const [query, setQuery] = useState("");
   const [open, setOpen]   = useState(false);
   const containerRef      = useRef<HTMLDivElement>(null);
-  const inputRef          = useRef<HTMLInputElement>(null);
 
   const selected = accounts.find((a) => a.id === value);
 
-  const filteredFlat = useMemo(() => {
-    if (!query.trim()) return null;
+  const filtered = useMemo(() => {
+    if (!query.trim()) return accounts.slice(0, 80);
     const q = query.toLowerCase();
     return accounts
       .filter((a) => a.code.toLowerCase().includes(q) || a.name.toLowerCase().includes(q))
       .slice(0, 60);
   }, [accounts, query]);
 
-  const grouped = useMemo(() => {
-    const map: Record<string, CoaAccount[]> = { ASSET: [], LIABILITY: [], EQUITY: [] };
-    for (const a of accounts) {
-      const key = a.type as keyof typeof map;
-      if (map[key]) map[key].push(a);
-    }
-    return map;
-  }, [accounts]);
-
   useEffect(() => {
     if (!open) return;
-    const handler = (e: MouseEvent) => {
+    const h = (e: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node))
         setOpen(false);
     };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
   }, [open]);
 
-  const displayValue = open
+  const display = open
     ? query
     : selected
     ? `${selected.code} — ${selected.linkedBankName ?? selected.name}`
     : "";
-
-  const renderOption = (a: CoaAccount) => (
-    <button
-      key={a.id}
-      className={cn(
-        "w-full text-left px-3 py-2 text-sm hover:bg-blue-50 flex items-center gap-2 transition-colors",
-        a.id === value && "bg-blue-50"
-      )}
-      onMouseDown={(e) => {
-        e.preventDefault();
-        onChange(a.id);
-        setOpen(false);
-        setQuery("");
-      }}
-    >
-      <span className="font-mono text-xs text-muted-foreground w-12 shrink-0">{a.code}</span>
-      <span className="flex-1 truncate">{a.linkedBankName ?? a.name}</span>
-    </button>
-  );
 
   return (
     <div ref={containerRef} className="relative w-full min-w-[180px]">
       <div className="relative">
         <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
         <input
-          ref={inputRef}
-          value={displayValue}
+          value={display}
           placeholder={placeholder}
           className={cn(
             "w-full h-9 pl-8 pr-8 text-sm border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[hsl(210,60%,40%)]",
@@ -173,29 +155,28 @@ function AccountCombobox({
           <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
         )}
       </div>
-
       {open && (
         <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-xl max-h-72 overflow-y-auto">
-          {filteredFlat ? (
-            <>
-              {filteredFlat.map(renderOption)}
-              {filteredFlat.length === 0 && (
-                <div className="px-3 py-2 text-sm text-muted-foreground">No accounts match</div>
+          {filtered.map((a) => (
+            <button
+              key={a.id}
+              className={cn(
+                "w-full text-left px-3 py-2 text-sm hover:bg-blue-50 flex items-center gap-2 transition-colors",
+                a.id === value && "bg-blue-50"
               )}
-            </>
-          ) : (
-            GROUP_ORDER.map((type) => {
-              const items = grouped[type] ?? [];
-              if (items.length === 0) return null;
-              return (
-                <div key={type}>
-                  <div className={cn("px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest border-b", GROUP_HEADER_CLS[type])}>
-                    {GROUP_LABELS[type]} ({items.length})
-                  </div>
-                  {items.map(renderOption)}
-                </div>
-              );
-            })
+              onMouseDown={(e) => {
+                e.preventDefault();
+                onChange(a.id);
+                setOpen(false);
+                setQuery("");
+              }}
+            >
+              <span className="font-mono text-xs text-muted-foreground w-12 shrink-0">{a.code}</span>
+              <span className="flex-1 truncate">{a.linkedBankName ?? a.name}</span>
+            </button>
+          ))}
+          {filtered.length === 0 && (
+            <div className="px-3 py-2 text-sm text-muted-foreground">No accounts match</div>
           )}
           <div className="border-t border-gray-100 px-3 py-2">
             <button
@@ -256,18 +237,23 @@ function MethodToggle({ value, onChange }: { value: Method; onChange: (v: Method
 
 // ── Add Account Modal ─────────────────────────────────────────────────────────
 function AddAccountModal({
-  open, onClose, onCreated,
-}: { open: boolean; onClose: () => void; onCreated: (a: CoaAccount) => void }) {
-  const [code, setCode]   = useState("");
-  const [name, setName]   = useState("");
-  const [type, setType]   = useState<"ASSET" | "LIABILITY" | "EQUITY">("ASSET");
+  open, onClose, onCreated, defaultType = "ASSET",
+}: {
+  open: boolean;
+  onClose: () => void;
+  onCreated: (a: CoaAccount) => void;
+  defaultType?: "ASSET" | "LIABILITY" | "EQUITY";
+}) {
+  const [code, setCode]     = useState("");
+  const [name, setName]     = useState("");
+  const [type, setType]     = useState<"ASSET" | "LIABILITY" | "EQUITY">(defaultType);
   const [saving, setSaving] = useState(false);
   const [error, setError]   = useState("");
   const nameRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (open) { setCode(""); setName(""); setType("ASSET"); setError(""); setTimeout(() => nameRef.current?.focus(), 80); }
-  }, [open]);
+    if (open) { setCode(""); setName(""); setType(defaultType); setError(""); setTimeout(() => nameRef.current?.focus(), 80); }
+  }, [open, defaultType]);
 
   async function handleSave() {
     setError("");
@@ -306,7 +292,7 @@ function AddAccountModal({
               <Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="e.g. 1050" className="mt-1 h-9 font-mono" />
             </div>
             <div>
-              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Account Name</Label>
+              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Name</Label>
               <Input ref={nameRef} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Checking Account" className="mt-1 h-9" onKeyDown={(e) => e.key === "Enter" && handleSave()} />
             </div>
           </div>
@@ -332,23 +318,18 @@ function AddAccountModal({
 
 // ── Confirm Modal ─────────────────────────────────────────────────────────────
 function ConfirmModal({
-  open, onClose, onConfirm, saving, error, submitRows, allCoa, funds, asOfDate, method,
+  open, onClose, onConfirm, saving, error,
+  submitRows, allCoa, funds, asOfDate, method,
 }: {
-  open: boolean;
-  onClose: () => void;
-  onConfirm: () => void;
-  saving: boolean;
-  error: string;
+  open: boolean; onClose: () => void; onConfirm: () => void;
+  saving: boolean; error: string;
   submitRows: Array<{ accountId: string; fundId: string; amount: number; entryType: EntryType; memo: string | null }>;
-  allCoa: CoaAccount[];
-  funds: FundRecord[];
-  asOfDate: string;
-  method: Method;
+  allCoa: CoaAccount[]; funds: FundRecord[]; asOfDate: string; method: Method;
 }) {
   const acctMap = Object.fromEntries(allCoa.map((a) => [a.id, a]));
   const fundMap = Object.fromEntries(funds.map((f) => [f.id, f]));
-  const totalDebits  = submitRows.filter((r) => r.entryType === "DEBIT").reduce((s, r) => s + r.amount, 0);
-  const totalCredits = submitRows.filter((r) => r.entryType === "CREDIT").reduce((s, r) => s + r.amount, 0);
+  const totalDR = submitRows.filter((r) => r.entryType === "DEBIT").reduce((s, r) => s + r.amount, 0);
+  const totalCR = submitRows.filter((r) => r.entryType === "CREDIT").reduce((s, r) => s + r.amount, 0);
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
@@ -373,18 +354,18 @@ function ConfirmModal({
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200">
-                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Account</th>
-                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Fund</th>
-                  <th className="text-right px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide w-28">Debit</th>
-                  <th className="text-right px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide w-28">Credit</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase">Account</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase">Fund</th>
+                  <th className="text-right px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase w-28">Debit</th>
+                  <th className="text-right px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase w-28">Credit</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {submitRows.map((row, idx) => {
+                {submitRows.map((row, i) => {
                   const acct = acctMap[row.accountId];
                   const fund = fundMap[row.fundId];
                   return (
-                    <tr key={idx} className="hover:bg-gray-50/50">
+                    <tr key={i} className="hover:bg-gray-50/50">
                       <td className="px-4 py-2.5">
                         <span className="font-mono text-xs text-muted-foreground mr-2">{acct?.code}</span>
                         <span className="font-medium">{acct?.linkedBankName ?? acct?.name ?? "—"}</span>
@@ -404,15 +385,15 @@ function ConfirmModal({
               <tfoot>
                 <tr className="border-t-2 border-gray-200 bg-gray-50 font-bold">
                   <td className="px-4 py-2.5 text-sm" colSpan={2}>Total</td>
-                  <td className="px-4 py-2.5 text-right tabular-nums text-blue-700">{fmt(totalDebits)}</td>
-                  <td className="px-4 py-2.5 text-right tabular-nums text-emerald-700">{fmt(totalCredits)}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums text-blue-700">{fmt(totalDR)}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums text-emerald-700">{fmt(totalCR)}</td>
                 </tr>
               </tfoot>
             </table>
           </div>
           <div className="flex items-center gap-2 p-3 rounded-lg bg-blue-50 border border-blue-100 text-sm text-blue-800">
             <Info className="h-4 w-4 shrink-0" />
-            Posts <strong>{submitRows.length} lines</strong> to the GL with source type <code className="bg-blue-100 px-1 rounded text-xs">OPENING_BALANCE</code>. Any existing opening balance entry will be voided and replaced.
+            Posts <strong>{submitRows.length} lines</strong> to the GL. Any existing opening balance entry will be voided and replaced.
           </div>
         </div>
         <DialogFooter className="gap-2">
@@ -428,6 +409,91 @@ function ConfirmModal({
   );
 }
 
+// ── Ledger Row (shared for Asset + Liability sections) ─────────────────────────
+function LedgerRowInput({
+  row, funds, accounts, onUpdate, onDelete, canDelete, onAddNew, placeholder,
+}: {
+  row: AssetRow | LiabilityRow;
+  funds: FundRecord[];
+  accounts: CoaAccount[];
+  onUpdate: (patch: Partial<AssetRow>) => void;
+  onDelete: () => void;
+  canDelete: boolean;
+  onAddNew: () => void;
+  placeholder: string;
+}) {
+  const COLS = "1fr 160px 130px 1fr 32px";
+  return (
+    <div
+      className="grid gap-2 px-4 py-2.5 border-b border-gray-100 items-center transition-colors"
+      style={{ gridTemplateColumns: COLS }}
+    >
+      <AccountCombobox
+        accounts={accounts}
+        value={row.accountId}
+        onChange={(id) => onUpdate({ accountId: id })}
+        onAddNew={onAddNew}
+        placeholder={placeholder}
+      />
+      <FundSelect funds={funds} value={row.fundId} onChange={(id) => onUpdate({ fundId: id })} />
+      <Input
+        type="number" min="0" step="0.01"
+        value={row.amount}
+        onChange={(e) => onUpdate({ amount: e.target.value })}
+        placeholder="0.00"
+        className="h-9 text-right font-mono text-sm"
+      />
+      <Input
+        value={row.memo}
+        onChange={(e) => onUpdate({ memo: e.target.value })}
+        placeholder="Memo (optional)"
+        className="h-9 text-sm"
+      />
+      <button
+        onClick={onDelete}
+        disabled={!canDelete}
+        className="h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-50 disabled:opacity-30 transition-colors"
+      >
+        <Trash2 className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  );
+}
+
+// ── Section Shell ─────────────────────────────────────────────────────────────
+function SectionShell({
+  icon, title, subtitle, headerCls, headerTextCls, footerCls, footerContent, addLabel, onAdd, children,
+}: {
+  icon: React.ReactNode; title: string; subtitle: string;
+  headerCls: string; headerTextCls: string; footerCls: string;
+  footerContent: React.ReactNode; addLabel?: string; onAdd?: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className={cn("rounded-xl overflow-hidden", headerCls.replace(/bg-\S+/, "border-2").replace(/text-\S+/, "").replace(/px-\S+/, "").replace(/py-\S+/, "").trim(), "border-2")}>
+      <div className={cn(headerCls, "px-5 py-3 flex items-center gap-2")}>
+        {icon}
+        <span className="text-sm font-bold text-white">{title}</span>
+        <span className={cn("ml-auto text-xs", headerTextCls)}>{subtitle}</span>
+      </div>
+      {children}
+      {onAdd && addLabel && (
+        <div className="px-4 py-3">
+          <button
+            onClick={onAdd}
+            className={cn("flex items-center gap-1.5 text-sm font-medium transition-colors", headerTextCls)}
+          >
+            <Plus className="h-4 w-4" /> {addLabel}
+          </button>
+        </div>
+      )}
+      <div className={cn(footerCls, "px-5 py-2.5 flex justify-between items-center")}>
+        {footerContent}
+      </div>
+    </div>
+  );
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function OpeningBalancePage() {
   const [loading, setLoading]   = useState(true);
@@ -439,7 +505,8 @@ export default function OpeningBalancePage() {
   const [defaultFundId, setDefaultFundId] = useState("");
   const [showConfirm, setShowConfirm]     = useState(false);
   const [showAddAccount, setShowAddAccount] = useState(false);
-  const [addAccountSection, setAddAccountSection] = useState<"bank" | "other" | null>(null);
+  const [addAccountType, setAddAccountType] = useState<"ASSET" | "LIABILITY" | "EQUITY">("ASSET");
+  const [addAccountSection, setAddAccountSection] = useState<"asset" | "liability" | null>(null);
   const [addAccountRowId, setAddAccountRowId]   = useState<string | null>(null);
   const [existingEntryId, setExistingEntryId]   = useState<string | null>(null);
   const [createdEntry, setCreatedEntry]         = useState<any | null>(null);
@@ -448,10 +515,10 @@ export default function OpeningBalancePage() {
   const [allCoa, setAllCoa] = useState<CoaAccount[]>([]);
   const [funds, setFunds]   = useState<FundRecord[]>([]);
 
-  // ── Two-section row state ────────────────────────────────────────────────────
-  const [bankRows, setBankRows]   = useState<BankRow[]>([]);
-  const [otherRows, setOtherRows] = useState<OtherRow[]>([]);
-  // Per-fund equity account override: fundId → equityAccountId
+  // Four sections of state
+  const [assetRows,     setAssetRows]     = useState<AssetRow[]>([]);
+  const [liabilityRows, setLiabilityRows] = useState<LiabilityRow[]>([]);
+  // Per-fund equity account: fundId → equityAccountId
   const [fundEquityMap, setFundEquityMap] = useState<Record<string, string>>({});
 
   // ── Load ─────────────────────────────────────────────────────────────────────
@@ -468,41 +535,49 @@ export default function OpeningBalancePage() {
       setExistingEntryId(data.openingBalanceEntryId ?? null);
       if (data.openingBalanceDate) setAsOfDate(data.openingBalanceDate.slice(0, 10));
 
-      const firstFundId = (data.funds ?? [])[0]?.id ?? "";
-      if (firstFundId && !defaultFundId) setDefaultFundId(firstFundId);
+      const fds: FundRecord[]       = data.funds ?? [];
+      const coa: CoaAccount[]       = data.coa ?? [];
+      const firstFundId             = fds[0]?.id ?? "";
+      if (firstFundId) setDefaultFundId(firstFundId);
+
+      const eq = coa.filter((a) => a.type === "EQUITY")
+        .sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
+
+      // Build default fund→equity map from fund types
+      const defaultMap: Record<string, string> = {};
+      for (const f of fds) {
+        defaultMap[f.id] = defaultEquityAccount(f.fundType, eq);
+      }
 
       if (data.existingRows?.length) {
-        const newBank: BankRow[]  = [];
-        const newOther: OtherRow[] = [];
-        const coaMap: Record<string, CoaAccount> = Object.fromEntries(
-          (data.coa ?? []).map((a: CoaAccount) => [a.id, a])
-        );
+        const coaMap: Record<string, CoaAccount> = Object.fromEntries(coa.map((a) => [a.id, a]));
+        const newAsset: AssetRow[]       = [];
+        const newLiab: LiabilityRow[]    = [];
+        const rebuiltEquityMap: Record<string, string> = { ...defaultMap };
 
         for (const r of data.existingRows) {
           const acct = coaMap[r.accountId];
-          if (!acct || acct.type === "EQUITY") continue;
-
+          if (!acct) continue;
           const fid = r.fundId ?? firstFundId;
           const amt = String(r.amount ?? "");
           const memo = r.memo ?? "";
 
           if (acct.type === "ASSET" && r.entryType === "DEBIT") {
-            // Bank accounts → Bank section; other assets → Other section
-            if (acct.isLinkedBankAccount) {
-              newBank.push({ id: uid(), accountId: r.accountId, fundId: fid, amount: amt, memo });
-            } else {
-              newOther.push({ id: uid(), accountId: r.accountId, fundId: fid, amount: amt, entryType: "DEBIT", memo });
-            }
+            newAsset.push({ id: uid(), accountId: r.accountId, fundId: fid, amount: amt, memo });
           } else if (acct.type === "LIABILITY" && r.entryType === "CREDIT") {
-            newOther.push({ id: uid(), accountId: r.accountId, fundId: fid, amount: amt, entryType: "CREDIT", memo });
+            newLiab.push({ id: uid(), accountId: r.accountId, fundId: fid, amount: amt, memo });
+          } else if (acct.type === "EQUITY" && r.entryType === "CREDIT" && r.fundId) {
+            rebuiltEquityMap[r.fundId] = r.accountId;
           }
         }
 
-        setBankRows(newBank.length ? newBank : [{ id: uid(), accountId: "", fundId: firstFundId, amount: "", memo: "" }]);
-        setOtherRows(newOther.length ? newOther : [{ id: uid(), accountId: "", fundId: firstFundId, amount: "", entryType: "DEBIT", memo: "" }]);
+        setAssetRows(newAsset.length ? newAsset : [{ id: uid(), accountId: "", fundId: firstFundId, amount: "", memo: "" }]);
+        setLiabilityRows(newLiab.length ? newLiab : [{ id: uid(), accountId: "", fundId: firstFundId, amount: "", memo: "" }]);
+        setFundEquityMap(rebuiltEquityMap);
       } else {
-        setBankRows([{ id: uid(), accountId: "", fundId: firstFundId, amount: "", memo: "" }]);
-        setOtherRows([{ id: uid(), accountId: "", fundId: firstFundId, amount: "", entryType: "DEBIT", memo: "" }]);
+        setAssetRows([{ id: uid(), accountId: "", fundId: firstFundId, amount: "", memo: "" }]);
+        setLiabilityRows([{ id: uid(), accountId: "", fundId: firstFundId, amount: "", memo: "" }]);
+        setFundEquityMap(defaultMap);
       }
     } finally { setLoading(false); }
   }, []);
@@ -514,9 +589,9 @@ export default function OpeningBalancePage() {
     [...allCoa].sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true })),
     [allCoa]
   );
-  const assetCoa   = useMemo(() => sortedCoa.filter((a) => a.type === "ASSET"),     [sortedCoa]);
-  const otherBsCoa = useMemo(() => sortedCoa.filter((a) => ["ASSET", "LIABILITY"].includes(a.type)), [sortedCoa]);
-  const equityCoa  = useMemo(() => sortedCoa.filter((a) => a.type === "EQUITY"),    [sortedCoa]);
+  const assetCoa     = useMemo(() => sortedCoa.filter((a) => a.type === "ASSET"),     [sortedCoa]);
+  const liabilityCoa = useMemo(() => sortedCoa.filter((a) => a.type === "LIABILITY"), [sortedCoa]);
+  const equityCoa    = useMemo(() => sortedCoa.filter((a) => a.type === "EQUITY"),    [sortedCoa]);
 
   // ── Method change ─────────────────────────────────────────────────────────────
   async function handleMethodChange(m: Method) {
@@ -528,131 +603,136 @@ export default function OpeningBalancePage() {
     });
   }
 
-  // ── Bank row operations ───────────────────────────────────────────────────────
-  function addBankRow() {
-    setBankRows((prev) => [...prev, { id: uid(), accountId: "", fundId: defaultFundId, amount: "", memo: "" }]);
-  }
-  function deleteBankRow(id: string) {
-    setBankRows((prev) => prev.length <= 1 ? prev : prev.filter((r) => r.id !== id));
-  }
-  function updateBankRow(id: string, patch: Partial<Omit<BankRow, "id">>) {
-    setBankRows((prev) => prev.map((r) => r.id === id ? { ...r, ...patch } : r));
-  }
+  // ── Asset row ops ─────────────────────────────────────────────────────────────
+  const addAssetRow    = () => setAssetRows((p) => [...p, { id: uid(), accountId: "", fundId: defaultFundId, amount: "", memo: "" }]);
+  const deleteAssetRow = (id: string) => setAssetRows((p) => p.length <= 1 ? p : p.filter((r) => r.id !== id));
+  const updateAssetRow = (id: string, patch: Partial<AssetRow>) =>
+    setAssetRows((p) => p.map((r) => r.id === id ? { ...r, ...patch } : r));
 
-  // ── Other row operations ──────────────────────────────────────────────────────
-  function addOtherRow() {
-    setOtherRows((prev) => [...prev, { id: uid(), accountId: "", fundId: defaultFundId, amount: "", entryType: "DEBIT", memo: "" }]);
-  }
-  function deleteOtherRow(id: string) {
-    setOtherRows((prev) => prev.length <= 1 ? prev : prev.filter((r) => r.id !== id));
-  }
-  function updateOtherRow(id: string, patch: Partial<Omit<OtherRow, "id">>) {
-    setOtherRows((prev) => prev.map((r) => r.id === id ? { ...r, ...patch } : r));
-  }
-  function handleOtherAccountSelect(rowId: string, accountId: string) {
-    const acct = allCoa.find((a) => a.id === accountId);
-    const entryType: EntryType = acct?.type === "LIABILITY" ? "CREDIT" : "DEBIT";
-    updateOtherRow(rowId, { accountId, entryType });
-  }
+  // ── Liability row ops ──────────────────────────────────────────────────────────
+  const addLiabilityRow    = () => setLiabilityRows((p) => [...p, { id: uid(), accountId: "", fundId: defaultFundId, amount: "", memo: "" }]);
+  const deleteLiabilityRow = (id: string) => setLiabilityRows((p) => p.length <= 1 ? p : p.filter((r) => r.id !== id));
+  const updateLiabilityRow = (id: string, patch: Partial<LiabilityRow>) =>
+    setLiabilityRows((p) => p.map((r) => r.id === id ? { ...r, ...patch } : r));
 
   // ── Computed totals ───────────────────────────────────────────────────────────
-  const totalBankAssets = useMemo(
-    () => bankRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0),
-    [bankRows]
+  const totalAssets = useMemo(
+    () => assetRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0),
+    [assetRows]
   );
-
-  const totalOtherAssets = useMemo(
-    () => otherRows
-      .filter((r) => r.entryType === "DEBIT")
-      .reduce((s, r) => s + (parseFloat(r.amount) || 0), 0),
-    [otherRows]
-  );
-
   const totalLiabilities = useMemo(
-    () => otherRows
-      .filter((r) => r.entryType === "CREDIT")
-      .reduce((s, r) => s + (parseFloat(r.amount) || 0), 0),
-    [otherRows]
+    () => liabilityRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0),
+    [liabilityRows]
   );
-
-  const totalAssets    = totalBankAssets + totalOtherAssets;
   const totalNetAssets = totalAssets - totalLiabilities;
 
-  // ── Per-fund net assets (auto-computed Fund Balances) ─────────────────────────
-  const fundBalances = useMemo(() => {
+  // ── Per-fund net assets ───────────────────────────────────────────────────────
+  const fundNetMap = useMemo(() => {
     const map: Record<string, number> = {};
-
-    for (const r of bankRows) {
+    for (const r of assetRows) {
       const amt = parseFloat(r.amount) || 0;
       if (amt > 0 && r.fundId) map[r.fundId] = (map[r.fundId] || 0) + amt;
     }
-
-    for (const r of otherRows) {
+    for (const r of liabilityRows) {
       const amt = parseFloat(r.amount) || 0;
-      if (amt > 0 && r.fundId) {
-        if (r.entryType === "DEBIT")  map[r.fundId] = (map[r.fundId] || 0) + amt;
-        if (r.entryType === "CREDIT") map[r.fundId] = (map[r.fundId] || 0) - amt;
-      }
+      if (amt > 0 && r.fundId) map[r.fundId] = (map[r.fundId] || 0) - amt;
     }
+    return map;
+  }, [assetRows, liabilityRows]);
 
-    return Object.entries(map)
-      .filter(([, n]) => Math.abs(n) > 0.001)
-      .map(([fundId, netAmount]) => ({
-        fundId,
-        netAmount,
-        equityAccountId: fundEquityMap[fundId] ?? equityCoa[0]?.id ?? "",
-      }));
-  }, [bankRows, otherRows, fundEquityMap, equityCoa]);
+  // All funds that appear in any row (have a non-zero balance)
+  const activeFundIds = useMemo(() => Object.keys(fundNetMap), [fundNetMap]);
+
+  // ── Equity totals by account (Section 3 data) ────────────────────────────────
+  const equityTotals = useMemo(() => {
+    const map: Record<string, { total: number; fundNames: string[] }> = {};
+    for (const fundId of activeFundIds) {
+      const eqAcctId = fundEquityMap[fundId];
+      if (!eqAcctId) continue;
+      const net  = fundNetMap[fundId] ?? 0;
+      const fund = funds.find((f) => f.id === fundId);
+      if (!map[eqAcctId]) map[eqAcctId] = { total: 0, fundNames: [] };
+      map[eqAcctId].total += net;
+      if (fund) map[eqAcctId].fundNames.push(fund.name);
+    }
+    // Also show equity accounts in fundEquityMap that have 0 balance (funds with no rows yet)
+    for (const [, eqAcctId] of Object.entries(fundEquityMap)) {
+      if (eqAcctId && !map[eqAcctId]) map[eqAcctId] = { total: 0, fundNames: [] };
+    }
+    return Object.entries(map).map(([equityAccountId, { total, fundNames }]) => ({
+      equityAccountId,
+      total,
+      fundNames,
+    })).sort((a, b) => {
+      const codeA = equityCoa.find((e) => e.id === a.equityAccountId)?.code ?? "";
+      const codeB = equityCoa.find((e) => e.id === b.equityAccountId)?.code ?? "";
+      return codeA.localeCompare(codeB, undefined, { numeric: true });
+    });
+  }, [activeFundIds, fundEquityMap, fundNetMap, funds, equityCoa]);
+
+  const totalEquity = equityTotals.reduce((s, e) => s + e.total, 0);
+
+  // ── Fund Balances (Section 4 data) ───────────────────────────────────────────
+  const fundBalances = useMemo(() => {
+    // Show all funds that appear in any row
+    const seen = new Set([...activeFundIds]);
+    // Also include funds that have an equity assignment even if no balance yet
+    return funds.filter((f) => seen.has(f.id)).map((f) => ({
+      fund: f,
+      netAmount: fundNetMap[f.id] ?? 0,
+      equityAccountId: fundEquityMap[f.id] ?? "",
+    }));
+  }, [activeFundIds, funds, fundNetMap, fundEquityMap]);
 
   const totalFundBalances = fundBalances.reduce((s, fb) => s + fb.netAmount, 0);
 
-  // ── Validation ───────────────────────────────────────────────────────────────
-  const futureDateError    = asOfDate > format(new Date(), "yyyy-MM-dd");
-  const activeBankRows     = bankRows.filter((r) => parseFloat(r.amount) > 0);
-  const activeOtherRows    = otherRows.filter((r) => parseFloat(r.amount) > 0);
-  const missingBankAcct    = activeBankRows.some((r) => !r.accountId);
-  const missingBankFund    = activeBankRows.some((r) => !r.fundId);
-  const missingOtherAcct   = activeOtherRows.some((r) => !r.accountId);
-  const missingOtherFund   = activeOtherRows.some((r) => !r.fundId);
-  const missingEquity      = fundBalances.some((fb) => !fb.equityAccountId);
-  const hasData            = totalAssets > 0;
+  // ── Validation ────────────────────────────────────────────────────────────────
+  const futureDateError  = asOfDate > format(new Date(), "yyyy-MM-dd");
+  const activeAssets     = assetRows.filter((r) => parseFloat(r.amount) > 0);
+  const activeLiabs      = liabilityRows.filter((r) => parseFloat(r.amount) > 0);
+  const missingAssetAcct = activeAssets.some((r) => !r.accountId);
+  const missingAssetFund = activeAssets.some((r) => !r.fundId);
+  const missingLiabAcct  = activeLiabs.some((r) => !r.accountId);
+  const missingLiabFund  = activeLiabs.some((r) => !r.fundId);
+  const missingEquity    = activeFundIds.some((fid) => !fundEquityMap[fid]);
+  const hasData          = totalAssets > 0;
 
   const canPost = hasData && !futureDateError
-    && !missingBankAcct && !missingBankFund
-    && !missingOtherAcct && !missingOtherFund
+    && !missingAssetAcct && !missingAssetFund
+    && !missingLiabAcct  && !missingLiabFund
     && !missingEquity && funds.length > 0;
 
   // ── Build final submit rows ───────────────────────────────────────────────────
   const finalSubmitRows = useMemo(() => {
     const rows: Array<{ accountId: string; fundId: string; amount: number; entryType: EntryType; memo: string | null }> = [];
 
-    for (const r of bankRows) {
+    for (const r of assetRows) {
       const amt = parseFloat(r.amount) || 0;
       if (amt > 0 && r.accountId && r.fundId)
         rows.push({ accountId: r.accountId, fundId: r.fundId, amount: amt, entryType: "DEBIT", memo: r.memo || null });
     }
 
-    for (const r of otherRows) {
+    for (const r of liabilityRows) {
       const amt = parseFloat(r.amount) || 0;
       if (amt > 0 && r.accountId && r.fundId)
-        rows.push({ accountId: r.accountId, fundId: r.fundId, amount: amt, entryType: r.entryType, memo: r.memo || null });
+        rows.push({ accountId: r.accountId, fundId: r.fundId, amount: amt, entryType: "CREDIT", memo: r.memo || null });
     }
 
+    // Auto-equity rows: one per fund per equity account assignment
     for (const fb of fundBalances) {
-      if (Math.abs(fb.netAmount) > 0.001 && fb.equityAccountId && fb.fundId) {
-        const fund = funds.find((f) => f.id === fb.fundId);
+      if (Math.abs(fb.netAmount) > 0.001 && fb.equityAccountId) {
         rows.push({
           accountId: fb.equityAccountId,
-          fundId: fb.fundId,
+          fundId: fb.fund.id,
           amount: Math.abs(fb.netAmount),
           entryType: fb.netAmount >= 0 ? "CREDIT" : "DEBIT",
-          memo: `Opening Net Assets — ${fund?.name ?? "Fund"}`,
+          memo: `Opening Net Assets — ${fb.fund.name}`,
         });
       }
     }
 
     return rows;
-  }, [bankRows, otherRows, fundBalances, funds]);
+  }, [assetRows, liabilityRows, fundBalances]);
 
   // ── Submit ────────────────────────────────────────────────────────────────────
   async function handleFinalize() {
@@ -686,29 +766,25 @@ export default function OpeningBalancePage() {
     } finally { setSyncing(false); }
   }
 
-  // ── CSV template download ─────────────────────────────────────────────────────
+  // ── CSV template ──────────────────────────────────────────────────────────────
   function downloadTemplate() {
-    const header = ["Section", "Account Code", "Account Name", "Fund Name", "Amount", "Type (Asset/Liability)", "Memo"];
-    const examples = [
-      ["Bank/Cash", "1010", "Checking Account", "General Fund", "50000.00", "Asset", "Opening bank balance"],
-      ["Bank/Cash", "1010", "Checking Account", "City of Colony Fund", "20000.00", "Asset", "Restricted portion"],
-      ["Bank/Cash", "1020", "Savings Account", "General Fund", "10000.00", "Asset", "Savings balance"],
-      ["Other", "1100", "Accounts Receivable", "General Fund", "5000.00", "Asset", "Outstanding receivables"],
-      ["Other", "2010", "Accounts Payable", "General Fund", "3000.00", "Liability", "Outstanding payables"],
+    const hdr = ["Section (Asset/Liability)", "Account Code", "Fund Name", "Amount", "Memo"];
+    const ex = [
+      ["Asset", "1010", "General Fund", "50000.00", "Checking account balance"],
+      ["Asset", "1010", "Payroll Fund", "5000.00", "Payroll checking"],
+      ["Asset", "1020", "General Fund", "10000.00", "Savings balance"],
+      ["Liability", "2010", "General Fund", "3000.00", "Accounts payable"],
     ];
-    const csv = [header, ...examples].map((row) => row.map((c) => `"${c}"`).join(",")).join("\n");
-    const blob = new Blob([csv], { type: "text/csv" });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement("a");
+    const csv = [hdr, ...ex].map((r) => r.map((c) => `"${c}"`).join(",")).join("\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    const a   = document.createElement("a");
     a.href = url; a.download = "opening-balance-template.csv"; a.click();
     URL.revokeObjectURL(url);
   }
 
   // ── CSV import ────────────────────────────────────────────────────────────────
   function handleImportCSV(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    e.target.value = "";
+    const file = e.target.files?.[0]; if (!file) return; e.target.value = "";
     const reader = new FileReader();
     reader.onload = (ev) => {
       const text  = ev.target?.result as string;
@@ -717,28 +793,22 @@ export default function OpeningBalancePage() {
       const parse = (line: string) => line.split(",").map((c) => c.trim().replace(/^"|"$/g, "").trim());
       const hdr = parse(lines[0]).map((h) => h.toLowerCase());
       const sIdx = hdr.findIndex((h) => h.includes("section"));
-      const cIdx = hdr.findIndex((h) => h.includes("account code"));
+      const cIdx = hdr.findIndex((h) => h.includes("account code") || h.includes("code"));
       const fIdx = hdr.findIndex((h) => h.includes("fund"));
       const aIdx = hdr.findIndex((h) => h.includes("amount"));
-      const tIdx = hdr.findIndex((h) => h.includes("type") && !h.includes("account"));
       const mIdx = hdr.findIndex((h) => h.includes("memo"));
-      const newBank: BankRow[] = []; const newOther: OtherRow[] = [];
+      const newA: AssetRow[] = []; const newL: LiabilityRow[] = [];
       for (let i = 1; i < lines.length; i++) {
         const cols = parse(lines[i]);
         if (!cols[cIdx]) continue;
-        const acct  = allCoa.find((a) => a.code === cols[cIdx]);
-        const fund  = funds.find((f) => f.name.toLowerCase() === (cols[fIdx] ?? "").toLowerCase());
-        const section = (cols[sIdx] ?? "").toLowerCase();
-        const typRaw  = (cols[tIdx] ?? "asset").toLowerCase();
-        const entryType: EntryType = typRaw.includes("liab") ? "CREDIT" : "DEBIT";
-        if (section.includes("bank") || section.includes("cash")) {
-          newBank.push({ id: uid(), accountId: acct?.id ?? "", fundId: fund?.id ?? defaultFundId, amount: cols[aIdx] ?? "", memo: cols[mIdx] ?? "" });
-        } else {
-          newOther.push({ id: uid(), accountId: acct?.id ?? "", fundId: fund?.id ?? defaultFundId, amount: cols[aIdx] ?? "", entryType, memo: cols[mIdx] ?? "" });
-        }
+        const acct   = allCoa.find((a) => a.code === cols[cIdx]);
+        const fund   = funds.find((f) => f.name.toLowerCase() === (cols[fIdx] ?? "").toLowerCase());
+        const isLiab = (cols[sIdx] ?? "").toLowerCase().includes("liab");
+        const row = { id: uid(), accountId: acct?.id ?? "", fundId: fund?.id ?? defaultFundId, amount: cols[aIdx] ?? "", memo: cols[mIdx] ?? "" };
+        if (isLiab) newL.push(row); else newA.push(row);
       }
-      if (newBank.length)  setBankRows(newBank);
-      if (newOther.length) setOtherRows(newOther);
+      if (newA.length) setAssetRows(newA);
+      if (newL.length) setLiabilityRows(newL);
     };
     reader.readAsText(file);
   }
@@ -747,21 +817,14 @@ export default function OpeningBalancePage() {
   function handleAccountCreated(newAcct: CoaAccount) {
     setAllCoa((prev) => [...prev, newAcct]);
     if (addAccountRowId) {
-      if (addAccountSection === "bank") {
-        updateBankRow(addAccountRowId, { accountId: newAcct.id });
-      } else if (addAccountSection === "other") {
-        const entryType: EntryType = newAcct.type === "LIABILITY" ? "CREDIT" : "DEBIT";
-        updateOtherRow(addAccountRowId, { accountId: newAcct.id, entryType });
-      }
+      if (addAccountSection === "asset")     updateAssetRow(addAccountRowId,     { accountId: newAcct.id });
+      if (addAccountSection === "liability") updateLiabilityRow(addAccountRowId, { accountId: newAcct.id });
     }
-    setShowAddAccount(false);
-    setAddAccountSection(null);
-    setAddAccountRowId(null);
+    setShowAddAccount(false); setAddAccountSection(null); setAddAccountRowId(null);
   }
 
-  // ── Grid column templates ─────────────────────────────────────────────────────
-  const BANK_COLS  = "1fr 160px 130px 1fr 32px";
-  const OTHER_COLS = "1fr 160px 130px 90px 1fr 32px";
+  // ── Column headers for the two editable sections ──────────────────────────────
+  const ROW_HEADER_COLS = "1fr 160px 130px 1fr 32px";
 
   // ── Loading ───────────────────────────────────────────────────────────────────
   if (loading) {
@@ -785,15 +848,9 @@ export default function OpeningBalancePage() {
           <div>
             <h2 className="text-2xl font-bold text-[hsl(210,60%,25%)]">Opening Balances Posted!</h2>
             <p className="text-muted-foreground mt-2">
-              All bank account and fund balances have been updated. Your Dashboard is now accurate.
+              All bank account and fund balances are now updated. Your Dashboard is accurate.
             </p>
           </div>
-          {createdEntry && (
-            <div className="rounded-xl border border-gray-200 p-4 text-sm text-left space-y-1">
-              <div><span className="text-muted-foreground">Journal Entry ID:</span> <strong>{createdEntry.id?.slice(0, 8) ?? "—"}</strong></div>
-              <div><span className="text-muted-foreground">Lines posted:</span> <strong>{createdEntry.linesCount ?? finalSubmitRows.length}</strong></div>
-            </div>
-          )}
           <div className="flex flex-col items-center gap-3 w-full">
             <Button
               variant="default"
@@ -809,9 +866,7 @@ export default function OpeningBalancePage() {
                 syncResult.startsWith("Error")
                   ? "bg-red-50 border border-red-200 text-red-700"
                   : "bg-emerald-50 border border-emerald-200 text-emerald-700"
-              }`}>
-                {syncResult}
-              </div>
+              }`}>{syncResult}</div>
             )}
             <Button variant="outline" className="gap-2 w-full max-w-xs" onClick={() => { setPhase("wizard"); setCreatedEntry(null); load(); }}>
               <RotateCcw className="h-4 w-4" /> Edit Balances
@@ -827,19 +882,16 @@ export default function OpeningBalancePage() {
     <AppLayout title="Opening Balances">
       <div className="space-y-5 max-w-5xl mx-auto">
 
-        {/* ── Header ── */}
+        {/* Header */}
         <div className="flex items-start justify-between flex-wrap gap-4">
           <div>
             <h2 className="text-2xl font-bold text-[hsl(210,60%,25%)]">Opening Balances</h2>
             <p className="text-sm text-muted-foreground mt-0.5">
-              Enter starting balances by account and fund — fund balances are auto-calculated below.
+              Enter starting balances by fund. Equity totals and fund balances auto-calculate below.
             </p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
-            <button
-              onClick={downloadTemplate}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-sm text-gray-600 hover:bg-gray-50 transition-colors"
-            >
+            <button onClick={downloadTemplate} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-sm text-gray-600 hover:bg-gray-50 transition-colors">
               <Download className="h-3.5 w-3.5" /> Template
             </button>
             <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-sm text-gray-600 hover:bg-gray-50 transition-colors cursor-pointer">
@@ -850,15 +902,14 @@ export default function OpeningBalancePage() {
           </div>
         </div>
 
-        {/* ── Date + existing-entry banner ── */}
+        {/* Date + existing-entry banner */}
         <div className="flex flex-wrap items-end gap-4">
           <div>
             <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Opening Balance Date</Label>
             <div className="relative mt-1">
               <Calendar className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
               <Input
-                type="date"
-                value={asOfDate}
+                type="date" value={asOfDate}
                 onChange={(e) => setAsOfDate(e.target.value)}
                 className={cn("pl-8 w-44 h-9 text-sm", futureDateError && "border-red-400 focus:ring-red-400")}
                 max={format(new Date(), "yyyy-MM-dd")}
@@ -875,258 +926,197 @@ export default function OpeningBalancePage() {
         </div>
 
         {/* ═══════════════════════════════════════════════════════════════════════ */}
-        {/* SECTION 1 — Bank & Cash Accounts                                       */}
+        {/* SECTION 1 — Assets                                                     */}
         {/* ═══════════════════════════════════════════════════════════════════════ */}
         <div className="rounded-xl border-2 border-blue-200 overflow-hidden">
-          {/* Section header */}
           <div className="bg-blue-600 px-5 py-3 flex items-center gap-2">
             <Landmark className="h-4 w-4 text-blue-100" />
-            <span className="text-sm font-bold text-white">Bank &amp; Cash Accounts</span>
-            <span className="ml-auto text-xs text-blue-200">Enter the current balance for each bank account and fund</span>
+            <span className="text-sm font-bold text-white">Assets</span>
+            <span className="ml-auto text-xs text-blue-200">Bank, cash, receivables, equipment — all asset accounts</span>
           </div>
-
           {/* Column headers */}
-          <div
-            className="grid gap-2 px-4 py-2 bg-blue-50 border-b border-blue-100 text-[10px] font-bold text-blue-700 uppercase tracking-wide"
-            style={{ gridTemplateColumns: BANK_COLS }}
-          >
-            <span>Account</span>
-            <span>Fund</span>
-            <span>Balance ($)</span>
-            <span>Memo</span>
-            <span />
+          <div className="grid gap-2 px-4 py-2 bg-blue-50 border-b border-blue-100 text-[10px] font-bold text-blue-700 uppercase tracking-wide" style={{ gridTemplateColumns: ROW_HEADER_COLS }}>
+            <span>Account</span><span>Fund</span><span>Amount ($)</span><span>Memo</span><span />
           </div>
-
           {/* Rows */}
-          {bankRows.map((row) => (
-            <div
-              key={row.id}
-              className="grid gap-2 px-4 py-2.5 border-b border-gray-100 items-center hover:bg-blue-50/20 transition-colors"
-              style={{ gridTemplateColumns: BANK_COLS }}
-            >
-              <AccountCombobox
-                accounts={assetCoa}
-                value={row.accountId}
-                onChange={(id) => updateBankRow(row.id, { accountId: id })}
-                onAddNew={() => { setAddAccountSection("bank"); setAddAccountRowId(row.id); setShowAddAccount(true); }}
-                placeholder="Bank/Cash account…"
-              />
-              <FundSelect funds={funds} value={row.fundId} onChange={(id) => updateBankRow(row.id, { fundId: id })} />
-              <Input
-                type="number" min="0" step="0.01"
-                value={row.amount}
-                onChange={(e) => updateBankRow(row.id, { amount: e.target.value })}
-                placeholder="0.00"
-                className="h-9 text-right font-mono text-sm"
-              />
-              <Input
-                value={row.memo}
-                onChange={(e) => updateBankRow(row.id, { memo: e.target.value })}
-                placeholder="Memo (optional)"
-                className="h-9 text-sm"
-              />
-              <button
-                onClick={() => deleteBankRow(row.id)}
-                disabled={bankRows.length <= 1}
-                className="h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-50 disabled:opacity-30 transition-colors"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
-            </div>
+          {assetRows.map((row) => (
+            <LedgerRowInput
+              key={row.id} row={row} funds={funds} accounts={assetCoa}
+              onUpdate={(p) => updateAssetRow(row.id, p)}
+              onDelete={() => deleteAssetRow(row.id)}
+              canDelete={assetRows.length > 1}
+              onAddNew={() => { setAddAccountType("ASSET"); setAddAccountSection("asset"); setAddAccountRowId(row.id); setShowAddAccount(true); }}
+              placeholder="Asset account…"
+            />
           ))}
-
-          {/* Add row */}
           <div className="px-4 py-3 bg-blue-50/30 border-t border-blue-100">
-            <button
-              onClick={addBankRow}
-              className="flex items-center gap-1.5 text-sm font-medium text-blue-700 hover:text-blue-900 transition-colors"
-            >
-              <Plus className="h-4 w-4" /> Add bank account row
+            <button onClick={addAssetRow} className="flex items-center gap-1.5 text-sm font-medium text-blue-700 hover:text-blue-900 transition-colors">
+              <Plus className="h-4 w-4" /> Add asset row
             </button>
           </div>
-
-          {/* Section footer total */}
           <div className="px-5 py-2.5 bg-blue-50 border-t border-blue-200 flex justify-between items-center">
-            <span className="text-xs text-blue-600">
-              {activeBankRows.length} row{activeBankRows.length !== 1 ? "s" : ""} with balances
-            </span>
-            <span className="text-sm font-bold text-blue-800">
-              Total Bank Assets: <span className="font-mono ml-2">{fmt(totalBankAssets)}</span>
-            </span>
+            <span className="text-xs text-blue-600">{activeAssets.length} row{activeAssets.length !== 1 ? "s" : ""} with balances</span>
+            <span className="text-sm font-bold text-blue-800">Total Assets: <span className="font-mono ml-2">{fmt(totalAssets)}</span></span>
           </div>
         </div>
 
         {/* ═══════════════════════════════════════════════════════════════════════ */}
-        {/* SECTION 2 — Other Assets & Liabilities                                 */}
+        {/* SECTION 2 — Liabilities                                               */}
         {/* ═══════════════════════════════════════════════════════════════════════ */}
         <div className="rounded-xl border-2 border-orange-200 overflow-hidden">
-          {/* Section header */}
           <div className="bg-orange-500 px-5 py-3 flex items-center gap-2">
             <Scale className="h-4 w-4 text-orange-100" />
-            <span className="text-sm font-bold text-white">Other Assets &amp; Liabilities</span>
-            <span className="ml-auto text-xs text-orange-100">Receivables, equipment, payables, deferred revenue, etc.</span>
+            <span className="text-sm font-bold text-white">Liabilities</span>
+            <span className="ml-auto text-xs text-orange-100">Accounts payable, notes payable, deferred revenue, etc.</span>
           </div>
-
           {/* Column headers */}
-          <div
-            className="grid gap-2 px-4 py-2 bg-orange-50 border-b border-orange-100 text-[10px] font-bold text-orange-700 uppercase tracking-wide"
-            style={{ gridTemplateColumns: OTHER_COLS }}
-          >
-            <span>Account</span>
-            <span>Fund</span>
-            <span>Amount ($)</span>
-            <span>Type</span>
-            <span>Memo</span>
-            <span />
+          <div className="grid gap-2 px-4 py-2 bg-orange-50 border-b border-orange-100 text-[10px] font-bold text-orange-700 uppercase tracking-wide" style={{ gridTemplateColumns: ROW_HEADER_COLS }}>
+            <span>Account</span><span>Fund</span><span>Amount ($)</span><span>Memo</span><span />
           </div>
-
           {/* Rows */}
-          {otherRows.map((row) => (
-            <div
-              key={row.id}
-              className="grid gap-2 px-4 py-2.5 border-b border-gray-100 items-center hover:bg-orange-50/10 transition-colors"
-              style={{ gridTemplateColumns: OTHER_COLS }}
-            >
-              <AccountCombobox
-                accounts={otherBsCoa}
-                value={row.accountId}
-                onChange={(id) => handleOtherAccountSelect(row.id, id)}
-                onAddNew={() => { setAddAccountSection("other"); setAddAccountRowId(row.id); setShowAddAccount(true); }}
-                placeholder="Asset or Liability…"
-              />
-              <FundSelect funds={funds} value={row.fundId} onChange={(id) => updateOtherRow(row.id, { fundId: id })} />
-              <Input
-                type="number" min="0" step="0.01"
-                value={row.amount}
-                onChange={(e) => updateOtherRow(row.id, { amount: e.target.value })}
-                placeholder="0.00"
-                className="h-9 text-right font-mono text-sm"
-              />
-              {/* Asset / Liability toggle — auto-derived from account type, manually overrideable */}
-              <button
-                onClick={() => updateOtherRow(row.id, { entryType: row.entryType === "DEBIT" ? "CREDIT" : "DEBIT" })}
-                className={cn(
-                  "h-8 px-2 rounded-lg text-xs font-bold border transition-colors",
-                  row.entryType === "DEBIT"
-                    ? "bg-blue-100 text-blue-800 border-blue-200 hover:bg-blue-200"
-                    : "bg-orange-100 text-orange-800 border-orange-200 hover:bg-orange-200"
-                )}
-                title="Click to toggle Asset ↔ Liability"
-              >
-                {row.entryType === "DEBIT" ? "Asset" : "Liability"}
-              </button>
-              <Input
-                value={row.memo}
-                onChange={(e) => updateOtherRow(row.id, { memo: e.target.value })}
-                placeholder="Memo (optional)"
-                className="h-9 text-sm"
-              />
-              <button
-                onClick={() => deleteOtherRow(row.id)}
-                disabled={otherRows.length <= 1}
-                className="h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-50 disabled:opacity-30 transition-colors"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
-            </div>
+          {liabilityRows.map((row) => (
+            <LedgerRowInput
+              key={row.id} row={row} funds={funds} accounts={liabilityCoa}
+              onUpdate={(p) => updateLiabilityRow(row.id, p)}
+              onDelete={() => deleteLiabilityRow(row.id)}
+              canDelete={liabilityRows.length > 1}
+              onAddNew={() => { setAddAccountType("LIABILITY"); setAddAccountSection("liability"); setAddAccountRowId(row.id); setShowAddAccount(true); }}
+              placeholder="Liability account…"
+            />
           ))}
-
-          {/* Add row */}
           <div className="px-4 py-3 bg-orange-50/30 border-t border-orange-100">
-            <button
-              onClick={addOtherRow}
-              className="flex items-center gap-1.5 text-sm font-medium text-orange-700 hover:text-orange-900 transition-colors"
-            >
-              <Plus className="h-4 w-4" /> Add row
+            <button onClick={addLiabilityRow} className="flex items-center gap-1.5 text-sm font-medium text-orange-700 hover:text-orange-900 transition-colors">
+              <Plus className="h-4 w-4" /> Add liability row
             </button>
           </div>
-
-          {/* Section footer subtotals */}
-          <div className="px-5 py-2.5 bg-orange-50 border-t border-orange-200 flex flex-wrap gap-6 justify-end">
-            <span className="text-sm font-semibold text-blue-800">
-              Other Assets: <span className="font-mono ml-1 font-bold">{fmt(totalOtherAssets)}</span>
-            </span>
-            <span className="text-sm font-semibold text-orange-800">
-              Liabilities: <span className="font-mono ml-1 font-bold">{fmt(totalLiabilities)}</span>
-            </span>
+          <div className="px-5 py-2.5 bg-orange-50 border-t border-orange-200 flex justify-between items-center">
+            <span className="text-xs text-orange-600">{activeLiabs.length} row{activeLiabs.length !== 1 ? "s" : ""} with balances</span>
+            <span className="text-sm font-bold text-orange-800">Total Liabilities: <span className="font-mono ml-2">{fmt(totalLiabilities)}</span></span>
           </div>
         </div>
 
         {/* ═══════════════════════════════════════════════════════════════════════ */}
-        {/* SECTION 3 — Fund Balances (auto-computed)                              */}
+        {/* SECTION 3 — Equity / Net Assets (auto-computed by equity account)      */}
         {/* ═══════════════════════════════════════════════════════════════════════ */}
         <div className="rounded-xl border-2 border-violet-200 overflow-hidden">
-          {/* Section header */}
           <div className="bg-violet-600 px-5 py-3 flex items-center gap-2">
-            <Layers className="h-4 w-4 text-violet-100" />
-            <span className="text-sm font-bold text-white">Fund Balances</span>
-            <span className="ml-auto text-xs text-violet-200">Auto-calculated — Net Assets per fund (Assets − Liabilities)</span>
+            <TrendingUp className="h-4 w-4 text-violet-100" />
+            <span className="text-sm font-bold text-white">Equity / Net Assets</span>
+            <span className="ml-auto text-xs text-violet-200">Auto-calculated from fund balances — grouped by equity account</span>
           </div>
 
-          {fundBalances.length === 0 ? (
+          {equityTotals.length === 0 ? (
             <div className="px-5 py-10 text-center text-sm text-muted-foreground">
-              Enter bank/cash or asset amounts above to see auto-calculated fund balances here.
+              Assign equity accounts to funds in the Fund Balances section below to see totals here.
             </div>
           ) : (
             <>
               {/* Column headers */}
-              <div
-                className="grid gap-3 px-5 py-2 bg-violet-50 border-b border-violet-100 text-[10px] font-bold text-violet-700 uppercase tracking-wide"
-                style={{ gridTemplateColumns: "1fr 1fr auto" }}
-              >
-                <span>Fund</span>
-                <span>Net Assets Account (Equity)</span>
-                <span className="text-right min-w-[130px]">Net Balance</span>
+              <div className="grid gap-3 px-5 py-2 bg-violet-50 border-b border-violet-100 text-[10px] font-bold text-violet-700 uppercase tracking-wide" style={{ gridTemplateColumns: "1fr 1fr auto" }}>
+                <span>Equity Account</span>
+                <span>Tied Funds</span>
+                <span className="text-right min-w-[140px]">Total</span>
               </div>
-
-              {fundBalances.map((fb) => {
-                const fund = funds.find((f) => f.id === fb.fundId);
+              {equityTotals.map((eq) => {
+                const acct = equityCoa.find((a) => a.id === eq.equityAccountId);
                 return (
-                  <div
-                    key={fb.fundId}
-                    className="grid gap-3 px-5 py-3 border-b border-gray-100 items-center"
-                    style={{ gridTemplateColumns: "1fr 1fr auto" }}
-                  >
-                    {/* Fund name */}
-                    <div className="flex items-center gap-2">
-                      <div className="w-2 h-2 rounded-full bg-violet-400 shrink-0" />
-                      <span className="text-sm font-semibold">{fund?.name ?? "Unknown Fund"}</span>
+                  <div key={eq.equityAccountId} className="grid gap-3 px-5 py-3 border-b border-gray-100 items-center" style={{ gridTemplateColumns: "1fr 1fr auto" }}>
+                    <div>
+                      <span className="font-mono text-xs text-muted-foreground mr-2">{acct?.code}</span>
+                      <span className="text-sm font-semibold">{acct?.name ?? "—"}</span>
                     </div>
-
-                    {/* Equity account selector */}
-                    <select
-                      value={fb.equityAccountId}
-                      onChange={(e) => setFundEquityMap((prev) => ({ ...prev, [fb.fundId]: e.target.value }))}
-                      className={cn(
-                        "h-8 px-2 text-sm border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-violet-400",
-                        !fb.equityAccountId ? "border-amber-300" : "border-gray-200"
-                      )}
-                    >
-                      <option value="">— Select equity account —</option>
-                      {equityCoa.map((a) => (
-                        <option key={a.id} value={a.id}>{a.code} — {a.name}</option>
+                    <div className="flex flex-wrap gap-1">
+                      {eq.fundNames.length === 0 ? (
+                        <span className="text-xs text-muted-foreground italic">No funds assigned yet</span>
+                      ) : eq.fundNames.map((n) => (
+                        <span key={n} className="text-[10px] px-2 py-0.5 rounded-full bg-violet-100 text-violet-800 font-medium">{n}</span>
                       ))}
-                    </select>
-
-                    {/* Net amount */}
-                    <div className={cn(
-                      "text-right text-sm font-bold tabular-nums min-w-[130px]",
-                      fb.netAmount >= 0 ? "text-violet-700" : "text-red-600"
-                    )}>
-                      {fmt(fb.netAmount)}
+                    </div>
+                    <div className={cn("text-right text-sm font-bold tabular-nums min-w-[140px]", eq.total >= 0 ? "text-violet-700" : "text-red-600")}>
+                      {fmt(eq.total)}
                     </div>
                   </div>
                 );
               })}
-
-              {/* Section total */}
               <div className="px-5 py-2.5 bg-violet-50 border-t border-violet-200 flex justify-between items-center">
-                <span className="text-xs text-violet-600">
-                  {fundBalances.length} fund{fundBalances.length !== 1 ? "s" : ""} with balances
-                </span>
-                <span className="text-sm font-bold text-violet-800">
-                  Total Fund Balances: <span className="font-mono ml-2">{fmt(totalFundBalances)}</span>
-                </span>
+                <span className="text-xs text-violet-600">{equityTotals.length} equity account{equityTotals.length !== 1 ? "s" : ""}</span>
+                <span className="text-sm font-bold text-violet-800">Total Equity: <span className="font-mono ml-2">{fmt(totalEquity)}</span></span>
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* ═══════════════════════════════════════════════════════════════════════ */}
+        {/* SECTION 4 — Fund Balances (assign equity account per fund)             */}
+        {/* ═══════════════════════════════════════════════════════════════════════ */}
+        <div className="rounded-xl border-2 border-emerald-200 overflow-hidden">
+          <div className="bg-emerald-600 px-5 py-3 flex items-center gap-2">
+            <Layers className="h-4 w-4 text-emerald-100" />
+            <span className="text-sm font-bold text-white">Fund Balances</span>
+            <span className="ml-auto text-xs text-emerald-200">Auto-calculated per fund — assign each fund to its equity account</span>
+          </div>
+
+          {fundBalances.length === 0 ? (
+            <div className="px-5 py-10 text-center text-sm text-muted-foreground">
+              Enter asset balances above to see fund totals here.
+            </div>
+          ) : (
+            <>
+              {/* Column headers */}
+              <div className="grid gap-3 px-5 py-2 bg-emerald-50 border-b border-emerald-100 text-[10px] font-bold text-emerald-700 uppercase tracking-wide" style={{ gridTemplateColumns: "1fr 1fr auto" }}>
+                <span>Fund</span>
+                <span>Equity Account (Net Assets)</span>
+                <span className="text-right min-w-[140px]">Net Balance</span>
+              </div>
+
+              {fundBalances.map(({ fund, netAmount, equityAccountId }) => (
+                <div key={fund.id} className="grid gap-3 px-5 py-3 border-b border-gray-100 items-center" style={{ gridTemplateColumns: "1fr 1fr auto" }}>
+                  {/* Fund name + type badge */}
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
+                    <div>
+                      <span className="text-sm font-semibold">{fund.name}</span>
+                      {fund.fundType && (
+                        <span className={cn(
+                          "ml-2 text-[9px] px-1.5 py-0.5 rounded-full font-bold uppercase",
+                          fund.fundType === "UNRESTRICTED"   && "bg-blue-100 text-blue-700",
+                          fund.fundType === "RESTRICTED_TEMP" && "bg-amber-100 text-amber-700",
+                          fund.fundType === "RESTRICTED_PERM" && "bg-red-100 text-red-700",
+                        )}>
+                          {fund.fundType === "UNRESTRICTED"    ? "Unrestricted"
+                            : fund.fundType === "RESTRICTED_TEMP" ? "Temp. Restricted"
+                            : fund.fundType === "RESTRICTED_PERM" ? "Perm. Restricted"
+                            : fund.fundType}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Equity account selector */}
+                  <select
+                    value={equityAccountId}
+                    onChange={(e) => setFundEquityMap((prev) => ({ ...prev, [fund.id]: e.target.value }))}
+                    className={cn(
+                      "h-8 px-2 text-sm border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400",
+                      !equityAccountId ? "border-amber-300" : "border-gray-200"
+                    )}
+                  >
+                    <option value="">— Select equity account —</option>
+                    {equityCoa.map((a) => (
+                      <option key={a.id} value={a.id}>{a.code} — {a.name}</option>
+                    ))}
+                  </select>
+
+                  {/* Net balance */}
+                  <div className={cn("text-right text-sm font-bold tabular-nums min-w-[140px]", netAmount >= 0 ? "text-emerald-700" : "text-red-600")}>
+                    {fmt(netAmount)}
+                  </div>
+                </div>
+              ))}
+
+              <div className="px-5 py-2.5 bg-emerald-50 border-t border-emerald-200 flex justify-between items-center">
+                <span className="text-xs text-emerald-600">{fundBalances.length} fund{fundBalances.length !== 1 ? "s" : ""} with balances</span>
+                <span className="text-sm font-bold text-emerald-800">Total Fund Balances: <span className="font-mono ml-2">{fmt(totalFundBalances)}</span></span>
               </div>
             </>
           )}
@@ -1139,12 +1129,11 @@ export default function OpeningBalancePage() {
           "rounded-xl border-2 px-6 py-5 transition-all",
           canPost ? "border-emerald-200 bg-emerald-50" : "border-gray-200 bg-gray-50"
         )}>
-          {/* Accounting equation display */}
+          {/* Accounting equation */}
           <div className="flex flex-wrap items-center gap-4 mb-4">
             <div className="text-center">
               <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Total Assets</div>
               <div className="text-xl font-bold tabular-nums text-blue-700">{fmt(totalAssets)}</div>
-              <div className="text-[10px] text-blue-500 mt-0.5">Bank {fmt(totalBankAssets)} + Other {fmt(totalOtherAssets)}</div>
             </div>
             <div className="text-muted-foreground font-light text-xl">−</div>
             <div className="text-center">
@@ -1153,9 +1142,15 @@ export default function OpeningBalancePage() {
             </div>
             <div className="text-muted-foreground font-light text-xl">=</div>
             <div className="text-center">
-              <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Total Fund Balances</div>
+              <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Total Equity</div>
               <div className="text-xl font-bold tabular-nums text-violet-700">{fmt(totalNetAssets)}</div>
             </div>
+            <div className="text-muted-foreground font-light text-xl">=</div>
+            <div className="text-center">
+              <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Total Fund Balances</div>
+              <div className="text-xl font-bold tabular-nums text-emerald-700">{fmt(totalFundBalances)}</div>
+            </div>
+
             <div className="ml-auto flex items-center gap-3">
               {canPost ? (
                 <span className="text-sm font-semibold text-emerald-700 flex items-center gap-1.5">
@@ -1179,18 +1174,18 @@ export default function OpeningBalancePage() {
           {/* Validation hints */}
           {!canPost && hasData && (
             <ul className="space-y-0.5 border-t border-gray-200 pt-3">
-              {futureDateError    && <li className="text-xs text-red-700 flex items-center gap-1.5"><span className="w-1 h-1 rounded-full bg-red-500 shrink-0" /> Date cannot be in the future</li>}
-              {missingBankAcct    && <li className="text-xs text-amber-700 flex items-center gap-1.5"><span className="w-1 h-1 rounded-full bg-amber-500 shrink-0" /> One or more bank rows is missing an account</li>}
-              {missingBankFund    && <li className="text-xs text-amber-700 flex items-center gap-1.5"><span className="w-1 h-1 rounded-full bg-amber-500 shrink-0" /> One or more bank rows is missing a fund</li>}
-              {missingOtherAcct   && <li className="text-xs text-amber-700 flex items-center gap-1.5"><span className="w-1 h-1 rounded-full bg-amber-500 shrink-0" /> One or more Other rows is missing an account</li>}
-              {missingOtherFund   && <li className="text-xs text-amber-700 flex items-center gap-1.5"><span className="w-1 h-1 rounded-full bg-amber-500 shrink-0" /> One or more Other rows is missing a fund</li>}
-              {missingEquity      && <li className="text-xs text-amber-700 flex items-center gap-1.5"><span className="w-1 h-1 rounded-full bg-amber-500 shrink-0" /> One or more funds is missing a Net Assets (equity) account</li>}
+              {futureDateError   && <li className="text-xs text-red-700 flex items-center gap-1.5"><span className="w-1 h-1 rounded-full bg-red-500 shrink-0" /> Date cannot be in the future</li>}
+              {missingAssetAcct  && <li className="text-xs text-amber-700 flex items-center gap-1.5"><span className="w-1 h-1 rounded-full bg-amber-500 shrink-0" /> One or more asset rows is missing an account</li>}
+              {missingAssetFund  && <li className="text-xs text-amber-700 flex items-center gap-1.5"><span className="w-1 h-1 rounded-full bg-amber-500 shrink-0" /> One or more asset rows is missing a fund</li>}
+              {missingLiabAcct   && <li className="text-xs text-amber-700 flex items-center gap-1.5"><span className="w-1 h-1 rounded-full bg-amber-500 shrink-0" /> One or more liability rows is missing an account</li>}
+              {missingLiabFund   && <li className="text-xs text-amber-700 flex items-center gap-1.5"><span className="w-1 h-1 rounded-full bg-amber-500 shrink-0" /> One or more liability rows is missing a fund</li>}
+              {missingEquity     && <li className="text-xs text-amber-700 flex items-center gap-1.5"><span className="w-1 h-1 rounded-full bg-amber-500 shrink-0" /> One or more funds is missing an equity (Net Assets) account assignment</li>}
               {funds.length === 0 && <li className="text-xs text-red-700 flex items-center gap-1.5"><span className="w-1 h-1 rounded-full bg-red-500 shrink-0" /> No funds found — create at least one fund first</li>}
             </ul>
           )}
         </div>
 
-        {/* ── Force Sync (shown only when an existing entry is posted) ── */}
+        {/* Force Sync */}
         {existingEntryId && (
           <div className="rounded-xl border border-amber-200 bg-amber-50 px-5 py-4">
             <p className="text-sm font-semibold text-amber-800 mb-2">Data Tools</p>
@@ -1210,22 +1205,17 @@ export default function OpeningBalancePage() {
 
       {/* Modals */}
       <ConfirmModal
-        open={showConfirm}
-        onClose={() => setShowConfirm(false)}
-        onConfirm={handleFinalize}
-        saving={saving}
-        error={error}
-        submitRows={finalSubmitRows}
-        allCoa={allCoa}
-        funds={funds}
-        asOfDate={asOfDate}
-        method={method}
+        open={showConfirm} onClose={() => setShowConfirm(false)}
+        onConfirm={handleFinalize} saving={saving} error={error}
+        submitRows={finalSubmitRows} allCoa={allCoa} funds={funds}
+        asOfDate={asOfDate} method={method}
       />
 
       <AddAccountModal
         open={showAddAccount}
         onClose={() => { setShowAddAccount(false); setAddAccountSection(null); setAddAccountRowId(null); }}
         onCreated={handleAccountCreated}
+        defaultType={addAccountType}
       />
     </AppLayout>
   );
