@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-import { TrendingUp, TrendingDown, DollarSign, BookOpen, FileText, Table2, Download } from "lucide-react";
+import { TrendingUp, TrendingDown, DollarSign, BookOpen, FileText, Table2, Download, Printer } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL as string;
 
@@ -165,7 +165,81 @@ export default function ReportsPage() {
     { name: "Net Income", amount: profitLoss?.netIncome    || 0 },
   ];
 
-  // CSV export for transaction register
+  // ── Download helpers ──────────────────────────────────────────────────────
+  function triggerCsvDownload(csv: string, filename: string) {
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // Financial Statements → print to PDF
+  const downloadFinancial = useCallback(() => window.print(), []);
+
+  // General Ledger → CSV (one row per GL entry, grouped by account)
+  const downloadGl = useCallback(() => {
+    const accts = glByAccount?.accounts ?? [];
+    if (!accts.length) return;
+    const headers = ["Account Code", "Account Name", "Type", "Date", "Description", "Fund", "Debit", "Credit", "Running Balance"];
+    const lines: string[] = [];
+    for (const acct of accts) {
+      // Beginning balance row
+      lines.push([
+        acct.accountCode, `"${acct.accountName.replace(/"/g, '""')}"`, acct.coaType,
+        "", "Beginning Balance", "", "", "", acct.beginBalance.toFixed(2),
+      ].join(","));
+      for (const e of acct.entries) {
+        lines.push([
+          acct.accountCode, `"${acct.accountName.replace(/"/g, '""')}"`, acct.coaType,
+          new Date(e.date).toLocaleDateString(),
+          `"${(e.description ?? "").replace(/"/g, '""')}"`,
+          e.fundName ?? "",
+          e.entryType === "DEBIT"  ? e.amount.toFixed(2) : "",
+          e.entryType === "CREDIT" ? e.amount.toFixed(2) : "",
+          e.runningBalance.toFixed(2),
+        ].join(","));
+      }
+      // Ending balance row
+      lines.push([
+        acct.accountCode, `"${acct.accountName.replace(/"/g, '""')}"`, acct.coaType,
+        "", "Ending Balance", "", acct.periodDebit.toFixed(2), acct.periodCredit.toFixed(2), acct.endBalance.toFixed(2),
+      ].join(","));
+      lines.push(""); // blank separator between accounts
+    }
+    triggerCsvDownload([headers.join(","), ...lines].join("\n"),
+      `general-ledger-${applied.startDate}-${applied.endDate}.csv`);
+  }, [glByAccount, applied]);
+
+  // General Journal → CSV (one row per split line, grouped by entry)
+  const downloadJournal = useCallback(() => {
+    const groups = journalData?.groups ?? [];
+    if (!groups.length) return;
+    const headers = ["Date", "Type", "Reference", "Entry Description", "Account Code", "Account Name", "Fund", "Debit", "Credit"];
+    const lines: string[] = [];
+    for (const grp of groups) {
+      for (const e of grp.entries) {
+        lines.push([
+          new Date(grp.date).toLocaleDateString(),
+          SOURCE_LABELS[grp.sourceType] ?? grp.sourceType,
+          grp.referenceNumber ?? "",
+          `"${grp.description.replace(/"/g, '""')}"`,
+          e.accountCode,
+          `"${e.accountName.replace(/"/g, '""')}"`,
+          e.fundName ?? "",
+          e.entryType === "DEBIT"  ? e.amount.toFixed(2) : "",
+          e.entryType === "CREDIT" ? e.amount.toFixed(2) : "",
+        ].join(","));
+      }
+      lines.push(""); // blank separator between journal entries
+    }
+    triggerCsvDownload([headers.join(","), ...lines].join("\n"),
+      `general-journal-${applied.startDate}-${applied.endDate}.csv`);
+  }, [journalData, applied]);
+
+  // Transaction Register → CSV
   const exportCsv = useCallback(() => {
     const rows = registerData?.transactions ?? [];
     if (!rows.length) return;
@@ -181,15 +255,17 @@ export default function ReportsPage() {
       `"${(r.creditAccounts ?? "").replace(/"/g, '""')}"`,
       r.amount.toFixed(2),
     ].join(","));
-    const csv = [headers.join(","), ...lines].join("\n");
-    const blob = new Blob([csv], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `transaction-register-${applied.startDate}-${applied.endDate}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    triggerCsvDownload([headers.join(","), ...lines].join("\n"),
+      `transaction-register-${applied.startDate}-${applied.endDate}.csv`);
   }, [registerData, applied]);
+
+  // Unified download action for the current tab
+  const downloadLabel = tab === "financial" ? "Print / Save PDF" : "Download CSV";
+  const downloadIcon  = tab === "financial" ? <Printer className="w-4 h-4" /> : <Download className="w-4 h-4" />;
+  const handleDownload = tab === "financial" ? downloadFinancial
+    : tab === "gl"       ? downloadGl
+    : tab === "journal"  ? downloadJournal
+    : exportCsv;
 
   const bs = balanceSheet as any;
 
@@ -255,11 +331,9 @@ export default function ReportsPage() {
           </>
         )}
         <Button onClick={handleApply} className="h-9">Apply</Button>
-        {tab === "register" && (
-          <Button variant="outline" onClick={exportCsv} className="h-9 gap-1.5">
-            <Download className="w-4 h-4" />Export CSV
-          </Button>
-        )}
+        <Button variant="outline" onClick={handleDownload} className="h-9 gap-1.5">
+          {downloadIcon}{downloadLabel}
+        </Button>
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════════ */}
