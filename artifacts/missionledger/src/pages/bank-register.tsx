@@ -407,11 +407,14 @@ export default function BankRegisterPage() {
     return true;
   });
 
+  // Compute running balance oldest→newest (API returns newest-first, so reverse)
+  const balanceMap = new Map<string, number>();
   let rb = 0;
-  const withBalance = filtered.map((t) => {
+  for (const t of [...filtered].reverse()) {
     if (!t.isVoid) rb += t.type === "CREDIT" ? t.amount : -t.amount;
-    return { ...t, runningBalance: rb };
-  });
+    balanceMap.set(t.id, rb);
+  }
+  const withBalance = filtered.map((t) => ({ ...t, runningBalance: balanceMap.get(t.id) ?? 0 }));
 
   const totals = filtered.reduce(
     (acc, t) => {
