@@ -2,6 +2,7 @@ import { Router } from "express";
 import { db, journalEntries, journalEntryLines, accounts, chartOfAccounts, glEntries, funds } from "@workspace/db";
 import { eq, and, desc } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
+import { logAudit, snap } from "../lib/audit";
 
 const router = Router();
 
@@ -106,6 +107,20 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
       });
     }
 
+    const { id: userId, email: userEmail, name: userName } = (req as any).user;
+    logAudit({
+      req,
+      companyId,
+      userId,
+      userEmail,
+      userName,
+      action: "CREATE",
+      entityType: "JOURNAL_ENTRY",
+      entityId: entry.id,
+      description: `Created journal entry ${entryNumber}: ${description}`,
+      newValue: snap(entry as any),
+    });
+
     res.status(201).json(await enrichEntry(entry, companyId));
   } catch (error) {
     console.error("Create JE error:", error);
@@ -145,6 +160,21 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
       }
     }
 
+    const { id: userId2, email: userEmail2, name: userName2 } = (req as any).user;
+    logAudit({
+      req,
+      companyId,
+      userId: userId2,
+      userEmail: userEmail2,
+      userName: userName2,
+      action: "UPDATE",
+      entityType: "JOURNAL_ENTRY",
+      entityId: updated.id,
+      description: `Updated journal entry ${updated.entryNumber}: ${updated.description}`,
+      oldValue: snap(existing[0] as any),
+      newValue: snap(updated as any),
+    });
+
     res.json(await enrichEntry(updated, companyId));
   } catch (error) {
     res.status(500).json({ error: "Internal server error" });
@@ -160,6 +190,21 @@ router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
 
     await db.delete(journalEntryLines).where(eq(journalEntryLines.journalEntryId, req.params.id));
     await db.delete(journalEntries).where(eq(journalEntries.id, req.params.id));
+
+    const { id: userId3, email: userEmail3, name: userName3 } = (req as any).user;
+    logAudit({
+      req,
+      companyId,
+      userId: userId3,
+      userEmail: userEmail3,
+      userName: userName3,
+      action: "DELETE",
+      entityType: "JOURNAL_ENTRY",
+      entityId: existing[0].id,
+      description: `Deleted journal entry ${existing[0].entryNumber}: ${existing[0].description}`,
+      oldValue: snap(existing[0] as any),
+    });
+
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: "Internal server error" });

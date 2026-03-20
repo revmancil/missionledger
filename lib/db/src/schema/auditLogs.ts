@@ -7,11 +7,15 @@ export const auditLogs = pgTable("audit_logs", {
   companyId: text("company_id").notNull(),
   userId: text("user_id").notNull(),
   userEmail: text("user_email"),
-  action: text("action").notNull(),
-  entityType: text("entity_type"),
+  userName: text("user_name"),
+  action: text("action").notNull(),         // CREATE | UPDATE | DELETE | LOGIN | PERIOD_CLOSE | VOID
+  entityType: text("entity_type"),           // TRANSACTION | JOURNAL_ENTRY | ACCOUNT | FUND | USER | SESSION
   entityId: text("entity_id"),
   description: text("description").notNull(),
+  oldValue: text("old_value"),               // JSON snapshot before change
+  newValue: text("new_value"),               // JSON snapshot after change
   metadata: text("metadata"),
+  ipAddress: text("ip_address"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

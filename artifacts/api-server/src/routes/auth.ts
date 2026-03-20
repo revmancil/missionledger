@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { db, users, companies, organizationUsers } from "@workspace/db";
 import { eq, and, inArray } from "drizzle-orm";
+import { logAudit } from "../lib/audit";
 import {
   requireAuth,
   hashPassword,
@@ -93,6 +94,18 @@ router.post("/login", async (req, res) => {
       organizationType: company.organizationType,
       isPlatformAdmin: user.isPlatformAdmin,
     };
+
+    logAudit({
+      req,
+      companyId: company.id,
+      userId: user.id,
+      userEmail: user.email,
+      userName: user.name,
+      action: "LOGIN",
+      entityType: "SESSION",
+      entityId: user.id,
+      description: `User logged in: ${user.email} (${company.companyCode})`,
+    });
 
     setCookieAndRespond(res, authUser);
   } catch (error) {

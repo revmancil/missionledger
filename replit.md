@@ -53,6 +53,12 @@ MissionLedger is a full-stack nonprofit financial management SaaS app for church
   - Finalized financial statement snapshots (Statement of Activities + Balance Sheet) saved to `financial_snapshots` table
   - Reopen Protocol: MASTER_ADMIN only, requires reason, logged permanently to `audit_logs` table
   - Bank Register shows amber lock banner + lock icon on closed-period transactions
+- **Immutable Audit Log System**:
+  - Schema: `audit_logs` table — id, companyId, userId, userEmail, userName, action, entityType, entityId, description, oldValue (JSON text), newValue (JSON text), ipAddress, metadata, createdAt
+  - Helper: `artifacts/api-server/src/lib/audit.ts` — `logAudit()` (fire-and-forget) + `snap()` object snapshot
+  - Instrumented: TRANSACTION CREATE/UPDATE/VOID/STATUS_CHANGE, JOURNAL_ENTRY CREATE/UPDATE/DELETE, user LOGIN
+  - Admin Viewer: `/admin/audit-logs` (platform admin only) — filter by action, entity type, date range, full-text search; expandable rows show before/after JSON diff; paginated 50/page
+  - API: `GET /api/master-admin/audit-logs?action=&entityType=&search=&startDate=&endDate=&limit=&offset=`
 
 ## Tech Stack
 

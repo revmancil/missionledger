@@ -3,7 +3,7 @@ import { Link, useLocation } from "wouter";
 import { cn } from "@/lib/utils";
 import {
   LayoutDashboard, BookOpen,
-  Shield, LogOut, ArrowLeft, Terminal,
+  Shield, LogOut, ArrowLeft, Terminal, ClipboardList,
 } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -11,6 +11,7 @@ const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const navItems = [
   { href: "/admin", label: "Command Center", icon: LayoutDashboard },
   { href: "/admin/global-coa", label: "Global COA Template", icon: BookOpen },
+  { href: "/admin/audit-logs", label: "Audit Log", icon: ClipboardList },
 ];
 
 export function AdminLayout({ children, title }: { children: ReactNode; title?: string }) {

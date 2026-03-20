@@ -1,7 +1,7 @@
 import { Router } from "express";
-import { db, users, companies, bankAccounts } from "@workspace/db";
+import { db, users, companies, bankAccounts, auditLogs } from "@workspace/db";
 import { pool } from "@workspace/db";
-import { eq, count, and } from "drizzle-orm";
+import { eq, count, and, desc, gte, lte, like, or } from "drizzle-orm";
 import {
   requireAuth,
   requirePlatformAdmin,
@@ -374,6 +374,79 @@ router.post("/exit-impersonation", async (req, res) => {
     res.json({ success: true, session: authUser });
   } catch (error) {
     console.error("Exit impersonation error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ── GET /master-admin/audit-logs ───────────────────────────────────────────────
+// Query params: companyId, userId, action, entityType, search, startDate, endDate, limit, offset
+router.get("/audit-logs", async (req, res) => {
+  try {
+    const {
+      companyId: filterCompanyId,
+      userId: filterUserId,
+      action: filterAction,
+      entityType: filterEntityType,
+      search,
+      startDate,
+      endDate,
+      limit: limitParam = "100",
+      offset: offsetParam = "0",
+    } = req.query as Record<string, string>;
+
+    const limitVal = Math.min(parseInt(limitParam) || 100, 500);
+    const offsetVal = parseInt(offsetParam) || 0;
+
+    const conditions: any[] = [];
+    if (filterCompanyId) conditions.push(eq(auditLogs.companyId, filterCompanyId));
+    if (filterUserId) conditions.push(eq(auditLogs.userId, filterUserId));
+    if (filterAction) conditions.push(eq(auditLogs.action, filterAction.toUpperCase()));
+    if (filterEntityType) conditions.push(eq(auditLogs.entityType, filterEntityType.toUpperCase()));
+    if (startDate) conditions.push(gte(auditLogs.createdAt, new Date(startDate)));
+    if (endDate) {
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+      conditions.push(lte(auditLogs.createdAt, end));
+    }
+    if (search) {
+      conditions.push(
+        or(
+          like(auditLogs.description, `%${search}%`),
+          like(auditLogs.userEmail, `%${search}%`),
+          like(auditLogs.entityId, `%${search}%`),
+        )
+      );
+    }
+
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+    const [rows, [{ total }]] = await Promise.all([
+      db.select().from(auditLogs)
+        .where(whereClause)
+        .orderBy(desc(auditLogs.createdAt))
+        .limit(limitVal)
+        .offset(offsetVal),
+      db.select({ total: count() }).from(auditLogs).where(whereClause),
+    ]);
+
+    // Enrich with company name
+    const companyIds = [...new Set(rows.map(r => r.companyId))];
+    const companyRows = companyIds.length
+      ? await db.select({ id: companies.id, name: companies.name, companyCode: companies.companyCode }).from(companies).where(or(...companyIds.map(id => eq(companies.id, id))))
+      : [];
+    const companyMap: Record<string, { name: string; companyCode: string }> = {};
+    for (const c of companyRows) companyMap[c.id] = { name: c.name, companyCode: c.companyCode };
+
+    const enriched = rows.map(r => ({
+      ...r,
+      createdAt: r.createdAt instanceof Date ? r.createdAt.toISOString() : r.createdAt,
+      companyName: companyMap[r.companyId]?.name ?? null,
+      companyCode: companyMap[r.companyId]?.companyCode ?? null,
+    }));
+
+    res.json({ logs: enriched, total, limit: limitVal, offset: offsetVal });
+  } catch (error) {
+    console.error("Audit logs error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });

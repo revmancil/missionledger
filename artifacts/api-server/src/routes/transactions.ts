@@ -6,6 +6,7 @@ import {
 import { eq, and, desc, inArray, sql, ne } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
 import { generateGlEntries, voidGlEntries } from "../lib/gl";
+import { logAudit, snap } from "../lib/audit";
 
 /** Recompute a bank account's currentBalance from all its non-void transactions. */
 async function recomputeBankBalance(bankAccountId: string | null | undefined, companyId: string): Promise<void> {
@@ -273,6 +274,20 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
       console.error("[Balance] create sync error:", e)
     );
 
+    const { id: userId, email: userEmail, name: userName } = (req as any).user;
+    logAudit({
+      req,
+      companyId,
+      userId,
+      userEmail,
+      userName,
+      action: "CREATE",
+      entityType: "TRANSACTION",
+      entityId: created.id,
+      description: `Created transaction: ${created.payee} $${created.amount.toFixed(2)} on ${created.date instanceof Date ? created.date.toISOString().substring(0, 10) : created.date}`,
+      newValue: snap(created as any),
+    });
+
     const lookups = await getLookups(companyId);
     const splits = isSplit
       ? await db.select().from(transactionSplits).where(eq(transactionSplits.transactionId, created.id)).orderBy(transactionSplits.sortOrder)
@@ -459,6 +474,21 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
       );
     }
 
+    const { id: userId2, email: userEmail2, name: userName2 } = (req as any).user;
+    logAudit({
+      req,
+      companyId,
+      userId: userId2,
+      userEmail: userEmail2,
+      userName: userName2,
+      action: "UPDATE",
+      entityType: "TRANSACTION",
+      entityId: updated.id,
+      description: `Updated transaction: ${updated.payee} $${updated.amount.toFixed(2)}`,
+      oldValue: snap(existing as any),
+      newValue: snap(updated as any),
+    });
+
     const lookups = await getLookups(companyId);
     const splits = isSplit
       ? await db.select().from(transactionSplits).where(eq(transactionSplits.transactionId, updated.id)).orderBy(transactionSplits.sortOrder)
@@ -506,6 +536,21 @@ router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
       console.error("[Balance] delete sync error:", e)
     );
 
+    const { id: userId3, email: userEmail3, name: userName3 } = (req as any).user;
+    logAudit({
+      req,
+      companyId,
+      userId: userId3,
+      userEmail: userEmail3,
+      userName: userName3,
+      action: "VOID",
+      entityType: "TRANSACTION",
+      entityId: existing.id,
+      description: `Voided transaction: ${existing.payee} $${existing.amount.toFixed(2)} on ${existing.date instanceof Date ? existing.date.toISOString().substring(0, 10) : existing.date}`,
+      oldValue: snap(existing as any),
+      newValue: { isVoid: true, status: "VOID" },
+    });
+
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: "Internal server error" });
@@ -519,12 +564,34 @@ router.patch("/:id/status", requireAuth, requireAdmin, async (req, res) => {
     const { status } = req.body ?? {};
     if (!status) return res.status(400).json({ error: "status is required" });
 
+    const [before] = await db
+      .select()
+      .from(transactions)
+      .where(and(eq(transactions.id, req.params.id), eq(transactions.companyId, companyId)));
+
     const [updated] = await db
       .update(transactions)
       .set({ status: status as any, updatedAt: new Date() })
       .where(and(eq(transactions.id, req.params.id), eq(transactions.companyId, companyId)))
       .returning();
     if (!updated) return res.status(404).json({ error: "Not found" });
+
+    if (before) {
+      const { id: userId4, email: userEmail4, name: userName4 } = (req as any).user;
+      logAudit({
+        req,
+        companyId,
+        userId: userId4,
+        userEmail: userEmail4,
+        userName: userName4,
+        action: "UPDATE",
+        entityType: "TRANSACTION",
+        entityId: updated.id,
+        description: `Status changed: ${updated.payee} — ${before.status} → ${status}`,
+        oldValue: { status: before.status },
+        newValue: { status },
+      });
+    }
 
     const lookups = await getLookups(companyId);
     const splits = await db
