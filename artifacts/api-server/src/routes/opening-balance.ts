@@ -232,13 +232,19 @@ router.post("/finalize", requireAuth, requireAdmin, async (req, res) => {
     }
     const entryNumber = `JE-${String(nextNum).padStart(6, "0")}`;
 
-    // Void existing OB entry
+    // Void existing OB entry (journal entry + its GL entries + its JE lines)
     const [company] = await db.select().from(companies).where(eq(companies.id, companyId));
     if (company?.openingBalanceEntryId) {
+      const oldJeId = company.openingBalanceEntryId;
       await db
         .update(journalEntries)
         .set({ status: "VOID", voidedAt: new Date(), updatedAt: new Date() })
-        .where(eq(journalEntries.id, company.openingBalanceEntryId));
+        .where(eq(journalEntries.id, oldJeId));
+      // Void the GL entries so they are excluded from all balance calculations
+      await db
+        .update(glEntries)
+        .set({ isVoid: true, updatedAt: new Date() })
+        .where(and(eq(glEntries.journalEntryId, oldJeId), eq(glEntries.companyId, companyId)));
     }
 
     // Create posted JE
@@ -388,6 +394,19 @@ router.post("/finalize", requireAuth, requireAdmin, async (req, res) => {
 router.post("/recalculate", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
+
+    // ── Step 0: Propagate void status from journal_entries → gl_entries ────
+    // Fix any gl_entries that belong to a voided JE but still have is_void=false
+    await db.execute(sql`
+      UPDATE gl_entries ge
+      SET is_void = true, updated_at = NOW()
+      FROM journal_entries je
+      WHERE ge.journal_entry_id = je.id
+        AND ge.company_id = ${companyId}
+        AND je.status = 'VOID'
+        AND ge.is_void = false
+    `);
+    console.log(`[Recalculate] Propagated void status from voided journal entries to gl_entries for company ${companyId}`);
 
     // ── Step A: Reset all bank_account balances to zero ────────────────────
     await db
