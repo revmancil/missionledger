@@ -91,7 +91,12 @@ export default function LandingPage() {
       </main>
 
       <footer className="bg-foreground text-background py-12 text-center">
-        <p className="text-muted opacity-70">© {new Date().getFullYear()} MissionLedger. All rights reserved.</p>
+        <div className="flex items-center justify-center gap-4 text-sm opacity-70 mb-2">
+          <a href="/missionledger/terms" className="hover:opacity-100 hover:underline">Terms of Service</a>
+          <span className="opacity-40">·</span>
+          <a href="/missionledger/privacy" className="hover:opacity-100 hover:underline">Privacy Policy</a>
+        </div>
+        <p className="text-muted opacity-50 text-sm">© {new Date().getFullYear()} MissionLedger. All rights reserved.</p>
       </footer>
     </div>
   );

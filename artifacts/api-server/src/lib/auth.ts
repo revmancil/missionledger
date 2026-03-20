@@ -45,15 +45,55 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     return;
   }
 
-  // Enforce company suspension on every request
+  // Enforce company-level guards on every request
   if (user.companyId && !user.isPlatformAdmin) {
-    const [company] = await db.select({ isActive: companies.isActive })
+    const [company] = await db
+      .select({
+        isActive: companies.isActive,
+        subscriptionStatus: companies.subscriptionStatus,
+        createdAt: companies.createdAt,
+      })
       .from(companies)
       .where(eq(companies.id, user.companyId))
       .limit(1);
-    if (company && !company.isActive) {
-      res.status(403).json({ error: "ACCOUNT_SUSPENDED", message: "Your organization account has been suspended. Please contact support." });
-      return;
+
+    if (company) {
+      // 1. Account suspension
+      if (!company.isActive) {
+        res.status(403).json({ error: "ACCOUNT_SUSPENDED", message: "Your organization account has been suspended. Please contact support." });
+        return;
+      }
+
+      // 2. Subscription gate — exempt billing/auth/health routes so users can pay
+      const url = (req as any).originalUrl ?? "";
+      const isExempt =
+        url.includes("/api/stripe") ||
+        url.includes("/api/auth") ||
+        url.includes("/api/healthz");
+
+      if (!isExempt) {
+        const { subscriptionStatus, createdAt } = company;
+        if (subscriptionStatus === "ACTIVE") {
+          // valid — fall through
+        } else if (subscriptionStatus === "TRIAL") {
+          const trialExpiry = new Date(createdAt);
+          trialExpiry.setDate(trialExpiry.getDate() + 14);
+          if (new Date() > trialExpiry) {
+            res.status(402).json({
+              error: "SUBSCRIPTION_REQUIRED",
+              message: "Your free trial has expired. Please subscribe to continue using MissionLedger.",
+            });
+            return;
+          }
+        } else {
+          // INACTIVE or CANCELLED
+          res.status(402).json({
+            error: "SUBSCRIPTION_REQUIRED",
+            message: "An active subscription is required to access this feature.",
+          });
+          return;
+        }
+      }
     }
   }
 

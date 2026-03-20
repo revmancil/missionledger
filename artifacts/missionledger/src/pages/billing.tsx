@@ -72,7 +72,15 @@ export default function BillingPage() {
 
     fetch("/api/stripe/subscription", { credentials: "include" })
       .then((r) => r.json())
-      .then(setSubscriptionInfo)
+      .then((info) => {
+        setSubscriptionInfo(info);
+        const params = new URLSearchParams(window.location.search);
+        if (params.get("success") === "1") {
+          window.history.replaceState({}, "", window.location.pathname);
+          toast.success("Subscription activated! Welcome aboard.");
+          fetch("/api/stripe/notify-subscribed", { method: "POST", credentials: "include" }).catch(() => {});
+        }
+      })
       .catch(() => {})
       .finally(() => setLoadingSubscription(false));
   }, []);

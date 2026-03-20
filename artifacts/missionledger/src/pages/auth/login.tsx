@@ -82,6 +82,11 @@ export default function LoginPage() {
                 />
               </div>
             </div>
+            <div className="flex justify-end -mt-1">
+              <Link href="/forgot-password" className="text-xs text-muted-foreground hover:text-primary hover:underline">
+                Forgot password?
+              </Link>
+            </div>
             <Button type="submit" className="w-full h-11 text-base shadow-md" disabled={isLoggingIn}>
               {isLoggingIn ? "Signing in..." : "Sign In"}
             </Button>

@@ -91,6 +91,12 @@ export default function RegisterPage() {
           <div className="mt-6 text-center text-sm text-muted-foreground">
             Already registered? <Link href="/login" className="text-primary font-medium hover:underline">Log in here</Link>
           </div>
+          <p className="mt-4 text-center text-xs text-muted-foreground">
+            By registering you agree to our{" "}
+            <Link href="/terms" className="underline hover:text-foreground">Terms of Service</Link>
+            {" "}and{" "}
+            <Link href="/privacy" className="underline hover:text-foreground">Privacy Policy</Link>
+          </p>
         </CardContent>
       </Card>
     </div>

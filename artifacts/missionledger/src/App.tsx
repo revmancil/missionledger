@@ -1,10 +1,11 @@
 import { Switch, Route, Router as WouterRouter, Redirect } from "wouter";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster as SonnerToaster } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
 import { FinancialSyncProvider } from "@/lib/financial-sync";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 // Pages
 import LandingPage from "@/pages/landing";
@@ -25,6 +26,10 @@ import PeriodClosePage from "@/pages/period-close";
 import ReportsPage from "@/pages/reports";
 import MasterAdminPage from "@/pages/master-admin";
 import BillingPage from "@/pages/billing";
+import ForgotPasswordPage from "@/pages/auth/forgot-password";
+import ResetPasswordPage from "@/pages/auth/reset-password";
+import TermsPage from "@/pages/terms";
+import PrivacyPage from "@/pages/privacy";
 import NotFound from "@/pages/not-found";
 import AdminCommandCenter from "@/pages/admin/index";
 import AdminLoginPage from "@/pages/admin/login";
@@ -40,10 +45,51 @@ const queryClient = new QueryClient({
   },
 });
 
+const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+
+function useSubscription(enabled: boolean) {
+  return useQuery<any>({
+    queryKey: ["subscription-status"],
+    queryFn: () =>
+      fetch(`${BASE}/api/stripe/subscription`, { credentials: "include" }).then((r) => r.json()),
+    enabled,
+    staleTime: 60_000,
+  });
+}
+
+function LoadingScreen() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-background">
+      <div className="animate-pulse text-muted-foreground">Loading session...</div>
+    </div>
+  );
+}
+
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
   const { isAuthenticated, isLoading } = useAuth();
-  if (isLoading) return <div className="min-h-screen flex items-center justify-center bg-background"><div className="animate-pulse text-muted-foreground">Loading session...</div></div>;
+  if (isLoading) return <LoadingScreen />;
   if (!isAuthenticated) return <Redirect to="/login" />;
+  return <Component />;
+}
+
+function SubscriptionGatedRoute({ component: Component }: { component: React.ComponentType }) {
+  const { isAuthenticated, isLoading, isPlatformAdmin } = useAuth();
+  const { data: sub, isLoading: subLoading } = useSubscription(isAuthenticated && !isPlatformAdmin);
+
+  if (isLoading) return <LoadingScreen />;
+  if (!isAuthenticated) return <Redirect to="/login" />;
+
+  if (!isPlatformAdmin) {
+    if (subLoading) return <LoadingScreen />;
+    if (sub) {
+      const locked =
+        sub.subscriptionStatus === "INACTIVE" ||
+        sub.subscriptionStatus === "CANCELLED" ||
+        sub.isTrialExpired;
+      if (locked) return <Redirect to="/billing" />;
+    }
+  }
+
   return <Component />;
 }
 
@@ -53,21 +99,25 @@ function Router() {
       <Route path="/" component={LandingPage} />
       <Route path="/login" component={LoginPage} />
       <Route path="/register" component={RegisterPage} />
+      <Route path="/forgot-password" component={ForgotPasswordPage} />
+      <Route path="/reset-password" component={ResetPasswordPage} />
+      <Route path="/terms" component={TermsPage} />
+      <Route path="/privacy" component={PrivacyPage} />
 
-      <Route path="/dashboard"><ProtectedRoute component={DashboardPage} /></Route>
-      <Route path="/funds"><ProtectedRoute component={FundsPage} /></Route>
-      <Route path="/accounts"><ProtectedRoute component={AccountsPage} /></Route>
-      <Route path="/vendors"><ProtectedRoute component={VendorsPage} /></Route>
-      <Route path="/pledges"><ProtectedRoute component={PledgesPage} /></Route>
-      <Route path="/bank-accounts"><ProtectedRoute component={BankAccountsPage} /></Route>
-      <Route path="/bank-register"><ProtectedRoute component={BankRegisterPage} /></Route>
-      <Route path="/reconciliation"><ProtectedRoute component={ReconciliationPage} /></Route>
-      <Route path="/opening-balance"><ProtectedRoute component={OpeningBalancePage} /></Route>
-      <Route path="/journal-entries"><ProtectedRoute component={JournalEntriesPage} /></Route>
-      <Route path="/trial-balance"><ProtectedRoute component={TrialBalancePage} /></Route>
-      <Route path="/period-close"><ProtectedRoute component={PeriodClosePage} /></Route>
-      <Route path="/reports"><ProtectedRoute component={ReportsPage} /></Route>
-      <Route path="/master-admin"><ProtectedRoute component={MasterAdminPage} /></Route>
+      <Route path="/dashboard"><SubscriptionGatedRoute component={DashboardPage} /></Route>
+      <Route path="/funds"><SubscriptionGatedRoute component={FundsPage} /></Route>
+      <Route path="/accounts"><SubscriptionGatedRoute component={AccountsPage} /></Route>
+      <Route path="/vendors"><SubscriptionGatedRoute component={VendorsPage} /></Route>
+      <Route path="/pledges"><SubscriptionGatedRoute component={PledgesPage} /></Route>
+      <Route path="/bank-accounts"><SubscriptionGatedRoute component={BankAccountsPage} /></Route>
+      <Route path="/bank-register"><SubscriptionGatedRoute component={BankRegisterPage} /></Route>
+      <Route path="/reconciliation"><SubscriptionGatedRoute component={ReconciliationPage} /></Route>
+      <Route path="/opening-balance"><SubscriptionGatedRoute component={OpeningBalancePage} /></Route>
+      <Route path="/journal-entries"><SubscriptionGatedRoute component={JournalEntriesPage} /></Route>
+      <Route path="/trial-balance"><SubscriptionGatedRoute component={TrialBalancePage} /></Route>
+      <Route path="/period-close"><SubscriptionGatedRoute component={PeriodClosePage} /></Route>
+      <Route path="/reports"><SubscriptionGatedRoute component={ReportsPage} /></Route>
+      <Route path="/master-admin"><SubscriptionGatedRoute component={MasterAdminPage} /></Route>
       <Route path="/billing"><ProtectedRoute component={BillingPage} /></Route>
 
       <Route path="/admin/login" component={AdminLoginPage} />
@@ -82,17 +132,21 @@ function Router() {
 
 function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-          <FinancialSyncProvider>
-            <Router />
-          </FinancialSyncProvider>
-        </WouterRouter>
-        <Toaster />
-        <SonnerToaster position="top-right" richColors />
-      </TooltipProvider>
-    </QueryClientProvider>
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <TooltipProvider>
+          <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+            <FinancialSyncProvider>
+              <ErrorBoundary>
+                <Router />
+              </ErrorBoundary>
+            </FinancialSyncProvider>
+          </WouterRouter>
+          <Toaster />
+          <SonnerToaster position="top-right" richColors />
+        </TooltipProvider>
+      </QueryClientProvider>
+    </ErrorBoundary>
   );
 }
 

@@ -2,6 +2,7 @@ import { Router } from "express";
 import { db, users, companies, organizationUsers } from "@workspace/db";
 import { eq, and, inArray } from "drizzle-orm";
 import { logAudit } from "../lib/audit";
+import { sendWelcomeEmail } from "../lib/email";
 import {
   requireAuth,
   hashPassword,
@@ -196,6 +197,10 @@ router.post("/register", async (req, res) => {
       organizationType: company.organizationType,
       isPlatformAdmin: false,
     };
+
+    sendWelcomeEmail(user.email, company.name).catch((err) =>
+      console.error("Welcome email failed:", err.message)
+    );
 
     setCookieAndRespond(res, authUser, 201);
   } catch (error) {

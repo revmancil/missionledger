@@ -27,6 +27,7 @@ import helpMessagesRouter from "./help-messages";
 import stripeRouter from "./stripe";
 import plaidRouter from "./plaid";
 import financialSummaryRouter from "./financial-summary";
+import passwordResetRouter from "./password-reset";
 
 const router: IRouter = Router();
 
@@ -58,5 +59,6 @@ router.use("/help-messages", helpMessagesRouter);
 router.use("/stripe", stripeRouter);
 router.use("/plaid", plaidRouter);
 router.use("/financial-summary", financialSummaryRouter);
+router.use("/auth", passwordResetRouter);
 
 export default router;

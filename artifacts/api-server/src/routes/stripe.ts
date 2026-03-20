@@ -2,6 +2,7 @@ import { Router } from "express";
 import { db, companies } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
+import { sendSubscriptionConfirmedEmail } from "../lib/email";
 import { getUncachableStripeClient } from "../lib/stripeClient";
 import { stripeStorage } from "../lib/stripeStorage";
 
@@ -54,10 +55,18 @@ router.get("/subscription", requireAuth, async (req, res) => {
       subscription = await stripeStorage.getSubscription(company.stripeSubscriptionId);
     }
 
+    const trialExpiry = new Date(company.createdAt);
+    trialExpiry.setDate(trialExpiry.getDate() + 14);
+    const msRemaining = trialExpiry.getTime() - Date.now();
+    const daysRemaining = Math.max(0, Math.ceil(msRemaining / (1000 * 60 * 60 * 24)));
+
     res.json({
       subscriptionStatus: company.subscriptionStatus,
       stripeSubscriptionId: company.stripeSubscriptionId,
       stripeCustomerId: company.stripeCustomerId,
+      trialExpiresAt: trialExpiry.toISOString(),
+      daysRemaining,
+      isTrialExpired: company.subscriptionStatus === "TRIAL" && msRemaining <= 0,
       subscription,
     });
   } catch (err: any) {
@@ -123,6 +132,24 @@ router.post("/portal", requireAuth, requireAdmin, async (req, res) => {
   } catch (err: any) {
     console.error("Portal error:", err.message);
     res.status(500).json({ error: "Failed to open billing portal" });
+  }
+});
+
+router.post("/notify-subscribed", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { companyId } = (req as any).user;
+    const [company] = await db.select({ name: companies.name, email: companies.email, subscriptionStatus: companies.subscriptionStatus }).from(companies).where(eq(companies.id, companyId)).limit(1);
+    if (!company) return res.status(404).json({ error: "Company not found" });
+    if (company.subscriptionStatus !== "ACTIVE") return res.json({ ok: true, skipped: true });
+
+    const adminEmail = (req as any).user.email;
+    if (adminEmail) {
+      await sendSubscriptionConfirmedEmail(adminEmail, company.name);
+    }
+    res.json({ ok: true });
+  } catch (err: any) {
+    console.error("Notify subscribed error:", err.message);
+    res.status(500).json({ error: "Failed to send confirmation email" });
   }
 });
 

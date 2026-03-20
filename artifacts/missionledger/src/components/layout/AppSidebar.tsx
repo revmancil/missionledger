@@ -236,6 +236,11 @@ export function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
             <Shield className="w-4 h-4 text-primary shrink-0" title="Platform Admin" />
           )}
         </div>
+        <div className="flex items-center justify-center gap-3 text-[10px] text-muted-foreground/60 mb-2">
+          <a href="/missionledger/terms" className="hover:text-muted-foreground hover:underline">Terms</a>
+          <span>·</span>
+          <a href="/missionledger/privacy" className="hover:text-muted-foreground hover:underline">Privacy</a>
+        </div>
         <Button
           variant="outline"
           className="w-full justify-start text-muted-foreground"
