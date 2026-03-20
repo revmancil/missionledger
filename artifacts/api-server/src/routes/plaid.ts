@@ -185,9 +185,26 @@ router.post("/sync/:bankAccountId", requireAuth, requireAdmin, async (req, res) 
       );
     }
 
+    // Fetch current balance from Plaid and update the bank account
+    let updatedBalance: number | undefined;
+    try {
+      const balanceResponse = await plaid.accountsBalanceGet({ access_token: account.plaidAccessToken });
+      const plaidAccounts = balanceResponse.data.accounts;
+      // Match by last four digits if available, otherwise take the first account
+      const matchedAccount = account.lastFour
+        ? plaidAccounts.find((a) => a.mask === account.lastFour) || plaidAccounts[0]
+        : plaidAccounts[0];
+      if (matchedAccount?.balances?.current != null) {
+        updatedBalance = matchedAccount.balances.current;
+      }
+    } catch (balErr: any) {
+      console.warn("Could not fetch Plaid balance:", balErr.message);
+    }
+
     await db.update(bankAccounts).set({
       plaidLastSyncedAt: new Date(),
       updatedAt: new Date(),
+      ...(updatedBalance !== undefined ? { currentBalance: updatedBalance } : {}),
     }).where(eq(bankAccounts.id, bankAccountId));
 
     res.json({
@@ -196,6 +213,7 @@ router.post("/sync/:bankAccountId", requireAuth, requireAdmin, async (req, res) 
       total: allPlaidTx.length,
       startDate,
       endDate,
+      balance: updatedBalance,
     });
   } catch (err: any) {
     console.error("Plaid sync error:", err.message);

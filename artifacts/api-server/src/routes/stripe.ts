@@ -37,6 +37,35 @@ router.get("/plans", async (_req, res) => {
         });
       }
     }
+
+    // If the sync DB is empty, fall back to fetching directly from Stripe API
+    if (productsMap.size === 0) {
+      const stripe = await getUncachableStripeClient();
+      const [products, prices] = await Promise.all([
+        stripe.products.list({ active: true, limit: 100 }),
+        stripe.prices.list({ active: true, limit: 100 }),
+      ]);
+      const pricesByProduct = new Map<string, any[]>();
+      for (const price of prices.data) {
+        const pid = typeof price.product === "string" ? price.product : price.product.id;
+        if (!pricesByProduct.has(pid)) pricesByProduct.set(pid, []);
+        pricesByProduct.get(pid)!.push({
+          id: price.id,
+          unit_amount: price.unit_amount,
+          currency: price.currency,
+          recurring: price.recurring,
+        });
+      }
+      const fallbackPlans = products.data.map((p) => ({
+        id: p.id,
+        name: p.name,
+        description: p.description,
+        metadata: p.metadata || {},
+        prices: pricesByProduct.get(p.id) || [],
+      }));
+      return res.json({ data: fallbackPlans });
+    }
+
     res.json({ data: Array.from(productsMap.values()) });
   } catch (err: any) {
     console.error("Error fetching plans:", err.message);
