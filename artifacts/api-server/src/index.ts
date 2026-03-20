@@ -121,43 +121,48 @@ async function seedStripeProductsIfNeeded() {
         console.log(`  Created Stripe product: ${plan.name} (${productId})`);
       }
 
-      // Upsert product into local stripe.products table
+      // Upsert product into local stripe.products table via _raw_data (all other columns are generated)
+      const productRaw = JSON.stringify({
+        id: productId, object: "product", active: true,
+        name: plan.name, description: plan.description, metadata: plan.metadata,
+        created: now, updated: now, livemode: false,
+        images: [], marketing_features: [],
+      });
       await pool.query(
-        `INSERT INTO stripe.products (id, name, description, metadata, active, created, updated, livemode, object)
-         VALUES ($1, $2, $3, $4::jsonb, true, $5, $5, false, 'product')
-         ON CONFLICT (id) DO UPDATE SET name=$2, description=$3, metadata=$4::jsonb, active=true`,
-        [productId, plan.name, plan.description, JSON.stringify(plan.metadata), now]
+        `INSERT INTO stripe.products (_raw_data) VALUES ($1::jsonb)
+         ON CONFLICT (id) DO UPDATE SET _raw_data = EXCLUDED._raw_data`,
+        [productRaw]
       );
 
-      // Find or create monthly price
+      // Find or create monthly/yearly prices in Stripe
       const existingPrices = await stripe.prices.list({ product: productId, active: true });
-      let monthlyPriceId = existingPrices.data.find(p => p.recurring?.interval === "month")?.id;
-      let yearlyPriceId = existingPrices.data.find(p => p.recurring?.interval === "year")?.id;
+      let monthlyPrice = existingPrices.data.find(p => p.recurring?.interval === "month");
+      let yearlyPrice = existingPrices.data.find(p => p.recurring?.interval === "year");
 
-      if (!monthlyPriceId) {
-        const mp = await stripe.prices.create({ product: productId, unit_amount: plan.monthlyAmount, currency: "usd", recurring: { interval: "month" } });
-        monthlyPriceId = mp.id;
+      if (!monthlyPrice) {
+        monthlyPrice = await stripe.prices.create({ product: productId, unit_amount: plan.monthlyAmount, currency: "usd", recurring: { interval: "month" } });
       }
-      if (!yearlyPriceId) {
-        const yp = await stripe.prices.create({ product: productId, unit_amount: plan.yearlyAmount, currency: "usd", recurring: { interval: "year" } });
-        yearlyPriceId = yp.id;
+      if (!yearlyPrice) {
+        yearlyPrice = await stripe.prices.create({ product: productId, unit_amount: plan.yearlyAmount, currency: "usd", recurring: { interval: "year" } });
       }
 
-      // Upsert prices into local stripe.prices table
-      await pool.query(
-        `INSERT INTO stripe.prices (id, product, unit_amount, currency, recurring, active, type, created, livemode, object)
-         VALUES ($1, $2, $3, 'usd', $4::jsonb, true, 'recurring', $5, false, 'price')
-         ON CONFLICT (id) DO UPDATE SET unit_amount=$3, active=true`,
-        [monthlyPriceId, productId, plan.monthlyAmount, JSON.stringify({ interval: "month", interval_count: 1 }), now]
-      );
-      await pool.query(
-        `INSERT INTO stripe.prices (id, product, unit_amount, currency, recurring, active, type, created, livemode, object)
-         VALUES ($1, $2, $3, 'usd', $4::jsonb, true, 'recurring', $5, false, 'price')
-         ON CONFLICT (id) DO UPDATE SET unit_amount=$3, active=true`,
-        [yearlyPriceId, productId, plan.yearlyAmount, JSON.stringify({ interval: "year", interval_count: 1 }), now]
-      );
+      // Upsert prices into local stripe.prices table via _raw_data
+      for (const price of [monthlyPrice, yearlyPrice]) {
+        const priceRaw = JSON.stringify({
+          id: price.id, object: "price", active: true,
+          product: productId, unit_amount: price.unit_amount,
+          currency: price.currency, recurring: price.recurring,
+          type: "recurring", created: price.created, livemode: false,
+          billing_scheme: "per_unit",
+        });
+        await pool.query(
+          `INSERT INTO stripe.prices (_raw_data) VALUES ($1::jsonb)
+           ON CONFLICT (id) DO UPDATE SET _raw_data = EXCLUDED._raw_data`,
+          [priceRaw]
+        );
+      }
 
-      console.log(`  Seeded ${plan.name}: monthly=${monthlyPriceId}, yearly=${yearlyPriceId}`);
+      console.log(`  Seeded ${plan.name}: monthly=${monthlyPrice.id}, yearly=${yearlyPrice.id}`);
     }
     console.log("Stripe plan seed complete");
   } catch (err: any) {
