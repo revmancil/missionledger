@@ -6,7 +6,9 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-import { TrendingUp, TrendingDown, DollarSign, BookOpen, FileText, Table2, Download, Printer } from "lucide-react";
+import { TrendingUp, TrendingDown, DollarSign, BookOpen, FileText, Table2, Download, FileDown } from "lucide-react";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 
 const BASE = import.meta.env.BASE_URL as string;
 
@@ -176,8 +178,227 @@ export default function ReportsPage() {
     URL.revokeObjectURL(url);
   }
 
-  // Financial Statements → print to PDF
-  const downloadFinancial = useCallback(() => window.print(), []);
+  // Shared PDF setup: title block + page numbers
+  function makePdf(title: string, subtitle: string) {
+    const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "letter" });
+    const W = doc.internal.pageSize.getWidth();
+
+    const addPageHeader = (pageTitle: string, pageSub: string) => {
+      doc.setFillColor(30, 64, 108);
+      doc.rect(0, 0, W, 52, "F");
+      doc.setTextColor(255, 255, 255);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(16);
+      doc.text("MissionLedger", 40, 22);
+      doc.setFontSize(11);
+      doc.setFont("helvetica", "normal");
+      doc.text(pageTitle, 40, 37);
+      doc.setFontSize(9);
+      doc.setTextColor(200, 220, 255);
+      doc.text(pageSub, 40, 49);
+      doc.setTextColor(0, 0, 0);
+    };
+
+    addPageHeader(title, subtitle);
+
+    doc.setFont("helvetica", "normal");
+    (doc as any).internal.events.subscribe("addPage", () => {
+      addPageHeader(title, subtitle);
+    });
+
+    return { doc, startY: 65, W, addPageHeader };
+  }
+
+  function addPdfFooter(doc: jsPDF) {
+    const pageCount = (doc as any).internal.getNumberOfPages();
+    const W = doc.internal.pageSize.getWidth();
+    const H = doc.internal.pageSize.getHeight();
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      doc.setFontSize(8);
+      doc.setTextColor(150, 150, 150);
+      doc.text(`Page ${i} of ${pageCount}`, W - 40, H - 20, { align: "right" });
+      doc.text(`Generated ${new Date().toLocaleString()}`, 40, H - 20);
+    }
+    doc.setTextColor(0, 0, 0);
+  }
+
+  // Financial Statements → PDF
+  const downloadFinancialPdf = useCallback(() => {
+    const pl = profitLoss as any;
+    const bsData = balanceSheet as any;
+    if (!pl && !bsData) return;
+
+    const { doc, startY, W } = makePdf(
+      "Financial Statements",
+      `Period: ${new Date(applied.startDate).toLocaleDateString()} – ${new Date(applied.endDate).toLocaleDateString()}`
+    );
+
+    let y = startY;
+
+    // ── Statement of Activities ─────────────────────────────────────────────
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.setTextColor(30, 64, 108);
+    doc.text("Statement of Activities", 40, y);
+    y += 6;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(100, 100, 100);
+    doc.text(`${new Date(applied.startDate).toLocaleDateString()} – ${new Date(applied.endDate).toLocaleDateString()}`, 40, y + 8);
+    doc.setTextColor(0, 0, 0);
+    y += 16;
+
+    // Revenue table
+    autoTable(doc, {
+      startY: y,
+      head: [["Account Code", "Account Name", "Amount"]],
+      body: [
+        ...(pl?.revenue ?? []).map((r: any) => [r.accountCode, r.accountName, formatCurrency(r.amount)]),
+        [{ content: "Total Revenue", colSpan: 2, styles: { fontStyle: "bold" } }, { content: formatCurrency(pl?.totalRevenue ?? 0), styles: { fontStyle: "bold", textColor: [6, 95, 70] } }],
+      ],
+      theme: "striped",
+      headStyles: { fillColor: [30, 64, 108], fontSize: 9 },
+      bodyStyles: { fontSize: 9 },
+      columnStyles: { 2: { halign: "right" } },
+      margin: { left: 40, right: 40 },
+      didDrawPage: () => {},
+    });
+
+    y = (doc as any).lastAutoTable.finalY + 10;
+
+    // Expenses table
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(30, 64, 108);
+    doc.text("Expenses", 40, y + 6);
+    y += 14;
+
+    autoTable(doc, {
+      startY: y,
+      head: [["Account Code", "Account Name", "Amount"]],
+      body: [
+        ...(pl?.expenses ?? []).map((r: any) => [r.accountCode, r.accountName, formatCurrency(r.amount)]),
+        [{ content: "Total Expenses", colSpan: 2, styles: { fontStyle: "bold" } }, { content: formatCurrency(pl?.totalExpenses ?? 0), styles: { fontStyle: "bold", textColor: [180, 40, 20] } }],
+      ],
+      theme: "striped",
+      headStyles: { fillColor: [100, 40, 40], fontSize: 9 },
+      bodyStyles: { fontSize: 9 },
+      columnStyles: { 2: { halign: "right" } },
+      margin: { left: 40, right: 40 },
+    });
+
+    y = (doc as any).lastAutoTable.finalY + 6;
+
+    // Net Income row
+    const ni = pl?.netIncome ?? 0;
+    autoTable(doc, {
+      startY: y,
+      body: [[
+        { content: "Change in Net Assets", colSpan: 2, styles: { fontStyle: "bold", fontSize: 10 } },
+        { content: formatCurrency(Math.abs(ni)) + (ni < 0 ? " (deficit)" : ""), styles: { fontStyle: "bold", fontSize: 10, textColor: ni >= 0 ? [6, 95, 70] : [180, 40, 20], halign: "right" } },
+      ]],
+      theme: "plain",
+      margin: { left: 40, right: 40 },
+    });
+
+    // ── Balance Sheet (new page) ─────────────────────────────────────────────
+    doc.addPage();
+    y = startY;
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.setTextColor(30, 64, 108);
+    doc.text("Statement of Financial Position", 40, y);
+    y += 6;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(100, 100, 100);
+    doc.text(`As of ${new Date(bsQueryDate).toLocaleDateString()}`, 40, y + 8);
+    doc.setTextColor(0, 0, 0);
+    y += 16;
+
+    // Assets
+    autoTable(doc, {
+      startY: y,
+      head: [["Account Code", "Account Name", "Balance"]],
+      body: [
+        ...(bsData?.assets ?? []).map((a: any) => [a.accountCode, a.accountName, formatCurrency(a.amount)]),
+        [{ content: "Total Assets", colSpan: 2, styles: { fontStyle: "bold" } }, { content: formatCurrency(bsData?.totalAssets ?? 0), styles: { fontStyle: "bold" } }],
+      ],
+      theme: "striped",
+      headStyles: { fillColor: [30, 64, 108], fontSize: 9 },
+      bodyStyles: { fontSize: 9 },
+      columnStyles: { 2: { halign: "right" } },
+      margin: { left: 40, right: 40 },
+    });
+
+    y = (doc as any).lastAutoTable.finalY + 10;
+
+    // Liabilities
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(30, 64, 108);
+    doc.text("Liabilities", 40, y + 6);
+    y += 14;
+
+    autoTable(doc, {
+      startY: y,
+      head: [["Account Code", "Account Name", "Balance"]],
+      body: [
+        ...(bsData?.liabilities ?? []).map((a: any) => [a.accountCode, a.accountName, formatCurrency(a.amount)]),
+        [{ content: "Total Liabilities", colSpan: 2, styles: { fontStyle: "bold" } }, { content: formatCurrency(bsData?.totalLiabilities ?? 0), styles: { fontStyle: "bold" } }],
+      ],
+      theme: "striped",
+      headStyles: { fillColor: [80, 80, 80], fontSize: 9 },
+      bodyStyles: { fontSize: 9 },
+      columnStyles: { 2: { halign: "right" } },
+      margin: { left: 40, right: 40 },
+    });
+
+    y = (doc as any).lastAutoTable.finalY + 10;
+
+    // Net Assets
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(30, 64, 108);
+    doc.text("Net Assets", 40, y + 6);
+    y += 14;
+
+    const naRows: any[] = [
+      [{ content: "Unrestricted (General & Payroll)", colSpan: 2 }, formatCurrency(bsData?.totalUnrestrictedNetAssets ?? 0)],
+      ...(bsData?.restrictedFundDetails ?? []).map((f: any) => [`  ${f.fundName}`, FUND_TYPE_LABELS[f.fundType] ?? f.fundType, formatCurrency(f.netAssets)]),
+      [{ content: "Total Net Assets", colSpan: 2, styles: { fontStyle: "bold" } }, { content: formatCurrency(bsData?.totalNetAssets ?? 0), styles: { fontStyle: "bold" } }],
+    ];
+
+    autoTable(doc, {
+      startY: y,
+      head: [["Category", "Fund Type", "Balance"]],
+      body: naRows,
+      theme: "striped",
+      headStyles: { fillColor: [6, 95, 70], fontSize: 9 },
+      bodyStyles: { fontSize: 9 },
+      columnStyles: { 2: { halign: "right" } },
+      margin: { left: 40, right: 40 },
+    });
+
+    y = (doc as any).lastAutoTable.finalY + 6;
+
+    // Balance check
+    const diff = Math.abs(bsData?.difference ?? 0);
+    autoTable(doc, {
+      startY: y,
+      body: [[
+        { content: diff <= 0.01 ? "✓ Books are in balance" : `⚠ Out of balance by ${formatCurrency(diff)}`, colSpan: 3,
+          styles: { fontStyle: "bold", textColor: diff <= 0.01 ? [6, 95, 70] : [180, 40, 20], halign: "center" } }
+      ]],
+      theme: "plain",
+      margin: { left: 40, right: 40 },
+    });
+
+    addPdfFooter(doc);
+    doc.save(`financial-statements-${applied.endDate}.pdf`);
+  }, [profitLoss, balanceSheet, applied, bsQueryDate]);
 
   // General Ledger → CSV (one row per GL entry, grouped by account)
   const downloadGl = useCallback(() => {
@@ -259,13 +480,165 @@ export default function ReportsPage() {
       `transaction-register-${applied.startDate}-${applied.endDate}.csv`);
   }, [registerData, applied]);
 
-  // Unified download action for the current tab
-  const downloadLabel = tab === "financial" ? "Print / Save PDF" : "Download CSV";
-  const downloadIcon  = tab === "financial" ? <Printer className="w-4 h-4" /> : <Download className="w-4 h-4" />;
-  const handleDownload = tab === "financial" ? downloadFinancial
-    : tab === "gl"       ? downloadGl
-    : tab === "journal"  ? downloadJournal
-    : exportCsv;
+  // General Ledger → PDF
+  const downloadGlPdf = useCallback(() => {
+    const accts = glByAccount?.accounts ?? [];
+    if (!accts.length) return;
+    const { doc, startY } = makePdf(
+      "General Ledger",
+      `${new Date(applied.startDate).toLocaleDateString()} – ${new Date(applied.endDate).toLocaleDateString()}${fundFilter ? "  |  Filtered by fund" : ""}`
+    );
+    let y = startY;
+    for (const acct of accts) {
+      // Account section header
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.setFillColor(230, 236, 248);
+      doc.rect(40, y - 2, doc.internal.pageSize.getWidth() - 80, 16, "F");
+      doc.setTextColor(30, 64, 108);
+      doc.text(`${acct.accountCode}  ${acct.accountName}  (${acct.coaType})`, 44, y + 10);
+      doc.setTextColor(0, 0, 0);
+      y += 18;
+
+      const rows: any[] = [
+        [{ content: "Beginning Balance", styles: { fontStyle: "italic", textColor: [80, 80, 80] } }, "", "", "", "",
+         { content: formatCurrency(Math.abs(acct.beginBalance)) + (acct.beginBalance < 0 ? " Cr" : ""), styles: { fontStyle: "italic", textColor: [80, 80, 80], halign: "right" } }],
+        ...acct.entries.map(e => [
+          new Date(e.date).toLocaleDateString(),
+          e.description ?? SOURCE_LABELS[e.sourceType] ?? "—",
+          e.fundName ?? "—",
+          e.entryType === "DEBIT"  ? formatCurrency(e.amount) : "",
+          e.entryType === "CREDIT" ? formatCurrency(e.amount) : "",
+          formatCurrency(Math.abs(e.runningBalance)) + (e.runningBalance < 0 ? " Cr" : ""),
+        ]),
+        [
+          { content: "Period Totals", colSpan: 3, styles: { fontStyle: "bold" } },
+          { content: formatCurrency(acct.periodDebit),  styles: { fontStyle: "bold", textColor: [160, 60, 20], halign: "right" } },
+          { content: formatCurrency(acct.periodCredit), styles: { fontStyle: "bold", textColor: [20, 120, 60], halign: "right" } },
+          { content: formatCurrency(Math.abs(acct.endBalance)) + (acct.endBalance < 0 ? " Cr" : ""), styles: { fontStyle: "bold", halign: "right" } },
+        ],
+      ];
+
+      autoTable(doc, {
+        startY: y,
+        head: [["Date", "Description", "Fund", "Debit", "Credit", "Balance"]],
+        body: rows,
+        theme: "striped",
+        headStyles: { fillColor: [30, 64, 108], fontSize: 8 },
+        bodyStyles: { fontSize: 8 },
+        columnStyles: { 3: { halign: "right" }, 4: { halign: "right" }, 5: { halign: "right" } },
+        margin: { left: 40, right: 40 },
+      });
+
+      y = (doc as any).lastAutoTable.finalY + 14;
+      if (y > doc.internal.pageSize.getHeight() - 80) { doc.addPage(); y = startY; }
+    }
+    addPdfFooter(doc);
+    doc.save(`general-ledger-${applied.startDate}-${applied.endDate}.pdf`);
+  }, [glByAccount, applied, fundFilter]);
+
+  // General Journal → PDF
+  const downloadJournalPdf = useCallback(() => {
+    const groups = journalData?.groups ?? [];
+    if (!groups.length) return;
+    const { doc, startY } = makePdf(
+      "General Journal",
+      `${new Date(applied.startDate).toLocaleDateString()} – ${new Date(applied.endDate).toLocaleDateString()}`
+    );
+    let y = startY;
+    for (const grp of groups) {
+      const balanced = Math.abs(grp.totalDebits - grp.totalCredits) <= 0.01;
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9);
+      doc.setFillColor(240, 240, 250);
+      doc.rect(40, y - 2, doc.internal.pageSize.getWidth() - 80, 15, "F");
+      doc.setTextColor(30, 64, 108);
+      doc.text(
+        `${new Date(grp.date).toLocaleDateString()}  |  ${SOURCE_LABELS[grp.sourceType] ?? grp.sourceType}  |  ${grp.description}${grp.referenceNumber ? "  #" + grp.referenceNumber : ""}`,
+        44, y + 9
+      );
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+      doc.setTextColor(balanced ? 20 : 180, balanced ? 120 : 40, balanced ? 60 : 20);
+      doc.text(balanced ? "✓ Balanced" : "⚠ Unbalanced", doc.internal.pageSize.getWidth() - 44, y + 9, { align: "right" });
+      doc.setTextColor(0, 0, 0);
+      y += 17;
+
+      autoTable(doc, {
+        startY: y,
+        head: [["Account Code", "Account Name", "Fund", "Debit", "Credit"]],
+        body: [
+          ...grp.entries.map(e => [
+            e.accountCode, e.accountName, e.fundName ?? "—",
+            e.entryType === "DEBIT"  ? formatCurrency(e.amount) : "",
+            e.entryType === "CREDIT" ? formatCurrency(e.amount) : "",
+          ]),
+          [
+            { content: "Totals", colSpan: 3, styles: { fontStyle: "bold" } },
+            { content: formatCurrency(grp.totalDebits),  styles: { fontStyle: "bold", textColor: [160, 60, 20], halign: "right" } },
+            { content: formatCurrency(grp.totalCredits), styles: { fontStyle: "bold", textColor: [20, 120, 60], halign: "right" } },
+          ],
+        ],
+        theme: "striped",
+        headStyles: { fillColor: [60, 80, 120], fontSize: 8 },
+        bodyStyles: { fontSize: 8 },
+        columnStyles: { 3: { halign: "right" }, 4: { halign: "right" } },
+        margin: { left: 40, right: 40 },
+      });
+
+      y = (doc as any).lastAutoTable.finalY + 12;
+      if (y > doc.internal.pageSize.getHeight() - 80) { doc.addPage(); y = startY; }
+    }
+    addPdfFooter(doc);
+    doc.save(`general-journal-${applied.startDate}-${applied.endDate}.pdf`);
+  }, [journalData, applied]);
+
+  // Transaction Register → PDF
+  const downloadRegisterPdf = useCallback(() => {
+    const rows = registerData?.transactions ?? [];
+    if (!rows.length) return;
+    const { doc, startY } = makePdf(
+      "Transaction Register",
+      `${new Date(applied.startDate).toLocaleDateString()} – ${new Date(applied.endDate).toLocaleDateString()}  |  ${rows.length} records`
+    );
+    const total = rows.reduce((s, r) => s + r.amount, 0);
+    autoTable(doc, {
+      startY,
+      head: [["Date", "Type", "Description / Payee", "Fund", "Debit Accounts", "Amount"]],
+      body: [
+        ...rows.map(r => [
+          new Date(r.date).toLocaleDateString(),
+          SOURCE_LABELS[r.sourceType] ?? r.sourceType,
+          r.description + (r.memo ? `\n${r.memo}` : ""),
+          r.fundName ?? "—",
+          r.debitAccounts ?? "—",
+          formatCurrency(r.amount),
+        ]),
+        [
+          { content: `Total  (${rows.length} records)`, colSpan: 5, styles: { fontStyle: "bold" } },
+          { content: formatCurrency(total), styles: { fontStyle: "bold", halign: "right" } },
+        ],
+      ],
+      theme: "striped",
+      headStyles: { fillColor: [30, 64, 108], fontSize: 8 },
+      bodyStyles: { fontSize: 8 },
+      columnStyles: { 5: { halign: "right" } },
+      margin: { left: 40, right: 40 },
+    });
+    addPdfFooter(doc);
+    doc.save(`transaction-register-${applied.startDate}-${applied.endDate}.pdf`);
+  }, [registerData, applied]);
+
+  // Per-tab download actions
+  const handleDownloadPdf = tab === "financial" ? downloadFinancialPdf
+    : tab === "gl"      ? downloadGlPdf
+    : tab === "journal" ? downloadJournalPdf
+    : downloadRegisterPdf;
+
+  const handleDownloadCsv = tab === "gl"      ? downloadGl
+    : tab === "journal" ? downloadJournal
+    : tab === "register" ? exportCsv
+    : null;
 
   const bs = balanceSheet as any;
 
@@ -331,9 +704,14 @@ export default function ReportsPage() {
           </>
         )}
         <Button onClick={handleApply} className="h-9">Apply</Button>
-        <Button variant="outline" onClick={handleDownload} className="h-9 gap-1.5">
-          {downloadIcon}{downloadLabel}
+        <Button variant="outline" onClick={handleDownloadPdf} className="h-9 gap-1.5">
+          <FileDown className="w-4 h-4" />Download PDF
         </Button>
+        {handleDownloadCsv && (
+          <Button variant="outline" onClick={handleDownloadCsv} className="h-9 gap-1.5">
+            <Download className="w-4 h-4" />Download CSV
+          </Button>
+        )}
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════════ */}
