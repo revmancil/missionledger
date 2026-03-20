@@ -19,3 +19,4 @@ export * from "./glEntries";
 export * from "./auditLogs";
 export * from "./financialSnapshots";
 export * from "./organizationUsers";
+export * from "./helpMessages";

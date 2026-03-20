@@ -8,6 +8,7 @@ import {
   Ban, Eye, EyeOff, RefreshCw, Search, ToggleLeft, ToggleRight,
   Wifi, WifiOff, CreditCard, ChevronDown, ChevronRight, X,
   TrendingUp, Activity, Lock, Wrench, Globe, KeyRound,
+  MessageSquare, Send, Bell,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -424,6 +425,36 @@ export default function AdminCommandCenter() {
   const [selectedOrg, setSelectedOrg]       = useState<OrgRow | null>(null);
   const [togglingMaint, setTogglingMaint]   = useState(false);
   const [impersonating, setImpersonating]   = useState<string | null>(null);
+  const [messages, setMessages]             = useState<any[]>([]);
+  const [msgLoading, setMsgLoading]         = useState(false);
+  const [expandedMsg, setExpandedMsg]       = useState<string | null>(null);
+  const [replyBody, setReplyBody]           = useState<Record<string, string>>({});
+  const [sendingReply, setSendingReply]     = useState<string | null>(null);
+  const [msgTab, setMsgTab]                 = useState<"inbox" | "all">("inbox");
+
+  async function loadMessages() {
+    setMsgLoading(true);
+    try {
+      const msgs = await apiFetch("/api/help-messages");
+      setMessages(msgs);
+    } catch { }
+    finally { setMsgLoading(false); }
+  }
+
+  async function sendReply(parentId: string) {
+    const body = replyBody[parentId]?.trim();
+    if (!body) return;
+    setSendingReply(parentId);
+    try {
+      await apiFetch(`/api/help-messages/${parentId}/reply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body }),
+      });
+      setReplyBody(prev => ({ ...prev, [parentId]: "" }));
+      await loadMessages();
+    } finally { setSendingReply(null); }
+  }
 
   // Auth guard
   useEffect(() => {
@@ -450,7 +481,7 @@ export default function AdminCommandCenter() {
     } finally { setLoading(false); }
   }
 
-  useEffect(() => { if (authChecked) loadData(); }, [authChecked]);
+  useEffect(() => { if (authChecked) { loadData(); loadMessages(); } }, [authChecked]);
 
   async function toggleGlobalMaintenance() {
     if (!stats) return;
@@ -579,6 +610,89 @@ export default function AdminCommandCenter() {
             </div>
           </div>
         </div>
+
+        {/* ── User Messages Inbox ──────────────────────────────────────────── */}
+        {(() => {
+          const userMsgs = messages.filter(m => m.direction === "USER_TO_ADMIN");
+          const unread = userMsgs.filter(m => !m.isRead).length;
+          return (
+            <div className="rounded-xl border border-slate-800 bg-slate-900 overflow-hidden">
+              <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800">
+                <div className="flex items-center gap-2">
+                  <MessageSquare className="h-4 w-4 text-violet-400" />
+                  <h2 className="text-sm font-bold text-slate-200">User Messages</h2>
+                  {unread > 0 && (
+                    <span className="px-2 py-0.5 rounded-full bg-violet-600 text-white text-[10px] font-bold">{unread} new</span>
+                  )}
+                </div>
+                <button onClick={loadMessages} disabled={msgLoading} className="h-7 w-7 flex items-center justify-center rounded-lg bg-slate-800 border border-slate-700 text-slate-400 hover:text-slate-200 disabled:opacity-50">
+                  <RefreshCw className={cn("h-3.5 w-3.5", msgLoading && "animate-spin")} />
+                </button>
+              </div>
+              {msgLoading ? (
+                <div className="py-8 text-center text-slate-600 text-sm">Loading messages…</div>
+              ) : userMsgs.length === 0 ? (
+                <div className="py-8 text-center text-slate-600 text-sm">No user messages yet. They appear here when users click "Message Admin" in the Help sidebar.</div>
+              ) : (
+                <div className="divide-y divide-slate-800/60">
+                  {userMsgs.map((msg) => {
+                    const thread = messages.filter(m => m.parentId === msg.id || m.id === msg.id);
+                    const isExpanded = expandedMsg === msg.id;
+                    return (
+                      <div key={msg.id}>
+                        <button
+                          onClick={() => setExpandedMsg(isExpanded ? null : msg.id)}
+                          className="w-full flex items-start gap-3 px-5 py-4 text-left hover:bg-slate-800/40 transition-colors"
+                        >
+                          <div className={cn("w-2 h-2 rounded-full mt-1.5 shrink-0", msg.isRead ? "bg-slate-700" : "bg-violet-500")} />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-sm font-semibold text-slate-200 truncate">{msg.subject}</span>
+                              <span className="text-[10px] text-slate-500">{msg.userName || msg.userEmail} · {msg.companyId}</span>
+                            </div>
+                            <p className="text-xs text-slate-400 mt-0.5 line-clamp-2">{msg.body}</p>
+                            <p className="text-[10px] text-slate-600 mt-1">{new Date(msg.createdAt).toLocaleString()}</p>
+                          </div>
+                          {isExpanded ? <ChevronDown className="h-4 w-4 text-slate-500 shrink-0" /> : <ChevronRight className="h-4 w-4 text-slate-500 shrink-0" />}
+                        </button>
+                        {isExpanded && (
+                          <div className="px-5 pb-5 space-y-3 bg-slate-950/30">
+                            <div className="p-3 rounded-lg bg-slate-800/60 border border-slate-700 text-sm text-slate-300 leading-relaxed">
+                              {msg.body}
+                            </div>
+                            {messages.filter(m => m.parentId === msg.id).map((reply) => (
+                              <div key={reply.id} className="ml-4 p-3 rounded-lg bg-violet-950/30 border border-violet-900/50 text-sm">
+                                <p className="text-[10px] font-bold text-violet-400 mb-1">Admin Reply · {new Date(reply.createdAt).toLocaleString()}</p>
+                                <p className="text-slate-300 leading-relaxed">{reply.body}</p>
+                              </div>
+                            ))}
+                            <div className="flex gap-2">
+                              <textarea
+                                value={replyBody[msg.id] ?? ""}
+                                onChange={e => setReplyBody(prev => ({ ...prev, [msg.id]: e.target.value }))}
+                                placeholder="Type your reply…"
+                                rows={2}
+                                className="flex-1 px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 text-sm placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-700 resize-none"
+                              />
+                              <button
+                                onClick={() => sendReply(msg.id)}
+                                disabled={!replyBody[msg.id]?.trim() || sendingReply === msg.id}
+                                className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-violet-700 hover:bg-violet-600 disabled:opacity-40 text-white text-sm font-semibold transition-colors self-end"
+                              >
+                                <Send className="h-3.5 w-3.5" />
+                                {sendingReply === msg.id ? "…" : "Reply"}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Tenant Table */}
         <div className="rounded-xl border border-slate-800 bg-slate-900 overflow-hidden">

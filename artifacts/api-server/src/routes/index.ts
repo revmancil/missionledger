@@ -23,6 +23,7 @@ import openingBalanceRouter from "./opening-balance";
 import trialBalanceRouter from "./trial-balance";
 import periodCloseRouter from "./period-close";
 import masterAdminRouter from "./master-admin";
+import helpMessagesRouter from "./help-messages";
 import stripeRouter from "./stripe";
 import plaidRouter from "./plaid";
 
@@ -52,6 +53,7 @@ router.use("/opening-balance", openingBalanceRouter);
 router.use("/trial-balance", trialBalanceRouter);
 router.use("/period-close", periodCloseRouter);
 router.use("/master-admin", masterAdminRouter);
+router.use("/help-messages", helpMessagesRouter);
 router.use("/stripe", stripeRouter);
 router.use("/plaid", plaidRouter);
 

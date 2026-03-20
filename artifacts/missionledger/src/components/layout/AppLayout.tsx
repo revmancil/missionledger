@@ -2,6 +2,7 @@ import { ReactNode, useState } from "react";
 import { AppSidebar } from "./AppSidebar";
 import { Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { HelpSidebar } from "@/components/help/HelpSidebar";
 
 export function AppLayout({ children, title }: { children: ReactNode, title?: string }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -27,6 +28,7 @@ export function AppLayout({ children, title }: { children: ReactNode, title?: st
           </div>
         </div>
       </main>
+      <HelpSidebar />
     </div>
   );
 }
