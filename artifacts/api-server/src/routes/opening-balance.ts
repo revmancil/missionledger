@@ -51,6 +51,35 @@ router.get("/", requireAuth, async (req, res) => {
       coa.push(created);
     }
 
+    // Auto-seed standard equity accounts if none exist for this company
+    const hasEquity = coa.some((a) => a.type === "EQUITY");
+    if (!hasEquity) {
+      const defaultEquityAccounts = [
+        { code: "3000", name: "Net Assets",                type: "EQUITY" as const, sortOrder: 210 },
+        { code: "3100", name: "Unrestricted Net Assets",   type: "EQUITY" as const, sortOrder: 211 },
+        { code: "3200", name: "Temporarily Restricted",    type: "EQUITY" as const, sortOrder: 212 },
+        { code: "3300", name: "Permanently Restricted",    type: "EQUITY" as const, sortOrder: 213 },
+      ];
+      const usedCodes = new Set(coa.map((a) => a.code));
+      for (const eq of defaultEquityAccounts) {
+        if (usedCodes.has(eq.code)) continue;
+        const [created] = await db
+          .insert(chartOfAccounts)
+          .values({
+            companyId,
+            code: eq.code,
+            name: eq.name,
+            type: eq.type,
+            isSystem: true,
+            isActive: true,
+            sortOrder: eq.sortOrder,
+          })
+          .returning();
+        coa.push(created);
+      }
+      coa.sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
+    }
+
     // Annotate COA accounts with bank linkage info
     const coaToBankAccount = new Map<string, { bankName: string; isPlaid: boolean }>();
     for (const ba of companyBankAccounts) {
