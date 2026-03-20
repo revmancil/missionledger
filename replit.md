@@ -18,7 +18,11 @@ MissionLedger is a full-stack nonprofit financial management SaaS app for church
 - **Bank Register**: QuickBooks-style double-row transaction register — Row 1 (Date, Check#, Payee, Payment, Deposit, Balance, Status), Row 2 (Account/Category, Fund, Memo). Supports filtering by bank account and status, inline clear/void actions, running balance column, footer totals.
 - **Chart of Accounts (new)**: Dedicated `chart_of_accounts` table with 56 pre-seeded accounts: 4000-series Income (Individual Contributions, Grants, Membership Dues, etc.) and 8000-series Expense (Personnel, Occupancy, Program, Admin, Professional Services, Travel, Marketing, etc.). Auto-seeded per company on registration.
 - **Transactions**: Full `transactions` table for the bank register: soft-void only (no deletes), DEBIT/CREDIT types, UNCLEARED/CLEARED/RECONCILED/VOID statuses.
-- **Reports**: P&L, Balance Sheet, Cash Flow, Budget vs Actual
+- **Reports**: 4-tab reporting suite:
+  - *Financial Statements*: Statement of Activities (P&L from GL), Statement of Financial Position (Balance Sheet) with Unrestricted vs Restricted Net Assets split by fund_type, cash flow overview, revenue/expense chart
+  - *General Ledger*: GL grouped by account with Beginning Balance → period entries + Running Balance → Ending Balance; fund filter dropdown
+  - *General Journal*: Chronological list of every journal entry with grouped debit/credit splits per transaction; balanced indicator per entry
+  - *Transaction Register*: Full searchable master feed of all transactions with Date/Amount/Fund filters and Export to CSV; all data sourced from gl_entries table
 - **Bank Reconciliation**: 4-phase module (history → setup → workspace → done); two-column cleared/uncleared table, live math footer, Difference badge, locks cleared transactions as RECONCILED
 - **Executive Dashboard**: KPI cards (Total Cash, Net Monthly Income, Budget %, Monthly Deposits), spending by category donut, 6-month income/expenses bar chart, budget tracker with over-budget alerts, recent activity feed
 - **Opening Balance Wizard**: GAAP-compliant double-entry wizard with:
