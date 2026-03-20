@@ -1,4 +1,3 @@
-import { Button } from "@/components/ui/button";
 import { ArrowLeft } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -6,8 +5,6 @@ const LAST_UPDATED = "March 20, 2026";
 const CONTACT_EMAIL = "legal@missionledger.app";
 
 export default function TermsPage() {
-  const [, setLocation] = useLocation();
-
   return (
     <div className="min-h-screen bg-slate-50">
       <header className="bg-white border-b border-slate-200 sticky top-0 z-10">
