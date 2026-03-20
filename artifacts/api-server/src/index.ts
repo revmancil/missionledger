@@ -1,6 +1,6 @@
 import app from "./app";
 import { seedPlatformAdmin } from "./seeds/platform-admin";
-import { runMigrations, getStripeSync } from "./lib/stripeClient";
+import { runMigrations, getStripeSync, getUncachableStripeClient } from "./lib/stripeClient";
 import { pool } from "@workspace/db";
 
 const rawPort = process.env["PORT"];
@@ -74,6 +74,97 @@ async function patchStripeEnums() {
   }
 }
 
+const STRIPE_PLANS = [
+  {
+    name: "Starter",
+    description: "Perfect for small nonprofits and churches just getting started.",
+    metadata: { features: "1 bank account|Up to 500 transactions/month|Standard financial reports|Email support|Plaid bank sync", order: "1" },
+    monthlyAmount: 1900,
+    yearlyAmount: 19000,
+  },
+  {
+    name: "Professional",
+    description: "Full-featured accounting for growing nonprofits.",
+    metadata: { features: "5 bank accounts|Unlimited transactions|Advanced reports & analytics|Priority support|Plaid bank sync|Multi-user access|Period close wizard", order: "2", featured: "true" },
+    monthlyAmount: 4900,
+    yearlyAmount: 49000,
+  },
+  {
+    name: "Enterprise",
+    description: "Unlimited scale for large organizations and networks.",
+    metadata: { features: "Unlimited bank accounts|Unlimited transactions|Custom reports|Dedicated support|Plaid bank sync|Unlimited users|Multi-org management|API access", order: "3" },
+    monthlyAmount: 9900,
+    yearlyAmount: 99000,
+  },
+];
+
+async function seedStripeProductsIfNeeded() {
+  try {
+    const { rows } = await pool.query(`SELECT COUNT(*) as cnt FROM stripe.products WHERE active = true`);
+    if (parseInt(rows[0].cnt, 10) > 0) return; // already seeded
+
+    console.log("stripe.products is empty — seeding plans into Stripe and local DB...");
+    const stripe = await getUncachableStripeClient();
+    const now = Math.floor(Date.now() / 1000);
+
+    for (const plan of STRIPE_PLANS) {
+      // Find or create in Stripe
+      const existing = await stripe.products.search({ query: `name:'${plan.name}' AND active:'true'` });
+      let productId: string;
+
+      if (existing.data.length > 0) {
+        productId = existing.data[0].id;
+        console.log(`  ✓ ${plan.name} already in Stripe (${productId})`);
+      } else {
+        const product = await stripe.products.create({ name: plan.name, description: plan.description, metadata: plan.metadata });
+        productId = product.id;
+        console.log(`  Created Stripe product: ${plan.name} (${productId})`);
+      }
+
+      // Upsert product into local stripe.products table
+      await pool.query(
+        `INSERT INTO stripe.products (id, name, description, metadata, active, created, updated, livemode, object)
+         VALUES ($1, $2, $3, $4::jsonb, true, $5, $5, false, 'product')
+         ON CONFLICT (id) DO UPDATE SET name=$2, description=$3, metadata=$4::jsonb, active=true`,
+        [productId, plan.name, plan.description, JSON.stringify(plan.metadata), now]
+      );
+
+      // Find or create monthly price
+      const existingPrices = await stripe.prices.list({ product: productId, active: true });
+      let monthlyPriceId = existingPrices.data.find(p => p.recurring?.interval === "month")?.id;
+      let yearlyPriceId = existingPrices.data.find(p => p.recurring?.interval === "year")?.id;
+
+      if (!monthlyPriceId) {
+        const mp = await stripe.prices.create({ product: productId, unit_amount: plan.monthlyAmount, currency: "usd", recurring: { interval: "month" } });
+        monthlyPriceId = mp.id;
+      }
+      if (!yearlyPriceId) {
+        const yp = await stripe.prices.create({ product: productId, unit_amount: plan.yearlyAmount, currency: "usd", recurring: { interval: "year" } });
+        yearlyPriceId = yp.id;
+      }
+
+      // Upsert prices into local stripe.prices table
+      await pool.query(
+        `INSERT INTO stripe.prices (id, product, unit_amount, currency, recurring, active, type, created, livemode, object)
+         VALUES ($1, $2, $3, 'usd', $4::jsonb, true, 'recurring', $5, false, 'price')
+         ON CONFLICT (id) DO UPDATE SET unit_amount=$3, active=true`,
+        [monthlyPriceId, productId, plan.monthlyAmount, JSON.stringify({ interval: "month", interval_count: 1 }), now]
+      );
+      await pool.query(
+        `INSERT INTO stripe.prices (id, product, unit_amount, currency, recurring, active, type, created, livemode, object)
+         VALUES ($1, $2, $3, 'usd', $4::jsonb, true, 'recurring', $5, false, 'price')
+         ON CONFLICT (id) DO UPDATE SET unit_amount=$3, active=true`,
+        [yearlyPriceId, productId, plan.yearlyAmount, JSON.stringify({ interval: "year", interval_count: 1 }), now]
+      );
+
+      console.log(`  Seeded ${plan.name}: monthly=${monthlyPriceId}, yearly=${yearlyPriceId}`);
+    }
+    console.log("Stripe plan seed complete");
+  } catch (err: any) {
+    console.error("Stripe plan seed error:", err.message);
+  }
+}
+
 async function initStripe() {
   const hasConnector = !!process.env.REPLIT_CONNECTORS_HOSTNAME;
   const hasFallbackKey = !!process.env.STRIPE_SECRET_KEY;
@@ -99,7 +190,10 @@ async function initStripe() {
     }
 
     stripeSync.syncBackfill()
-      .then(() => console.log("Stripe data synced"))
+      .then(async () => {
+        console.log("Stripe data synced");
+        await seedStripeProductsIfNeeded();
+      })
       .catch((err: any) => console.error("Stripe sync error:", err.message));
   } catch (err: any) {
     console.error("Stripe initialization failed:", err.message);
