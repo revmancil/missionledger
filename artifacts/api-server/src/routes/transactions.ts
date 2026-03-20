@@ -3,9 +3,26 @@ import {
   db, transactions, transactionSplits, chartOfAccounts,
   bankAccounts, funds, vendors, companies, journalEntryLines,
 } from "@workspace/db";
-import { eq, and, desc, inArray } from "drizzle-orm";
+import { eq, and, desc, inArray, sql } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
 import { generateGlEntries, voidGlEntries } from "../lib/gl";
+
+/** Recompute a bank account's currentBalance from all its non-void transactions. */
+async function recomputeBankBalance(bankAccountId: string | null | undefined, companyId: string): Promise<void> {
+  if (!bankAccountId) return;
+  const result = await db.execute(sql`
+    SELECT COALESCE(SUM(CASE WHEN type = 'CREDIT' THEN amount ELSE 0 END), 0)
+         - COALESCE(SUM(CASE WHEN type = 'DEBIT'  THEN amount ELSE 0 END), 0) AS balance
+    FROM transactions
+    WHERE bank_account_id = ${bankAccountId}
+      AND company_id = ${companyId}
+      AND is_void = false
+  `);
+  const balance = parseFloat((result.rows[0] as any)?.balance ?? "0") || 0;
+  await db.update(bankAccounts)
+    .set({ currentBalance: balance, updatedAt: new Date() })
+    .where(eq(bankAccounts.id, bankAccountId));
+}
 
 async function getClosedUntil(companyId: string): Promise<Date | null> {
   const [co] = await db.select({ closedUntil: companies.closedUntil }).from(companies).where(eq(companies.id, companyId));
@@ -189,6 +206,10 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
     generateGlEntries(created.id, companyId).catch((e) =>
       console.error("[GL] create error:", e)
     );
+    // Keep bank account balance in sync
+    recomputeBankBalance(created.bankAccountId, companyId).catch((e) =>
+      console.error("[Balance] create sync error:", e)
+    );
 
     const lookups = await getLookups(companyId);
     const splits = isSplit
@@ -333,6 +354,15 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
     generateGlEntries(updated.id, companyId).catch((e) =>
       console.error("[GL] update error:", e)
     );
+    // Keep bank account balance in sync (handle bank account change)
+    recomputeBankBalance(updated.bankAccountId, companyId).catch((e) =>
+      console.error("[Balance] update sync error:", e)
+    );
+    if (existing.bankAccountId && existing.bankAccountId !== updated.bankAccountId) {
+      recomputeBankBalance(existing.bankAccountId, companyId).catch((e) =>
+        console.error("[Balance] old-bank sync error:", e)
+      );
+    }
 
     const lookups = await getLookups(companyId);
     const splits = isSplit
@@ -375,6 +405,10 @@ router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
     // Void the GL entries for this transaction
     voidGlEntries(req.params.id, companyId).catch((e) =>
       console.error("[GL] void error:", e)
+    );
+    // Keep bank account balance in sync
+    recomputeBankBalance(existing.bankAccountId, companyId).catch((e) =>
+      console.error("[Balance] delete sync error:", e)
     );
 
     res.json({ success: true });

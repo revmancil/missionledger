@@ -707,7 +707,11 @@ export default function BankRegisterPage() {
 
           {selectedBankObj && (
             <div className="mt-3 flex gap-6 text-sm">
-              <span className="text-muted-foreground">Balance:&nbsp;<span className="font-semibold">{fmtAmt(selectedBankObj.currentBalance)}</span></span>
+              <span className="text-muted-foreground">Balance:&nbsp;<span className="font-semibold">{fmtAmt(
+                txList
+                  .filter(t => !t.isVoid && t.bankAccount?.id === selectedBankObj.id)
+                  .reduce((s, t) => s + (t.type === "CREDIT" ? t.amount : -t.amount), 0)
+              )}</span></span>
               <span className="text-muted-foreground">Payments:&nbsp;<span className="font-semibold text-red-600">{fmtAmt(totals.debits)}</span></span>
               <span className="text-muted-foreground">Deposits:&nbsp;<span className="font-semibold text-emerald-600">{fmtAmt(totals.credits)}</span></span>
             </div>
