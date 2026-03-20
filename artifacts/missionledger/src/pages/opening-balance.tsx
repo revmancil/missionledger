@@ -80,6 +80,13 @@ const ACCT_TYPE_COLORS: Record<string, string> = {
 };
 
 // ── Account Combobox ──────────────────────────────────────────────────────────
+const GROUP_LABELS: Record<string, string> = {
+  ASSET:     "Assets",
+  LIABILITY: "Liabilities",
+  EQUITY:    "Net Assets / Equity",
+};
+const GROUP_ORDER = ["ASSET", "LIABILITY", "EQUITY"] as const;
+
 function AccountCombobox({
   accounts,
   value,
@@ -98,15 +105,24 @@ function AccountCombobox({
 
   const selected = accounts.find((a) => a.id === value);
 
-  const filtered = useMemo(() => {
-    if (!query.trim()) return accounts.slice(0, 40);
+  // When searching, return flat filtered list; otherwise group by type
+  const filteredFlat = useMemo(() => {
+    if (!query.trim()) return null; // use grouped view
     const q = query.toLowerCase();
     return accounts
-      .filter((a) =>
-        a.code.toLowerCase().includes(q) || a.name.toLowerCase().includes(q)
-      )
-      .slice(0, 40);
+      .filter((a) => a.code.toLowerCase().includes(q) || a.name.toLowerCase().includes(q))
+      .slice(0, 60);
   }, [accounts, query]);
+
+  // Grouped view (no query) — ordered ASSET → LIABILITY → EQUITY
+  const grouped = useMemo(() => {
+    const map: Record<string, CoaAccount[]> = { ASSET: [], LIABILITY: [], EQUITY: [] };
+    for (const a of accounts) {
+      const key = a.type as keyof typeof map;
+      if (map[key]) map[key].push(a);
+    }
+    return map;
+  }, [accounts]);
 
   useEffect(() => {
     if (!open) return;
@@ -124,6 +140,25 @@ function AccountCombobox({
     : selected
     ? `${selected.code} — ${selected.linkedBankName ?? selected.name}`
     : "";
+
+  const renderOption = (a: CoaAccount) => (
+    <button
+      key={a.id}
+      className={cn(
+        "w-full text-left px-3 py-2 text-sm hover:bg-blue-50 flex items-center gap-2 transition-colors",
+        a.id === value && "bg-blue-50"
+      )}
+      onMouseDown={(e) => {
+        e.preventDefault();
+        onChange(a.id);
+        setOpen(false);
+        setQuery("");
+      }}
+    >
+      <span className="font-mono text-xs text-muted-foreground w-12 shrink-0">{a.code}</span>
+      <span className="flex-1 truncate">{a.linkedBankName ?? a.name}</span>
+    </button>
+  );
 
   return (
     <div ref={containerRef} className="relative w-full min-w-[220px]">
@@ -155,30 +190,34 @@ function AccountCombobox({
       </div>
 
       {open && (
-        <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-xl max-h-56 overflow-y-auto">
-          {filtered.map((a) => (
-            <button
-              key={a.id}
-              className={cn(
-                "w-full text-left px-3 py-2 text-sm hover:bg-blue-50 flex items-center gap-2 transition-colors",
-                a.id === value && "bg-blue-50"
+        <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-xl max-h-72 overflow-y-auto">
+          {filteredFlat ? (
+            /* ── Search results (flat) ── */
+            <>
+              {filteredFlat.map(renderOption)}
+              {filteredFlat.length === 0 && (
+                <div className="px-3 py-2 text-sm text-muted-foreground">No accounts match</div>
               )}
-              onMouseDown={(e) => {
-                e.preventDefault();
-                onChange(a.id);
-                setOpen(false);
-                setQuery("");
-              }}
-            >
-              <span className="font-mono text-xs text-muted-foreground w-12 shrink-0">{a.code}</span>
-              <span className="flex-1 truncate">{a.linkedBankName ?? a.name}</span>
-              <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0", ACCT_TYPE_COLORS[a.type] ?? "bg-gray-100 text-gray-600")}>
-                {a.type}
-              </span>
-            </button>
-          ))}
-          {filtered.length === 0 && (
-            <div className="px-3 py-2 text-sm text-muted-foreground">No accounts match</div>
+            </>
+          ) : (
+            /* ── Grouped by account type ── */
+            GROUP_ORDER.map((type) => {
+              const items = grouped[type] ?? [];
+              if (items.length === 0) return null;
+              return (
+                <div key={type}>
+                  <div className={cn(
+                    "px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest border-b",
+                    type === "ASSET"     && "bg-blue-50 text-blue-700 border-blue-100",
+                    type === "LIABILITY" && "bg-orange-50 text-orange-700 border-orange-100",
+                    type === "EQUITY"    && "bg-violet-50 text-violet-700 border-violet-100",
+                  )}>
+                    {GROUP_LABELS[type]} ({items.length})
+                  </div>
+                  {items.map(renderOption)}
+                </div>
+              );
+            })
           )}
           <div className="border-t border-gray-100 px-3 py-2">
             <button
