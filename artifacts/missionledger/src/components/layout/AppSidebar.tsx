@@ -1,7 +1,7 @@
 import { Link, useLocation } from "wouter";
 import {
-  LayoutDashboard, Heart, Receipt, Wallet, BookOpen, Building2,
-  FileText, HandHeart, LogOut, BarChart3, Building,
+  LayoutDashboard, Wallet, BookOpen, Building2,
+  HandHeart, LogOut, BarChart3, Building,
   Banknote, ClipboardList, RefreshCcw, Wand2, Scale, CalendarCheck,
   ChevronDown, ArrowLeftRight, Shield, AlertTriangle, CheckCircle2,
   CreditCard, PenLine, X,
@@ -31,9 +31,6 @@ const navGroups = [
   {
     label: "Transactions",
     items: [
-      { href: "/donations", label: "Donations", icon: Heart },
-      { href: "/expenses", label: "Expenses", icon: Receipt },
-      { href: "/bills", label: "Bills", icon: FileText },
       { href: "/pledges", label: "Pledges", icon: HandHeart },
     ]
   },

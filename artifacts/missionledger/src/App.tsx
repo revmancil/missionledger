@@ -10,12 +10,9 @@ import LandingPage from "@/pages/landing";
 import LoginPage from "@/pages/auth/login";
 import RegisterPage from "@/pages/auth/register";
 import DashboardPage from "@/pages/dashboard";
-import DonationsPage from "@/pages/donations";
 import FundsPage from "@/pages/funds";
 import AccountsPage from "@/pages/accounts";
-import ExpensesPage from "@/pages/expenses";
 import VendorsPage from "@/pages/vendors";
-import BillsPage from "@/pages/bills";
 import PledgesPage from "@/pages/pledges";
 import BankAccountsPage from "@/pages/bank-accounts";
 import BankRegisterPage from "@/pages/bank-register";
@@ -56,12 +53,9 @@ function Router() {
       <Route path="/register" component={RegisterPage} />
 
       <Route path="/dashboard"><ProtectedRoute component={DashboardPage} /></Route>
-      <Route path="/donations"><ProtectedRoute component={DonationsPage} /></Route>
-      <Route path="/expenses"><ProtectedRoute component={ExpensesPage} /></Route>
       <Route path="/funds"><ProtectedRoute component={FundsPage} /></Route>
       <Route path="/accounts"><ProtectedRoute component={AccountsPage} /></Route>
       <Route path="/vendors"><ProtectedRoute component={VendorsPage} /></Route>
-      <Route path="/bills"><ProtectedRoute component={BillsPage} /></Route>
       <Route path="/pledges"><ProtectedRoute component={PledgesPage} /></Route>
       <Route path="/bank-accounts"><ProtectedRoute component={BankAccountsPage} /></Route>
       <Route path="/bank-register"><ProtectedRoute component={BankRegisterPage} /></Route>
