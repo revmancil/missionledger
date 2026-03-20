@@ -26,7 +26,7 @@ router.get("/", requireAuth, async (req, res) => {
       WHERE g.company_id = ${companyId}
         AND g.is_void = false
         AND g.fund_id IS NOT NULL
-        AND c.type IN ('EQUITY', 'INCOME', 'EXPENSE')
+        AND c.coa_type IN ('EQUITY', 'INCOME', 'EXPENSE')
       GROUP BY g.fund_id
     `);
 

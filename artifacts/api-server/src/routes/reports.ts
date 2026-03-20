@@ -80,7 +80,7 @@ router.get("/balance-sheet", requireAuth, async (req, res) => {
         c.id              AS account_id,
         c.code            AS account_code,
         c.name            AS account_name,
-        c.type            AS account_type,
+        c.coa_type        AS account_type,
         c.sort_order      AS sort_order,
         COALESCE(SUM(CASE WHEN g.entry_type = 'DEBIT'  THEN g.amount ELSE 0 END), 0) AS total_debit,
         COALESCE(SUM(CASE WHEN g.entry_type = 'CREDIT' THEN g.amount ELSE 0 END), 0) AS total_credit
@@ -92,8 +92,8 @@ router.get("/balance-sheet", requireAuth, async (req, res) => {
         AND g.date <= ${asOf}
       WHERE c.company_id = ${companyId}
         AND c.is_active = true
-        AND c.type IN ('ASSET', 'LIABILITY', 'EQUITY')
-      GROUP BY c.id, c.code, c.name, c.type, c.sort_order
+        AND c.coa_type IN ('ASSET', 'LIABILITY', 'EQUITY')
+      GROUP BY c.id, c.code, c.name, c.coa_type, c.sort_order
       ORDER BY c.sort_order, c.code
     `);
 
