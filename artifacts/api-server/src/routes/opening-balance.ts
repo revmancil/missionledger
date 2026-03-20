@@ -1,6 +1,6 @@
 import { Router } from "express";
-import { db, companies, chartOfAccounts, bankAccounts, funds, journalEntries, journalEntryLines, glEntries } from "@workspace/db";
-import { eq, and, asc, desc, inArray } from "drizzle-orm";
+import { db, companies, chartOfAccounts, bankAccounts, funds, journalEntries, journalEntryLines, glEntries, transactions } from "@workspace/db";
+import { eq, and, asc, desc, inArray, sql } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
 
 const router = Router();
@@ -256,6 +256,68 @@ router.post("/finalize", requireAuth, requireAdmin, async (req, res) => {
         amount: amt,
         description: row.memo || "Opening Balance Entry",
         date: asOf,
+      });
+    }
+
+    // ── Bug 1: Sync bank account balances from GL entries ──────────────────────
+    // Find all bank accounts linked to any account in this entry
+    const linkedBanks = await db
+      .select()
+      .from(bankAccounts)
+      .where(and(eq(bankAccounts.companyId, companyId), inArray(bankAccounts.glAccountId as any, accountIds)));
+
+    for (const ba of linkedBanks) {
+      if (!ba.glAccountId) continue;
+      const balResult = await db.execute(sql`
+        SELECT COALESCE(SUM(CASE WHEN entry_type='DEBIT' THEN amount ELSE 0 END), 0)
+             - COALESCE(SUM(CASE WHEN entry_type='CREDIT' THEN amount ELSE 0 END), 0) AS balance
+        FROM gl_entries
+        WHERE account_id = ${ba.glAccountId} AND company_id = ${companyId} AND is_void = false
+      `);
+      const newBalance = parseFloat((balResult.rows[0] as any)?.balance ?? "0") || 0;
+      await db
+        .update(bankAccounts)
+        .set({ currentBalance: newBalance, updatedAt: new Date() })
+        .where(eq(bankAccounts.id, ba.id));
+    }
+
+    // ── Bug 2: Create / refresh bank-register transactions for OB entry ────────
+    // Void any transactions from a previous OB posting
+    if (company.openingBalanceEntryId) {
+      await db
+        .update(transactions)
+        .set({ isVoid: true, status: "VOID", updatedAt: new Date() })
+        .where(
+          and(
+            eq(transactions.companyId, companyId),
+            eq(transactions.journalEntryId as any, company.openingBalanceEntryId)
+          )
+        );
+    }
+
+    // Build glAccountId → bankAccountId lookup for fast matching
+    const glToBankId = Object.fromEntries(linkedBanks.map((ba) => [ba.glAccountId!, ba.id]));
+
+    for (const row of activeRows) {
+      const bankAccountId = glToBankId[row.accountId];
+      if (!bankAccountId) continue; // only create transactions for bank account rows
+      // DR to asset account = DEPOSIT in the register (CREDIT type)
+      // CR to asset account = WITHDRAWAL from the register (DEBIT type)
+      const txType: "CREDIT" | "DEBIT" = row.entryType === "DEBIT" ? "CREDIT" : "DEBIT";
+      await db.insert(transactions).values({
+        companyId,
+        bankAccountId,
+        date: asOf,
+        payee: "Opening Balance",
+        amount: Number(row.amount),
+        type: txType,
+        status: "CLEARED",
+        chartAccountId: row.accountId,
+        fundId: row.fundId ?? null,
+        memo: "Opening Balance Entry",
+        referenceNumber: je.entryNumber,
+        journalEntryId: je.id,
+        isVoid: false,
       });
     }
 

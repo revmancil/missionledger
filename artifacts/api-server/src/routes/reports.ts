@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, accounts, journalEntries, journalEntryLines, donations, expenses, budgets, budgetLines, glEntries, funds } from "@workspace/db";
+import { db, accounts, chartOfAccounts, journalEntries, journalEntryLines, donations, expenses, budgets, budgetLines, glEntries, funds } from "@workspace/db";
 import { eq, and, gte, lte, inArray, sql } from "drizzle-orm";
 import { requireAuth } from "../lib/auth";
 
@@ -70,30 +70,67 @@ router.get("/profit-loss", requireAuth, async (req, res) => {
 router.get("/balance-sheet", requireAuth, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
-    const allAccounts = await db.select().from(accounts).where(eq(accounts.companyId, companyId));
+    const { asOfDate } = req.query;
 
-    const assetAccounts = allAccounts.filter(a => a.type === "ASSET");
-    const liabilityAccounts = allAccounts.filter(a => a.type === "LIABILITY");
-    const equityAccounts = allAccounts.filter(a => a.type === "EQUITY");
+    const asOf = asOfDate ? new Date(asOfDate as string) : new Date();
 
-    const toLineItem = (acct: typeof allAccounts[0]) => ({
-      accountId: acct.id,
-      accountCode: acct.code,
-      accountName: acct.name,
-      amount: 0,
-      children: [],
+    // Aggregate GL entries per account up to the asOf date
+    const glRows = await db.execute(sql`
+      SELECT
+        c.id              AS account_id,
+        c.code            AS account_code,
+        c.name            AS account_name,
+        c.type            AS account_type,
+        c.sort_order      AS sort_order,
+        COALESCE(SUM(CASE WHEN g.entry_type = 'DEBIT'  THEN g.amount ELSE 0 END), 0) AS total_debit,
+        COALESCE(SUM(CASE WHEN g.entry_type = 'CREDIT' THEN g.amount ELSE 0 END), 0) AS total_credit
+      FROM chart_of_accounts c
+      LEFT JOIN gl_entries g
+        ON g.account_id = c.id
+        AND g.company_id = ${companyId}
+        AND g.is_void = false
+        AND g.date <= ${asOf}
+      WHERE c.company_id = ${companyId}
+        AND c.is_active = true
+        AND c.type IN ('ASSET', 'LIABILITY', 'EQUITY')
+      GROUP BY c.id, c.code, c.name, c.type, c.sort_order
+      ORDER BY c.sort_order, c.code
+    `);
+
+    const rows = (glRows.rows as any[]).map((r) => {
+      const debit = parseFloat(r.total_debit) || 0;
+      const credit = parseFloat(r.total_credit) || 0;
+      // Normal balance: ASSET = debit normal; LIABILITY/EQUITY = credit normal
+      const amount = r.account_type === "ASSET" ? debit - credit : credit - debit;
+      return {
+        accountId: r.account_id,
+        accountCode: r.account_code,
+        accountName: r.account_name,
+        accountType: r.account_type,
+        amount,
+        children: [],
+      };
     });
+
+    const assets      = rows.filter(r => r.accountType === "ASSET"     && r.amount !== 0);
+    const liabilities = rows.filter(r => r.accountType === "LIABILITY" && r.amount !== 0);
+    const equity      = rows.filter(r => r.accountType === "EQUITY"    && r.amount !== 0);
+
+    const totalAssets      = assets.reduce((s, r) => s + r.amount, 0);
+    const totalLiabilities = liabilities.reduce((s, r) => s + r.amount, 0);
+    const totalEquity      = equity.reduce((s, r) => s + r.amount, 0);
 
     res.json({
-      asOfDate: new Date().toISOString(),
-      assets: assetAccounts.map(toLineItem),
-      liabilities: liabilityAccounts.map(toLineItem),
-      equity: equityAccounts.map(toLineItem),
-      totalAssets: 0,
-      totalLiabilities: 0,
-      totalEquity: 0,
+      asOfDate: asOf.toISOString(),
+      assets,
+      liabilities,
+      equity,
+      totalAssets,
+      totalLiabilities,
+      totalEquity,
     });
   } catch (error) {
+    console.error("Balance sheet error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });

@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import {
   Plus, ChevronDown, ChevronUp, CheckCircle, Circle,
   Ban, RefreshCw, Edit, Wallet, Scissors, Trash2, Search,
-  AlertCircle, CheckCheck, Lock,
+  AlertCircle, CheckCheck, Lock, FileText,
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
@@ -57,6 +57,7 @@ interface Transaction {
   status: "UNCLEARED" | "CLEARED" | "RECONCILED" | "VOID";
   checkNumber: string | null; referenceNumber: string | null; memo: string | null;
   isVoid: boolean; isSplit: boolean; isClosed?: boolean;
+  journalEntryId: string | null;
   chartAccount: ChartAccount | null;
   fund: Fund | null; bankAccount: BankAccount | null; vendor: Vendor | null;
   splits: Array<{ id: string; chartAccountId: string | null; vendorId: string | null; amount: number; memo: string | null; chartAccount: ChartAccount | null; vendor: Vendor | null; }>;
@@ -367,6 +368,9 @@ export default function BankRegisterPage() {
   const [showAddVendor, setShowAddVendor] = useState(false);
   const [showAddAccount, setShowAddAccount] = useState(false);
   const [formError, setFormError] = useState("");
+  const [jeModal, setJeModal] = useState<{ open: boolean; data: any | null; loading: boolean }>({
+    open: false, data: null, loading: false,
+  });
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -448,6 +452,19 @@ export default function BankRegisterPage() {
       splits: [newSplitLine()],
     });
     setShowForm(true);
+  }
+
+  async function openJeModal(journalEntryId: string) {
+    setJeModal({ open: true, data: null, loading: true });
+    try {
+      const res = await apiFetch(`${BASE}api/journal-entries/${journalEntryId}`);
+      if (!res.ok) throw new Error("Failed to load journal entry");
+      const data = await res.json();
+      setJeModal({ open: true, data, loading: false });
+    } catch {
+      setJeModal({ open: false, data: null, loading: false });
+      toast.error("Could not load journal entry details.");
+    }
   }
 
   function openEdit(tx: Transaction) {
@@ -738,6 +755,15 @@ export default function BankRegisterPage() {
                       <td className="px-2 py-2.5 text-center"><StatusBadge status={tx.status} /></td>
                       <td className="px-2 py-2.5">
                         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                          {tx.journalEntryId && (
+                            <button
+                              title="View Journal Entry Details"
+                              onClick={(e) => { e.stopPropagation(); openJeModal(tx.journalEntryId!); }}
+                              className="p-1 rounded hover:bg-indigo-50 text-muted-foreground hover:text-indigo-600"
+                            >
+                              <FileText className="h-4 w-4" />
+                            </button>
+                          )}
                           {tx.isClosed ? (
                             <span title={`Period locked through ${closedUntil ? format(parseISO(closedUntil), "MM/dd/yyyy") : ""}`}
                               className="p-1 text-amber-500">
@@ -1181,6 +1207,132 @@ export default function BankRegisterPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* ── Journal Entry Detail Modal ──────────────── */}
+      <Dialog open={jeModal.open} onOpenChange={(o) => { if (!o) setJeModal({ open: false, data: null, loading: false }); }}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5 text-indigo-600" />
+              Journal Entry Details
+              {jeModal.data && (
+                <span className="ml-2 text-sm font-normal text-muted-foreground font-mono">
+                  {jeModal.data.entryNumber}
+                </span>
+              )}
+            </DialogTitle>
+          </DialogHeader>
+
+          {jeModal.loading && (
+            <div className="py-12 text-center text-muted-foreground text-sm">Loading…</div>
+          )}
+
+          {!jeModal.loading && jeModal.data && (
+            <div className="space-y-4">
+              {/* Header info */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 p-4 rounded-lg bg-slate-50 border text-sm">
+                <div>
+                  <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Date</div>
+                  <div>{format(parseISO(jeModal.data.date), "MMMM d, yyyy")}</div>
+                </div>
+                <div>
+                  <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Status</div>
+                  <span className={cn(
+                    "text-xs font-medium px-2 py-0.5 rounded-full border",
+                    jeModal.data.status === "POSTED"
+                      ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                      : jeModal.data.status === "VOID"
+                        ? "bg-red-50 text-red-600 border-red-200"
+                        : "bg-amber-50 text-amber-700 border-amber-200"
+                  )}>
+                    {jeModal.data.status}
+                  </span>
+                </div>
+                <div>
+                  <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Description</div>
+                  <div>{jeModal.data.description ?? "—"}</div>
+                </div>
+                {jeModal.data.memo && (
+                  <div className="col-span-2 sm:col-span-3">
+                    <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Memo</div>
+                    <div className="italic text-muted-foreground">{jeModal.data.memo}</div>
+                  </div>
+                )}
+              </div>
+
+              {/* Lines table */}
+              <div className="overflow-x-auto rounded-lg border">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 border-b">
+                    <tr>
+                      <th className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Account</th>
+                      <th className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Fund</th>
+                      <th className="text-right px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Debit</th>
+                      <th className="text-right px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Credit</th>
+                      <th className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Memo</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(jeModal.data.lines ?? []).map((line: any, i: number) => (
+                      <tr key={i} className={cn("border-b last:border-0", i % 2 === 0 ? "bg-white" : "bg-slate-50/50")}>
+                        <td className="px-4 py-2.5">
+                          {line.account ? (
+                            <>
+                              <span className="font-mono text-xs text-muted-foreground mr-1">{line.account.code}</span>
+                              {line.account.name}
+                            </>
+                          ) : (
+                            <span className="italic text-muted-foreground">Unknown account</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-2.5 text-muted-foreground">
+                          {line.fund?.name ?? "—"}
+                        </td>
+                        <td className="px-4 py-2.5 text-right tabular-nums">
+                          {(line.debit ?? 0) > 0
+                            ? <span className="text-foreground font-medium">{fmtAmt(line.debit)}</span>
+                            : <span className="text-muted-foreground/40">—</span>}
+                        </td>
+                        <td className="px-4 py-2.5 text-right tabular-nums">
+                          {(line.credit ?? 0) > 0
+                            ? <span className="text-foreground font-medium">{fmtAmt(line.credit)}</span>
+                            : <span className="text-muted-foreground/40">—</span>}
+                        </td>
+                        <td className="px-4 py-2.5 text-muted-foreground italic text-xs">
+                          {line.description ?? "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  {/* Totals footer */}
+                  {jeModal.data.lines?.length > 0 && (() => {
+                    const totalDr = (jeModal.data.lines as any[]).reduce((s: number, l: any) => s + (l.debit ?? 0), 0);
+                    const totalCr = (jeModal.data.lines as any[]).reduce((s: number, l: any) => s + (l.credit ?? 0), 0);
+                    return (
+                      <tfoot className="border-t-2 border-slate-200 bg-slate-50">
+                        <tr>
+                          <td colSpan={2} className="px-4 py-2 text-xs font-semibold text-muted-foreground text-right uppercase tracking-wide">
+                            Totals
+                          </td>
+                          <td className="px-4 py-2 text-right tabular-nums font-bold">{fmtAmt(totalDr)}</td>
+                          <td className="px-4 py-2 text-right tabular-nums font-bold">{fmtAmt(totalCr)}</td>
+                          <td />
+                        </tr>
+                      </tfoot>
+                    );
+                  })()}
+                </table>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setJeModal({ open: false, data: null, loading: false })}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </AppLayout>
   );
 }
