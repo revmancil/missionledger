@@ -192,6 +192,106 @@ function AccountCombobox({
   );
 }
 
+// ── Equity Combobox (same pattern as AccountCombobox, no native <select>) ─────
+function EquityCombobox({
+  accounts, value, onChange,
+}: {
+  accounts: CoaAccount[];
+  value: string;
+  onChange: (id: string) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen]   = useState(false);
+  const containerRef      = useRef<HTMLDivElement>(null);
+
+  const selected = accounts.find((a) => a.id === value);
+
+  const filtered = useMemo(() => {
+    if (!query.trim()) return accounts;
+    const q = query.toLowerCase();
+    return accounts.filter(
+      (a) => a.code.toLowerCase().includes(q) || a.name.toLowerCase().includes(q)
+    );
+  }, [accounts, query]);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent | TouchEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node))
+        setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("touchstart", close);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("touchstart", close);
+    };
+  }, [open]);
+
+  const display = open ? query : selected ? `${selected.code} — ${selected.name}` : "";
+
+  return (
+    <div ref={containerRef} className="relative w-full">
+      <div className="relative">
+        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+        <input
+          value={display}
+          placeholder="Select equity account…"
+          readOnly={!open}
+          className={cn(
+            "w-full h-10 pl-8 pr-8 text-sm border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400 cursor-pointer",
+            !value ? "border-amber-400 bg-amber-50" : "border-gray-300"
+          )}
+          onFocus={() => { setOpen(true); setQuery(""); }}
+          onChange={(e) => setQuery(e.target.value)}
+          onBlur={() => setTimeout(() => setOpen(false), 180)}
+          onClick={() => { if (!open) { setOpen(true); setQuery(""); } }}
+        />
+        {value && !open && (
+          <button
+            type="button"
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-1"
+            onMouseDown={(e) => { e.preventDefault(); onChange(""); }}
+            onTouchStart={(e) => { e.preventDefault(); onChange(""); }}
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        )}
+        {!value && (
+          <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+        )}
+      </div>
+      {open && (
+        <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-2xl max-h-64 overflow-y-auto">
+          {accounts.length === 0 ? (
+            <div className="px-3 py-4 text-sm text-muted-foreground text-center">
+              No equity accounts found. Add them in Chart of Accounts first.
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="px-3 py-2 text-sm text-muted-foreground">No accounts match</div>
+          ) : (
+            filtered.map((a) => (
+              <button
+                key={a.id}
+                type="button"
+                className={cn(
+                  "w-full text-left px-3 py-2.5 text-sm hover:bg-emerald-50 flex items-center gap-2 transition-colors",
+                  a.id === value && "bg-emerald-50 font-semibold"
+                )}
+                onMouseDown={(e) => { e.preventDefault(); onChange(a.id); setOpen(false); setQuery(""); }}
+                onTouchEnd={(e) => { e.preventDefault(); onChange(a.id); setOpen(false); setQuery(""); }}
+              >
+                <span className="font-mono text-xs text-muted-foreground w-12 shrink-0">{a.code}</span>
+                <span className="flex-1 truncate">{a.name}</span>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Fund Select ───────────────────────────────────────────────────────────────
 function FundSelect({ funds, value, onChange }: { funds: FundRecord[]; value: string; onChange: (id: string) => void }) {
   return (
@@ -1103,21 +1203,12 @@ export default function OpeningBalancePage() {
                       </div>
                     </div>
 
-                    {/* Equity account selector — full-width, tall tap target for tablet */}
-                    <select
+                    {/* Equity account selector — custom combobox, same as asset/liability pickers */}
+                    <EquityCombobox
+                      accounts={equityCoa}
                       value={equityAccountId}
-                      onChange={(e) => setFundEquityMap((prev) => ({ ...prev, [fund.id]: e.target.value }))}
-                      style={{ fontSize: "14px" }}
-                      className={cn(
-                        "w-full h-10 px-2 border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400",
-                        !equityAccountId ? "border-amber-400 bg-amber-50" : "border-gray-300"
-                      )}
-                    >
-                      <option value="">— Select equity account —</option>
-                      {equityCoa.map((a) => (
-                        <option key={a.id} value={a.id}>{a.code} — {a.name}</option>
-                      ))}
-                    </select>
+                      onChange={(id) => setFundEquityMap((prev) => ({ ...prev, [fund.id]: id }))}
+                    />
 
                     {/* Editable fund balance amount */}
                     <div className="relative">
