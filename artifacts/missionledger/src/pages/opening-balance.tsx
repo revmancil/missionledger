@@ -463,6 +463,8 @@ export default function OpeningBalancePage() {
   const [funds, setFunds]     = useState<FundRecord[]>([]);
   const [existingEntryId, setExistingEntryId] = useState<string | null>(null);
   const [createdEntry, setCreatedEntry] = useState<any | null>(null);
+  const [syncing, setSyncing]           = useState(false);
+  const [syncResult, setSyncResult]     = useState<string | null>(null);
 
   const [rows, setRows] = useState<GridRow[]>([]);
 
@@ -601,6 +603,23 @@ export default function OpeningBalancePage() {
     } finally { setSaving(false); }
   }
 
+  // ── Force sync existing OB balances ─────────────────────────────────────────
+  async function handleSync() {
+    setSyncing(true); setSyncResult(null);
+    try {
+      const res = await api(`${BASE}api/opening-balance/sync`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) { setSyncResult(`Error: ${data.error ?? "Sync failed"}`); return; }
+      const updatedCount = data.bankBalancesUpdated?.length ?? 0;
+      const txCount = data.transactionsCreated?.length ?? 0;
+      setSyncResult(`Sync complete — ${updatedCount} bank balance(s) updated, ${txCount} bank register transaction(s) created.`);
+    } catch (e: any) {
+      setSyncResult(`Error: ${e.message}`);
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   // ── Sorted COA (must be before any early returns — Rules of Hooks) ──────────
   const sortedCoa = useMemo(() =>
     [...allCoa].sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true })),
@@ -659,9 +678,29 @@ export default function OpeningBalancePage() {
             <Lock className="h-4 w-4 shrink-0" />
             {createdEntry.entryNumber} is posted and locked in the General Ledger
           </div>
-          <Button variant="outline" className="gap-2" onClick={() => { setPhase("wizard"); setCreatedEntry(null); load(); }}>
-            <RotateCcw className="h-4 w-4" /> Edit Balances
-          </Button>
+          <div className="flex flex-col items-center gap-3 w-full">
+            <Button
+              variant="default"
+              className="gap-2 bg-[hsl(210,60%,40%)] hover:bg-[hsl(210,60%,30%)] text-white w-full max-w-xs"
+              disabled={syncing}
+              onClick={handleSync}
+            >
+              <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
+              {syncing ? "Syncing…" : "Sync Balances to Bank & Funds"}
+            </Button>
+            {syncResult && (
+              <div className={`text-sm rounded-xl px-4 py-2 text-center w-full max-w-sm ${
+                syncResult.startsWith("Error")
+                  ? "bg-red-50 border border-red-200 text-red-700"
+                  : "bg-emerald-50 border border-emerald-200 text-emerald-700"
+              }`}>
+                {syncResult}
+              </div>
+            )}
+            <Button variant="outline" className="gap-2 w-full max-w-xs" onClick={() => { setPhase("wizard"); setCreatedEntry(null); load(); }}>
+              <RotateCcw className="h-4 w-4" /> Edit Balances
+            </Button>
+          </div>
         </div>
       </AppLayout>
     );

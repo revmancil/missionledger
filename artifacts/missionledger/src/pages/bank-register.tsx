@@ -467,6 +467,39 @@ export default function BankRegisterPage() {
     }
   }
 
+  async function openSplitsModal(txId: string, txJeId: string | null) {
+    setJeModal({ open: true, data: null, loading: true });
+    try {
+      const res = await apiFetch(`${BASE}api/transactions/${txId}/splits`);
+      if (!res.ok) throw new Error("Failed to load entry");
+      const body = await res.json();
+      // Shape it to match the JE modal's expectations
+      setJeModal({
+        open: true,
+        loading: false,
+        data: {
+          entryNumber: txJeId ? undefined : undefined,
+          description: "Journal Entry Details",
+          date: new Date().toISOString(),
+          status: "POSTED",
+          memo: null,
+          lines: (body.splits ?? []).map((s: any) => ({
+            account: s.account,
+            fund: s.fund,
+            debit: s.debit ?? 0,
+            credit: s.credit ?? 0,
+            description: s.memo,
+          })),
+          _txId: txId,
+          _source: body.source,
+        },
+      });
+    } catch {
+      setJeModal({ open: false, data: null, loading: false });
+      toast.error("Could not load entry details.");
+    }
+  }
+
   function openEdit(tx: Transaction) {
     setEditTx(tx);
     setFormError("");
@@ -728,7 +761,17 @@ export default function BankRegisterPage() {
                       </td>
                       <td className="px-2 py-2.5">
                         <div className="flex items-center gap-2">
-                          <span className="font-semibold text-[hsl(210,60%,25%)]">{tx.payee}</span>
+                          {tx.journalEntryId ? (
+                            <button
+                              className="font-semibold text-[hsl(210,60%,40%)] underline underline-offset-2 hover:text-[hsl(210,60%,25%)] text-left transition-colors"
+                              title="Click to view journal entry details"
+                              onClick={() => openSplitsModal(tx.id, tx.journalEntryId ?? null)}
+                            >
+                              {tx.payee}
+                            </button>
+                          ) : (
+                            <span className="font-semibold text-[hsl(210,60%,25%)]">{tx.payee}</span>
+                          )}
                           {tx.isSplit && (
                             <span className="inline-flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded border border-violet-200 bg-violet-50 text-violet-700">
                               <Scissors className="h-3 w-3" /> Split

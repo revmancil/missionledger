@@ -1,7 +1,7 @@
 import { Router } from "express";
 import {
   db, transactions, transactionSplits, chartOfAccounts,
-  bankAccounts, funds, vendors, companies,
+  bankAccounts, funds, vendors, companies, journalEntryLines,
 } from "@workspace/db";
 import { eq, and, desc, inArray } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
@@ -198,6 +198,71 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
     res.status(201).json(serializeTx(created, splits, lookups));
   } catch (err) {
     console.error("Create transaction error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ── GET /transactions/:id/splits — JE lines or split lines for audit view ────
+router.get("/:id/splits", requireAuth, async (req, res) => {
+  try {
+    const { companyId } = (req as any).user;
+
+    const [tx] = await db
+      .select()
+      .from(transactions)
+      .where(and(eq(transactions.id, req.params.id), eq(transactions.companyId, companyId)));
+
+    if (!tx) return res.status(404).json({ error: "Transaction not found" });
+
+    const allCoa = await db.select().from(chartOfAccounts).where(eq(chartOfAccounts.companyId, companyId));
+    const coaMap = Object.fromEntries(allCoa.map((a) => [a.id, a]));
+    const allFunds = await db.select().from(funds).where(eq(funds.companyId, companyId));
+    const fundMap = Object.fromEntries(allFunds.map((f) => [f.id, f]));
+
+    // If transaction has a linked JE, return the JE lines for the audit view
+    if (tx.journalEntryId) {
+      const lines = await db
+        .select()
+        .from(journalEntryLines)
+        .where(eq(journalEntryLines.journalEntryId, tx.journalEntryId));
+
+      return res.json({
+        transactionId: tx.id,
+        journalEntryId: tx.journalEntryId,
+        source: "JOURNAL_ENTRY",
+        splits: lines.map((l) => ({
+          id: l.id,
+          account: coaMap[l.accountId] ?? null,
+          fund: l.fundId ? (fundMap[l.fundId] ?? null) : null,
+          debit: l.debit ?? 0,
+          credit: l.credit ?? 0,
+          memo: l.description ?? null,
+        })),
+      });
+    }
+
+    // Otherwise return regular transaction splits
+    const splits = await db
+      .select()
+      .from(transactionSplits)
+      .where(eq(transactionSplits.transactionId, tx.id))
+      .orderBy(transactionSplits.sortOrder);
+
+    return res.json({
+      transactionId: tx.id,
+      journalEntryId: null,
+      source: "TRANSACTION_SPLIT",
+      splits: splits.map((s) => ({
+        id: s.id,
+        account: s.chartAccountId ? (coaMap[s.chartAccountId] ?? null) : null,
+        fund: null,
+        debit: tx.type === "DEBIT" ? s.amount : 0,
+        credit: tx.type === "CREDIT" ? s.amount : 0,
+        memo: s.memo ?? null,
+      })),
+    });
+  } catch (err) {
+    console.error("Transaction splits error:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 });

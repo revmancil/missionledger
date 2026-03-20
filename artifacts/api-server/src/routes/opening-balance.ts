@@ -348,4 +348,113 @@ router.post("/finalize", requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
+// ── POST /opening-balance/sync — force-sync balances for existing OB entry ───
+/**
+ * Retroactively applies bank-balance updates and transaction creation for an
+ * already-posted Opening Balance JE.  Call this once if OB was posted before
+ * the auto-sync code was deployed.
+ */
+router.post("/sync", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { companyId } = (req as any).user;
+
+    const [company] = await db.select().from(companies).where(eq(companies.id, companyId));
+    if (!company?.openingBalanceEntryId) {
+      return res.status(400).json({ error: "No opening balance entry found for this company." });
+    }
+
+    const jeId = company.openingBalanceEntryId;
+
+    // Fetch all GL entries for this JE
+    const jeGlEntries = await db
+      .select()
+      .from(glEntries)
+      .where(and(eq(glEntries.journalEntryId, jeId), eq(glEntries.companyId, companyId)));
+
+    if (!jeGlEntries.length) {
+      return res.status(400).json({ error: "No GL entries found for this opening balance JE." });
+    }
+
+    // ── Step 1: Recompute and update bank account balances ─────────────────
+    const uniqueAccountIds = [...new Set(jeGlEntries.map((g) => g.accountId))];
+    const linkedBanks = await db
+      .select()
+      .from(bankAccounts)
+      .where(and(eq(bankAccounts.companyId, companyId), inArray(bankAccounts.glAccountId as any, uniqueAccountIds)));
+
+    const bankUpdates: Array<{ name: string; newBalance: number }> = [];
+
+    for (const ba of linkedBanks) {
+      if (!ba.glAccountId) continue;
+      const balResult = await db.execute(sql`
+        SELECT COALESCE(SUM(CASE WHEN entry_type='DEBIT' THEN amount ELSE 0 END), 0)
+             - COALESCE(SUM(CASE WHEN entry_type='CREDIT' THEN amount ELSE 0 END), 0) AS balance
+        FROM gl_entries
+        WHERE account_id = ${ba.glAccountId} AND company_id = ${companyId} AND is_void = false
+      `);
+      const newBalance = parseFloat((balResult.rows[0] as any)?.balance ?? "0") || 0;
+      await db
+        .update(bankAccounts)
+        .set({ currentBalance: newBalance, updatedAt: new Date() })
+        .where(eq(bankAccounts.id, ba.id));
+
+      bankUpdates.push({ name: ba.name, newBalance });
+      console.log(`[OB Sync] Successfully updated "${ba.name}" balance to ${newBalance.toFixed(2)}`);
+    }
+
+    // ── Step 2: Create bank-register transactions (void existing, insert new) ─
+    // Void any previously created OB transactions for this JE
+    await db
+      .update(transactions)
+      .set({ isVoid: true, status: "VOID", updatedAt: new Date() })
+      .where(and(eq(transactions.companyId, companyId), eq(transactions.journalEntryId as any, jeId)));
+
+    const glToBankId = Object.fromEntries(linkedBanks.map((ba) => [ba.glAccountId!, ba.id]));
+
+    // Fetch the JE to get its entryNumber and date
+    const [je] = await db
+      .select()
+      .from(journalEntries)
+      .where(and(eq(journalEntries.id, jeId), eq(journalEntries.companyId, companyId)));
+
+    const txCreated: string[] = [];
+
+    for (const entry of jeGlEntries) {
+      const bankAccountId = glToBankId[entry.accountId];
+      if (!bankAccountId) continue;
+
+      const txType: "CREDIT" | "DEBIT" = entry.entryType === "DEBIT" ? "CREDIT" : "DEBIT";
+      await db.insert(transactions).values({
+        companyId,
+        bankAccountId,
+        date: entry.date ?? je?.date ?? new Date(),
+        payee: "Opening Balance",
+        amount: entry.amount,
+        type: txType,
+        status: "CLEARED",
+        chartAccountId: entry.accountId,
+        fundId: entry.fundId ?? null,
+        memo: "Opening Balance Entry",
+        referenceNumber: je?.entryNumber ?? null,
+        journalEntryId: jeId,
+        isVoid: false,
+      });
+
+      const bankName = linkedBanks.find((b) => b.id === bankAccountId)?.name ?? "Unknown";
+      txCreated.push(`${bankName}: ${txType === "CREDIT" ? "Deposit" : "Payment"} $${entry.amount.toFixed(2)}`);
+      console.log(`[OB Sync] Created bank register transaction for "${bankName}" — ${txType} $${entry.amount.toFixed(2)}`);
+    }
+
+    res.json({
+      success: true,
+      journalEntryId: jeId,
+      bankBalancesUpdated: bankUpdates,
+      transactionsCreated: txCreated,
+    });
+  } catch (err) {
+    console.error("Opening balance sync error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 export default router;
