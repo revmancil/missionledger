@@ -159,6 +159,8 @@ function TxStatusIcon({ status }: { status: string }) {
 export default function Dashboard() {
   const [data, setData] = useState<DashData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -167,6 +169,28 @@ export default function Dashboard() {
       if (res.ok) setData(await res.json());
     } finally { setLoading(false); }
   }, []);
+
+  const handleGlobalSync = useCallback(async () => {
+    setSyncing(true);
+    setSyncMsg(null);
+    try {
+      const res = await fetch(`${BASE}api/opening-balance/recalculate`, {
+        method: "POST",
+        credentials: "include",
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        setSyncMsg({ type: "err", text: body.error ?? "Sync failed. Please try again." });
+      } else {
+        setSyncMsg({ type: "ok", text: body.message ?? "All Bank and Fund balances have been recalculated based on the General Ledger." });
+        load(); // Refresh dashboard KPIs
+      }
+    } catch {
+      setSyncMsg({ type: "err", text: "Network error. Please try again." });
+    } finally {
+      setSyncing(false);
+    }
+  }, [load]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -358,6 +382,40 @@ export default function Dashboard() {
               {data.budgetTracker.map((b, i) => (
                 <BudgetBar key={i} {...b} />
               ))}
+            </div>
+          )}
+        </div>
+
+        {/* ── Data Tools ──────────────────────────────────────────────── */}
+        <div className="bg-white rounded-2xl border border-amber-200 shadow-sm p-5">
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div>
+              <h3 className="font-semibold text-[hsl(210,60%,25%)]">Data Tools</h3>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Administrative utilities for correcting account balances
+              </p>
+            </div>
+            <button
+              onClick={handleGlobalSync}
+              disabled={syncing}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white bg-[hsl(210,60%,40%)] hover:bg-[hsl(210,60%,30%)] disabled:opacity-60 disabled:cursor-not-allowed transition-colors shadow-sm"
+            >
+              <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
+              {syncing ? "Recalculating…" : "Force Global Balance Sync"}
+            </button>
+          </div>
+          <p className="text-xs text-muted-foreground mt-3 leading-relaxed">
+            Resets all bank account balances to <strong>$0.00</strong>, then replays every GL entry to rebuild
+            accurate balances from scratch. Also repairs Opening Balance transactions so the Journal Entry
+            detail view is accessible. Run this once if balances are out of sync.
+          </p>
+          {syncMsg && (
+            <div className={`mt-3 rounded-xl px-4 py-3 text-sm ${
+              syncMsg.type === "ok"
+                ? "bg-emerald-50 border border-emerald-200 text-emerald-800"
+                : "bg-red-50 border border-red-200 text-red-700"
+            }`}>
+              {syncMsg.text}
             </div>
           )}
         </div>

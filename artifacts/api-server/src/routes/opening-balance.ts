@@ -348,6 +348,159 @@ router.post("/finalize", requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
+// ── POST /opening-balance/recalculate — full GL replay of all bank balances ──
+/**
+ * The nuclear option:
+ *   1. Zero every bank_accounts.current_balance for this company
+ *   2. Replay every non-void gl_entry and recompute balances from scratch
+ *   3. Repair OB transactions so journalEntryId is set (enables JE drill-down)
+ * Fund balances are already computed dynamically — no reset needed for funds.
+ */
+router.post("/recalculate", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { companyId } = (req as any).user;
+
+    // ── Step A: Reset all bank_account balances to zero ────────────────────
+    await db
+      .update(bankAccounts)
+      .set({ currentBalance: 0, updatedAt: new Date() })
+      .where(eq(bankAccounts.companyId, companyId));
+    console.log(`[Recalculate] Reset all bank account balances to $0.00 for company ${companyId}`);
+
+    // ── Step B: Get all bank accounts that have a linked GL account ─────────
+    const allBanks = await db
+      .select()
+      .from(bankAccounts)
+      .where(and(eq(bankAccounts.companyId, companyId)));
+
+    const linkedBanks = allBanks.filter((ba) => ba.glAccountId);
+
+    const bankResults: Array<{ name: string; newBalance: number }> = [];
+
+    // ── Step C: For each bank account, replay all gl_entries ─────────────
+    for (const ba of linkedBanks) {
+      const result = await db.execute(sql`
+        SELECT
+          COALESCE(SUM(CASE WHEN entry_type = 'DEBIT'  THEN amount ELSE 0 END), 0) AS total_debit,
+          COALESCE(SUM(CASE WHEN entry_type = 'CREDIT' THEN amount ELSE 0 END), 0) AS total_credit
+        FROM gl_entries
+        WHERE account_id = ${ba.glAccountId}
+          AND company_id = ${companyId}
+          AND is_void = false
+      `);
+      const row = result.rows[0] as any;
+      const debit  = parseFloat(row?.total_debit  ?? "0") || 0;
+      const credit = parseFloat(row?.total_credit ?? "0") || 0;
+      // Asset accounts: DEBIT increases, CREDIT decreases
+      const newBalance = debit - credit;
+
+      await db
+        .update(bankAccounts)
+        .set({ currentBalance: newBalance, updatedAt: new Date() })
+        .where(eq(bankAccounts.id, ba.id));
+
+      bankResults.push({ name: ba.name, newBalance });
+      console.log(`[Recalculate] "${ba.name}": debit=${debit.toFixed(2)}, credit=${credit.toFixed(2)}, balance=${newBalance.toFixed(2)}`);
+    }
+
+    // ── Step D: Compute fund balances from gl_entries (for reporting only) ─
+    const fundResult = await db.execute(sql`
+      SELECT
+        g.fund_id,
+        f.name AS fund_name,
+        SUM(CASE WHEN g.entry_type = 'CREDIT' THEN g.amount ELSE 0 END) AS total_credit,
+        SUM(CASE WHEN g.entry_type = 'DEBIT'  THEN g.amount ELSE 0 END) AS total_debit
+      FROM gl_entries g
+      JOIN funds f ON f.id = g.fund_id
+      JOIN chart_of_accounts c ON c.id = g.account_id
+      WHERE g.company_id = ${companyId}
+        AND g.is_void = false
+        AND g.fund_id IS NOT NULL
+        AND c.type IN ('EQUITY', 'INCOME', 'EXPENSE')
+      GROUP BY g.fund_id, f.name
+    `);
+    const fundBalances = (fundResult.rows as any[]).map((r) => ({
+      fundId:   r.fund_id,
+      name:     r.fund_name,
+      balance:  parseFloat(r.total_credit) - parseFloat(r.total_debit),
+    }));
+
+    // ── Step E: Fix JE linkage on OB transactions ──────────────────────────
+    // Find the company's OB JE
+    const [company] = await db.select().from(companies).where(eq(companies.id, companyId));
+    let jeFixed = 0;
+
+    if (company?.openingBalanceEntryId) {
+      const jeId = company.openingBalanceEntryId;
+
+      // Fetch the OB JE for date/entryNumber
+      const [je] = await db
+        .select()
+        .from(journalEntries)
+        .where(and(eq(journalEntries.id, jeId), eq(journalEntries.companyId, companyId)));
+
+      // Get all GL entries for this JE that map to a bank account
+      const obGlEntries = await db
+        .select()
+        .from(glEntries)
+        .where(and(eq(glEntries.journalEntryId, jeId), eq(glEntries.companyId, companyId)));
+
+      const glToBankId: Record<string, string> = {};
+      for (const ba of linkedBanks) {
+        if (ba.glAccountId) glToBankId[ba.glAccountId] = ba.id;
+      }
+
+      // Void any existing OB transactions for this company (regardless of journalEntryId)
+      await db
+        .update(transactions)
+        .set({ isVoid: true, status: "VOID", updatedAt: new Date() })
+        .where(and(
+          eq(transactions.companyId, companyId),
+          eq(transactions.payee, "Opening Balance"),
+        ));
+
+      // Create fresh OB transactions with journalEntryId properly set
+      for (const entry of obGlEntries) {
+        const bankAccountId = glToBankId[entry.accountId];
+        if (!bankAccountId) continue;
+
+        // Flip: bank register shows the bank's perspective (DEBIT GL = bank deposit)
+        const txType: "CREDIT" | "DEBIT" = entry.entryType === "DEBIT" ? "CREDIT" : "DEBIT";
+
+        await db.insert(transactions).values({
+          companyId,
+          bankAccountId,
+          date: entry.date ?? je?.date ?? new Date(),
+          payee: "Opening Balance",
+          amount: entry.amount,
+          type: txType,
+          status: "CLEARED",
+          chartAccountId: entry.accountId,
+          fundId: entry.fundId ?? null,
+          memo: "Opening Balance Entry",
+          referenceNumber: je?.entryNumber ?? null,
+          journalEntryId: jeId,
+          isVoid: false,
+        });
+        jeFixed++;
+      }
+
+      console.log(`[Recalculate] Created ${jeFixed} bank register transaction(s) with journalEntryId="${jeId}"`);
+    }
+
+    res.json({
+      success: true,
+      bankAccountsUpdated: bankResults,
+      fundBalances,
+      obTransactionsFixed: jeFixed,
+      message: `All bank and fund balances have been recalculated based on the General Ledger. ${bankResults.length} bank account(s) updated. ${jeFixed} Opening Balance transaction(s) repaired.`,
+    });
+  } catch (err) {
+    console.error("Recalculate balances error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // ── POST /opening-balance/sync — force-sync balances for existing OB entry ───
 /**
  * Retroactively applies bank-balance updates and transaction creation for an
