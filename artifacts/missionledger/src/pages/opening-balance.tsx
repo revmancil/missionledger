@@ -520,6 +520,8 @@ export default function OpeningBalancePage() {
   const [liabilityRows, setLiabilityRows] = useState<LiabilityRow[]>([]);
   // Per-fund equity account: fundId → equityAccountId
   const [fundEquityMap, setFundEquityMap] = useState<Record<string, string>>({});
+  // Per-fund directly-entered balance (string so we don't lose trailing decimals while typing)
+  const [directFundAmounts, setDirectFundAmounts] = useState<Record<string, string>>({});
 
   // ── Load ─────────────────────────────────────────────────────────────────────
   const load = useCallback(async () => {
@@ -554,6 +556,7 @@ export default function OpeningBalancePage() {
         const newAsset: AssetRow[]       = [];
         const newLiab: LiabilityRow[]    = [];
         const rebuiltEquityMap: Record<string, string> = { ...defaultMap };
+        const rebuiltDirectAmounts: Record<string, string> = {};
 
         for (const r of data.existingRows) {
           const acct = coaMap[r.accountId];
@@ -568,16 +571,19 @@ export default function OpeningBalancePage() {
             newLiab.push({ id: uid(), accountId: r.accountId, fundId: fid, amount: amt, memo });
           } else if (acct.type === "EQUITY" && r.entryType === "CREDIT" && r.fundId) {
             rebuiltEquityMap[r.fundId] = r.accountId;
+            rebuiltDirectAmounts[r.fundId] = String(r.amount ?? "");
           }
         }
 
         setAssetRows(newAsset.length ? newAsset : [{ id: uid(), accountId: "", fundId: firstFundId, amount: "", memo: "" }]);
         setLiabilityRows(newLiab.length ? newLiab : [{ id: uid(), accountId: "", fundId: firstFundId, amount: "", memo: "" }]);
         setFundEquityMap(rebuiltEquityMap);
+        setDirectFundAmounts(rebuiltDirectAmounts);
       } else {
         setAssetRows([{ id: uid(), accountId: "", fundId: firstFundId, amount: "", memo: "" }]);
         setLiabilityRows([{ id: uid(), accountId: "", fundId: firstFundId, amount: "", memo: "" }]);
         setFundEquityMap(defaultMap);
+        setDirectFundAmounts({});
       }
     } finally { setLoading(false); }
   }, []);
@@ -669,14 +675,16 @@ export default function OpeningBalancePage() {
   const totalEquity = equityTotals.reduce((s, e) => s + e.total, 0);
 
   // ── Fund Balances (Section 4 data) ───────────────────────────────────────────
-  // Show ALL active funds — not just those with rows — so users can assign equity accounts up front
+  // Show ALL active funds. Amount = directly typed value if set, else auto-computed from asset/liability rows.
   const fundBalances = useMemo(() => {
-    return funds.map((f) => ({
-      fund: f,
-      netAmount: fundNetMap[f.id] ?? 0,
-      equityAccountId: fundEquityMap[f.id] ?? "",
-    }));
-  }, [funds, fundNetMap, fundEquityMap]);
+    return funds.map((f) => {
+      const directStr = directFundAmounts[f.id];
+      const netAmount = directStr !== undefined
+        ? (parseFloat(directStr) || 0)
+        : (fundNetMap[f.id] ?? 0);
+      return { fund: f, netAmount, equityAccountId: fundEquityMap[f.id] ?? "" };
+    });
+  }, [funds, fundNetMap, fundEquityMap, directFundAmounts]);
 
   const totalFundBalances = fundBalances.reduce((s, fb) => s + fb.netAmount, 0);
 
@@ -688,8 +696,8 @@ export default function OpeningBalancePage() {
   const missingAssetFund = activeAssets.some((r) => !r.fundId);
   const missingLiabAcct  = activeLiabs.some((r) => !r.accountId);
   const missingLiabFund  = activeLiabs.some((r) => !r.fundId);
-  const missingEquity    = activeFundIds.some((fid) => !fundEquityMap[fid]);
-  const hasData          = totalAssets > 0;
+  const missingEquity    = fundBalances.some((fb) => Math.abs(fb.netAmount) > 0.001 && !fb.equityAccountId);
+  const hasData          = totalAssets > 0 || totalFundBalances > 0;
 
   const canPost = hasData && !futureDateError
     && !missingAssetAcct && !missingAssetFund
@@ -922,8 +930,8 @@ export default function OpeningBalancePage() {
         {/* ═══════════════════════════════════════════════════════════════════════ */}
         {/* SECTION 1 — Assets                                                     */}
         {/* ═══════════════════════════════════════════════════════════════════════ */}
-        <div className="rounded-xl border-2 border-blue-200 overflow-hidden">
-          <div className="bg-blue-600 px-5 py-3 flex items-center gap-2">
+        <div className="rounded-xl border-2 border-blue-200">
+          <div className="bg-blue-600 px-5 py-3 flex items-center gap-2 rounded-t-xl">
             <Landmark className="h-4 w-4 text-blue-100" />
             <span className="text-sm font-bold text-white">Assets</span>
             <span className="ml-auto text-xs text-blue-200">Bank, cash, receivables, equipment — all asset accounts</span>
@@ -957,8 +965,8 @@ export default function OpeningBalancePage() {
         {/* ═══════════════════════════════════════════════════════════════════════ */}
         {/* SECTION 2 — Liabilities                                               */}
         {/* ═══════════════════════════════════════════════════════════════════════ */}
-        <div className="rounded-xl border-2 border-orange-200 overflow-hidden">
-          <div className="bg-orange-500 px-5 py-3 flex items-center gap-2">
+        <div className="rounded-xl border-2 border-orange-200">
+          <div className="bg-orange-500 px-5 py-3 flex items-center gap-2 rounded-t-xl">
             <Scale className="h-4 w-4 text-orange-100" />
             <span className="text-sm font-bold text-white">Liabilities</span>
             <span className="ml-auto text-xs text-orange-100">Accounts payable, notes payable, deferred revenue, etc.</span>
@@ -992,8 +1000,8 @@ export default function OpeningBalancePage() {
         {/* ═══════════════════════════════════════════════════════════════════════ */}
         {/* SECTION 3 — Equity / Net Assets (auto-computed by equity account)      */}
         {/* ═══════════════════════════════════════════════════════════════════════ */}
-        <div className="rounded-xl border-2 border-violet-200 overflow-hidden">
-          <div className="bg-violet-600 px-5 py-3 flex items-center gap-2">
+        <div className="rounded-xl border-2 border-violet-200">
+          <div className="bg-violet-600 px-5 py-3 flex items-center gap-2 rounded-t-xl">
             <TrendingUp className="h-4 w-4 text-violet-100" />
             <span className="text-sm font-bold text-white">Equity / Net Assets</span>
             <span className="ml-auto text-xs text-violet-200">Auto-calculated from fund balances — grouped by equity account</span>
@@ -1043,11 +1051,11 @@ export default function OpeningBalancePage() {
         {/* ═══════════════════════════════════════════════════════════════════════ */}
         {/* SECTION 4 — Fund Balances (assign equity account per fund)             */}
         {/* ═══════════════════════════════════════════════════════════════════════ */}
-        <div className="rounded-xl border-2 border-emerald-200 overflow-hidden">
-          <div className="bg-emerald-600 px-5 py-3 flex items-center gap-2">
+        <div className="rounded-xl border-2 border-emerald-200">
+          <div className="bg-emerald-600 px-5 py-3 flex items-center gap-2 rounded-t-xl">
             <Layers className="h-4 w-4 text-emerald-100" />
             <span className="text-sm font-bold text-white">Fund Balances</span>
-            <span className="ml-auto text-xs text-emerald-200">Auto-calculated per fund — assign each fund to its equity account</span>
+            <span className="ml-auto text-xs text-emerald-200">Enter each fund's net opening balance and assign it to an equity account</span>
           </div>
 
           {fundBalances.length === 0 ? (
@@ -1063,59 +1071,81 @@ export default function OpeningBalancePage() {
           ) : (
             <>
               {/* Column headers */}
-              <div className="grid gap-3 px-5 py-2 bg-emerald-50 border-b border-emerald-100 text-[10px] font-bold text-emerald-700 uppercase tracking-wide" style={{ gridTemplateColumns: "1fr 1fr auto" }}>
+              <div className="grid gap-3 px-5 py-2 bg-emerald-50 border-b border-emerald-100 text-[10px] font-bold text-emerald-700 uppercase tracking-wide" style={{ gridTemplateColumns: "1.4fr 1.6fr 1fr" }}>
                 <span>Fund</span>
                 <span>Equity Account (Net Assets)</span>
-                <span className="text-right min-w-[140px]">Net Balance</span>
+                <span className="text-right">Opening Balance</span>
               </div>
 
-              {fundBalances.map(({ fund, netAmount, equityAccountId }) => (
-                <div key={fund.id} className="grid gap-3 px-5 py-3 border-b border-gray-100 items-center" style={{ gridTemplateColumns: "1fr 1fr auto" }}>
-                  {/* Fund name + type badge */}
-                  <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
-                    <div>
-                      <span className="text-sm font-semibold">{fund.name}</span>
-                      {fund.fundType && (
-                        <span className={cn(
-                          "ml-2 text-[9px] px-1.5 py-0.5 rounded-full font-bold uppercase",
-                          fund.fundType === "UNRESTRICTED"   && "bg-blue-100 text-blue-700",
-                          fund.fundType === "RESTRICTED_TEMP" && "bg-amber-100 text-amber-700",
-                          fund.fundType === "RESTRICTED_PERM" && "bg-red-100 text-red-700",
-                        )}>
-                          {fund.fundType === "UNRESTRICTED"    ? "Unrestricted"
-                            : fund.fundType === "RESTRICTED_TEMP" ? "Temp. Restricted"
-                            : fund.fundType === "RESTRICTED_PERM" ? "Perm. Restricted"
-                            : fund.fundType}
-                        </span>
+              {fundBalances.map(({ fund, netAmount, equityAccountId }) => {
+                const directStr = directFundAmounts[fund.id];
+                const displayStr = directStr !== undefined ? directStr : (netAmount !== 0 ? String(netAmount) : "");
+                return (
+                  <div key={fund.id} className="grid gap-3 px-5 py-3 border-b border-gray-100 items-center" style={{ gridTemplateColumns: "1.4fr 1.6fr 1fr" }}>
+                    {/* Fund name + type badge */}
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold truncate">{fund.name}</div>
+                        {fund.fundType && (
+                          <span className={cn(
+                            "inline-block text-[9px] px-1.5 py-0.5 rounded-full font-bold uppercase mt-0.5",
+                            fund.fundType === "UNRESTRICTED"    && "bg-blue-100 text-blue-700",
+                            fund.fundType === "RESTRICTED_TEMP" && "bg-amber-100 text-amber-700",
+                            fund.fundType === "RESTRICTED_PERM" && "bg-red-100 text-red-700",
+                          )}>
+                            {fund.fundType === "UNRESTRICTED"    ? "Unrestricted"
+                              : fund.fundType === "RESTRICTED_TEMP" ? "Temp. Restricted"
+                              : fund.fundType === "RESTRICTED_PERM" ? "Perm. Restricted"
+                              : fund.fundType}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Equity account selector — full-width, tall tap target for tablet */}
+                    <select
+                      value={equityAccountId}
+                      onChange={(e) => setFundEquityMap((prev) => ({ ...prev, [fund.id]: e.target.value }))}
+                      style={{ fontSize: "14px" }}
+                      className={cn(
+                        "w-full h-10 px-2 border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400",
+                        !equityAccountId ? "border-amber-400 bg-amber-50" : "border-gray-300"
                       )}
+                    >
+                      <option value="">— Select equity account —</option>
+                      {equityCoa.map((a) => (
+                        <option key={a.id} value={a.id}>{a.code} — {a.name}</option>
+                      ))}
+                    </select>
+
+                    {/* Editable fund balance amount */}
+                    <div className="relative">
+                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-gray-400 pointer-events-none select-none">$</span>
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        min="0"
+                        step="0.01"
+                        placeholder="0.00"
+                        value={displayStr}
+                        onChange={(e) => setDirectFundAmounts((prev) => ({ ...prev, [fund.id]: e.target.value }))}
+                        onBlur={(e) => {
+                          const v = parseFloat(e.target.value);
+                          if (!isNaN(v)) setDirectFundAmounts((prev) => ({ ...prev, [fund.id]: String(v) }));
+                        }}
+                        className={cn(
+                          "w-full h-10 pl-6 pr-2 text-right text-sm font-semibold border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 tabular-nums",
+                          netAmount < 0 ? "border-red-300 text-red-700" : "border-gray-300 text-emerald-700"
+                        )}
+                      />
                     </div>
                   </div>
+                );
+              })}
 
-                  {/* Equity account selector */}
-                  <select
-                    value={equityAccountId}
-                    onChange={(e) => setFundEquityMap((prev) => ({ ...prev, [fund.id]: e.target.value }))}
-                    className={cn(
-                      "h-8 px-2 text-sm border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400",
-                      !equityAccountId ? "border-amber-300" : "border-gray-200"
-                    )}
-                  >
-                    <option value="">— Select equity account —</option>
-                    {equityCoa.map((a) => (
-                      <option key={a.id} value={a.id}>{a.code} — {a.name}</option>
-                    ))}
-                  </select>
-
-                  {/* Net balance */}
-                  <div className={cn("text-right text-sm font-bold tabular-nums min-w-[140px]", netAmount >= 0 ? "text-emerald-700" : "text-red-600")}>
-                    {fmt(netAmount)}
-                  </div>
-                </div>
-              ))}
-
-              <div className="px-5 py-2.5 bg-emerald-50 border-t border-emerald-200 flex justify-between items-center">
-                <span className="text-xs text-emerald-600">{fundBalances.length} fund{fundBalances.length !== 1 ? "s" : ""} with balances</span>
+              <div className="px-5 py-2.5 bg-emerald-50 border-t border-emerald-200 flex justify-between items-center rounded-b-xl">
+                <span className="text-xs text-emerald-600">{fundBalances.length} fund{fundBalances.length !== 1 ? "s" : ""}</span>
                 <span className="text-sm font-bold text-emerald-800">Total Fund Balances: <span className="font-mono ml-2">{fmt(totalFundBalances)}</span></span>
               </div>
             </>
