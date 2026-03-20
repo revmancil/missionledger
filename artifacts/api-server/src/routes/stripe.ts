@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, companies } from "@workspace/db";
+import { db, pool, companies } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
 import { sendSubscriptionConfirmedEmail } from "../lib/email";
@@ -79,6 +79,13 @@ router.get("/subscription", requireAuth, async (req, res) => {
     const [company] = await db.select().from(companies).where(eq(companies.id, companyId));
     if (!company) return res.status(404).json({ error: "Company not found" });
 
+    const { rows: compedRows } = await pool.query(
+      `SELECT is_comped, comped_note FROM companies WHERE id = $1 LIMIT 1`,
+      [companyId]
+    );
+    const isComped = compedRows[0]?.is_comped ?? false;
+    const compedNote = compedRows[0]?.comped_note ?? null;
+
     let subscription = null;
     if (company.stripeSubscriptionId) {
       subscription = await stripeStorage.getSubscription(company.stripeSubscriptionId);
@@ -97,6 +104,8 @@ router.get("/subscription", requireAuth, async (req, res) => {
       daysRemaining,
       isTrialExpired: company.subscriptionStatus === "TRIAL" && msRemaining <= 0,
       subscription,
+      isComped,
+      compedNote,
     });
   } catch (err: any) {
     console.error("Error fetching subscription:", err.message);

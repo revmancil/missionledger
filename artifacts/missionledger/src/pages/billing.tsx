@@ -3,7 +3,7 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { CheckCircle2, CreditCard, Zap, Building2, Star, AlertCircle } from "lucide-react";
+import { CheckCircle2, CreditCard, Zap, Building2, Star, AlertCircle, Gift } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
 
@@ -27,6 +27,8 @@ interface SubscriptionInfo {
   stripeSubscriptionId: string | null;
   stripeCustomerId: string | null;
   subscription: any;
+  isComped?: boolean;
+  compedNote?: string | null;
 }
 
 const PLAN_ICONS: Record<string, React.ReactNode> = {
@@ -40,6 +42,7 @@ const STATUS_COLORS: Record<string, string> = {
   ACTIVE: "bg-emerald-100 text-emerald-700 border-emerald-200",
   INACTIVE: "bg-gray-100 text-gray-600 border-gray-200",
   CANCELLED: "bg-red-100 text-red-700 border-red-200",
+  COMPED: "bg-purple-100 text-purple-700 border-purple-200",
 };
 
 function formatAmount(amount: number, currency: string): string {
@@ -121,7 +124,9 @@ export default function BillingPage() {
     }
   };
 
-  const currentStatus = subscriptionInfo?.subscriptionStatus || "TRIAL";
+  const isComped = subscriptionInfo?.isComped ?? false;
+  const compedNote = subscriptionInfo?.compedNote ?? null;
+  const currentStatus = isComped ? "COMPED" : (subscriptionInfo?.subscriptionStatus || "TRIAL");
   const hasActiveSubscription = currentStatus === "ACTIVE";
 
   return (
@@ -157,6 +162,18 @@ export default function BillingPage() {
           <CardContent>
             {loadingSubscription ? (
               <p className="text-sm text-muted-foreground">Loading subscription details...</p>
+            ) : isComped ? (
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center shrink-0">
+                  <Gift className="w-4 h-4 text-purple-600" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium">Complimentary access</p>
+                  <p className="text-xs text-muted-foreground">
+                    {compedNote || "This account has been granted complimentary access by MissionLedger."}
+                  </p>
+                </div>
+              </div>
             ) : hasActiveSubscription ? (
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
@@ -194,7 +211,7 @@ export default function BillingPage() {
         </Card>
       </div>
 
-      <div>
+      {isComped ? null : <div>
         <h2 className="text-lg font-semibold mb-4">Subscription Plans</h2>
         {loadingPlans ? (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -313,7 +330,7 @@ export default function BillingPage() {
             })}
           </div>
         )}
-      </div>
+      </div>}
     </AppLayout>
   );
 }

@@ -234,6 +234,13 @@ async function ensureSchema() {
     console.error("Schema migration error (maintenance_mode):", err.message);
   }
   try {
+    await pool.query(`ALTER TABLE companies ADD COLUMN IF NOT EXISTS is_comped BOOLEAN NOT NULL DEFAULT FALSE`);
+    await pool.query(`ALTER TABLE companies ADD COLUMN IF NOT EXISTS comped_note TEXT`);
+    console.log("Schema check: companies.is_comped OK");
+  } catch (err: any) {
+    console.error("Schema migration error (is_comped):", err.message);
+  }
+  try {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS system_settings (
         key VARCHAR(64) PRIMARY KEY,

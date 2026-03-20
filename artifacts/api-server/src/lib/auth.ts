@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from "express";
-import { db } from "@workspace/db";
+import { db, pool } from "@workspace/db";
 import { users, companies } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import bcrypt from "bcryptjs";
@@ -47,24 +47,27 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
 
   // Enforce company-level guards on every request
   if (user.companyId && !user.isPlatformAdmin) {
-    const [company] = await db
-      .select({
-        isActive: companies.isActive,
-        subscriptionStatus: companies.subscriptionStatus,
-        createdAt: companies.createdAt,
-      })
-      .from(companies)
-      .where(eq(companies.id, user.companyId))
-      .limit(1);
+    const { rows } = await pool.query(
+      `SELECT is_active, subscription_status, created_at, is_comped FROM companies WHERE id = $1 LIMIT 1`,
+      [user.companyId]
+    );
+    const company = rows[0];
 
     if (company) {
       // 1. Account suspension
-      if (!company.isActive) {
+      if (!company.is_active) {
         res.status(403).json({ error: "ACCOUNT_SUSPENDED", message: "Your organization account has been suspended. Please contact support." });
         return;
       }
 
-      // 2. Subscription gate — exempt billing/auth/health routes so users can pay
+      // 2. Comped accounts bypass subscription gating entirely
+      if (company.is_comped) {
+        (req as any).user = user;
+        next();
+        return;
+      }
+
+      // 3. Subscription gate — exempt billing/auth/health routes so users can pay
       const url = (req as any).originalUrl ?? "";
       const isExempt =
         url.includes("/api/stripe") ||
@@ -72,7 +75,8 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
         url.includes("/api/healthz");
 
       if (!isExempt) {
-        const { subscriptionStatus, createdAt } = company;
+        const subscriptionStatus = company.subscription_status;
+        const createdAt = company.created_at;
         if (subscriptionStatus === "ACTIVE") {
           // valid — fall through
         } else if (subscriptionStatus === "TRIAL") {

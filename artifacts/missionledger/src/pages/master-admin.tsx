@@ -27,7 +27,7 @@ import { useLocation } from "wouter";
 import {
   Shield, Building2, Users, Activity, Ban, CheckCircle2,
   Eye, Search, AlertTriangle, RefreshCcw, ChevronRight, X,
-  Lock
+  Lock, Gift
 } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
@@ -56,6 +56,8 @@ type OrgRow = {
   createdAt: string;
   closedUntil?: string;
   userCount: number;
+  isComped?: boolean;
+  compedNote?: string | null;
 };
 
 type OrgDetail = OrgRow & {
@@ -78,6 +80,7 @@ type Stats = {
 
 function statusBadge(org: OrgRow) {
   if (!org.isActive) return <Badge variant="destructive">Suspended</Badge>;
+  if (org.isComped) return <Badge variant="outline" className="bg-purple-100 text-purple-800 border-purple-200">Comped</Badge>;
   const map: Record<string, string> = {
     ACTIVE: "bg-green-100 text-green-800 border-green-200",
     TRIAL: "bg-blue-100 text-blue-800 border-blue-200",
@@ -100,6 +103,7 @@ export default function MasterAdminPage() {
   const [suspendDialog, setSuspendDialog] = useState<OrgRow | null>(null);
   const [suspendReason, setSuspendReason] = useState("");
   const [impersonating, setImpersonating] = useState<string | null>(null);
+  const [compedNote, setCompedNote] = useState("");
 
   // Redirect non-platform-admins
   if (!isPlatformAdmin) {
@@ -143,6 +147,24 @@ export default function MasterAdminPage() {
       qc.invalidateQueries({ queryKey: ["master-admin-stats"] });
       setSuspendDialog(null);
       setSuspendReason("");
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  const compedMutation = useMutation({
+    mutationFn: ({ id, isComped, note }: { id: string; isComped: boolean; note: string }) =>
+      apiFetch(`/api/master-admin/organizations/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isComped, compedNote: note }),
+      }),
+    onSuccess: (_, { isComped }) => {
+      toast.success(isComped ? "Account marked as comped" : "Comped status removed");
+      qc.invalidateQueries({ queryKey: ["master-admin-orgs"] });
+      if (selectedOrg) {
+        setSelectedOrg(prev => prev ? { ...prev, isComped, compedNote: compedNote || null } : null);
+      }
+      setCompedNote("");
     },
     onError: (e: any) => toast.error(e.message),
   });
@@ -373,6 +395,55 @@ export default function MasterAdminPage() {
             <div className="space-y-1 text-sm">
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Phone</p>
               <p>{selectedOrg?.phone || "—"}</p>
+            </div>
+          </div>
+
+          <div className="border-t pt-4">
+            <h4 className="text-sm font-semibold mb-3 flex items-center gap-2">
+              <Gift className="w-4 h-4 text-purple-600" /> Comped / Free Account
+            </h4>
+            <div className="space-y-3">
+              {selectedOrg?.isComped ? (
+                <div className="rounded-md border border-purple-200 bg-purple-50 p-3 flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium text-purple-800">This account has complimentary access</p>
+                    {selectedOrg.compedNote && (
+                      <p className="text-xs text-purple-700 mt-1">{selectedOrg.compedNote}</p>
+                    )}
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="shrink-0 text-xs border-purple-300 text-purple-700 hover:bg-purple-100"
+                    disabled={compedMutation.isPending}
+                    onClick={() => selectedOrg && compedMutation.mutate({ id: selectedOrg.id, isComped: false, note: "" })}
+                  >
+                    Remove Comp
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-xs text-muted-foreground">Grant this organization free access without a subscription.</p>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="Note (e.g. beta partner, grant-funded)…"
+                      value={compedNote}
+                      onChange={e => setCompedNote(e.target.value)}
+                      className="flex-1 h-8 rounded-md border border-input bg-background px-3 text-xs"
+                    />
+                    <Button
+                      size="sm"
+                      className="text-xs bg-purple-600 hover:bg-purple-700 text-white border-0"
+                      disabled={compedMutation.isPending}
+                      onClick={() => selectedOrg && compedMutation.mutate({ id: selectedOrg.id, isComped: true, note: compedNote })}
+                    >
+                      <Gift className="w-3 h-3 mr-1" />
+                      Mark Comped
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 

@@ -78,10 +78,14 @@ router.get("/organizations", async (_req, res) => {
       closedUntil: companies.closedUntil,
     }).from(companies).orderBy(companies.createdAt);
 
-    // Get maintenance_mode per org via raw SQL (column added via ensureSchema)
-    const { rows: maintModes } = await pool.query(`SELECT id, maintenance_mode FROM companies`);
+    // Get maintenance_mode + is_comped per org via raw SQL (columns added via ensureSchema)
+    const { rows: maintModes } = await pool.query(`SELECT id, maintenance_mode, is_comped, comped_note FROM companies`);
     const maintMap: Record<string, boolean> = {};
-    for (const r of maintModes) { maintMap[r.id] = r.maintenance_mode ?? false; }
+    const compedMap: Record<string, { isComped: boolean; compedNote: string | null }> = {};
+    for (const r of maintModes) {
+      maintMap[r.id] = r.maintenance_mode ?? false;
+      compedMap[r.id] = { isComped: r.is_comped ?? false, compedNote: r.comped_note ?? null };
+    }
 
     // User counts per org
     const userCounts = await db.select({ companyId: users.companyId, count: count() }).from(users).groupBy(users.companyId);
@@ -120,9 +124,12 @@ router.get("/organizations", async (_req, res) => {
       else if (maintenanceMode) status = "MAINTENANCE";
       else status = "ACTIVE";
 
+      const { isComped, compedNote } = compedMap[org.id] ?? { isComped: false, compedNote: null };
       return {
         ...org,
         maintenanceMode,
+        isComped,
+        compedNote,
         status,
         userCount: userCountMap[org.id] ?? 0,
         dbHealth: { plaidActive, stripeActive },
@@ -165,11 +172,11 @@ router.get("/organizations/:id", async (req, res) => {
 // ── PATCH /master-admin/organizations/:id ─────────────────────────────────────
 router.patch("/organizations/:id", async (req, res) => {
   try {
-    const { isActive, maintenanceMode, suspendedReason } = req.body ?? {};
+    const { isActive, maintenanceMode, suspendedReason, isComped, compedNote } = req.body ?? {};
     const [org] = await db.select().from(companies).where(eq(companies.id, req.params.id)).limit(1);
     if (!org) return res.status(404).json({ error: "Organization not found" });
 
-    // Use raw SQL to handle the maintenance_mode column (added via ensureSchema)
+    // Use raw SQL to handle the columns added via ensureSchema
     const updates: string[] = ["updated_at = NOW()"];
     const values: any[] = [req.params.id];
 
@@ -181,13 +188,21 @@ router.patch("/organizations/:id", async (req, res) => {
       updates.push(`maintenance_mode = $${values.length + 1}`);
       values.push(maintenanceMode);
     }
+    if (typeof isComped === "boolean") {
+      updates.push(`is_comped = $${values.length + 1}`);
+      values.push(isComped);
+    }
+    if (compedNote !== undefined) {
+      updates.push(`comped_note = $${values.length + 1}`);
+      values.push(compedNote || null);
+    }
 
     if (updates.length === 1) {
       return res.status(400).json({ error: "No valid fields to update." });
     }
 
     const { rows } = await pool.query(
-      `UPDATE companies SET ${updates.join(", ")} WHERE id = $1 RETURNING id, name, is_active, maintenance_mode`,
+      `UPDATE companies SET ${updates.join(", ")} WHERE id = $1 RETURNING id, name, is_active, maintenance_mode, is_comped, comped_note`,
       values
     );
 
