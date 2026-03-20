@@ -813,12 +813,12 @@ export default function BankRegisterPage() {
                       <td className="px-2 py-2.5 text-right tabular-nums">
                         {isDebit && !isVoid
                           ? <span className="text-red-600 font-medium">{fmtAmt(tx.amount)}</span>
-                          : <span className="text-muted-foreground/30">\u2014</span>}
+                          : <span className="text-muted-foreground/30">{"—"}</span>}
                       </td>
                       <td className="px-2 py-2.5 text-right tabular-nums">
                         {!isDebit && !isVoid
                           ? <span className="text-emerald-600 font-medium">{fmtAmt(tx.amount)}</span>
-                          : <span className="text-muted-foreground/30">\u2014</span>}
+                          : <span className="text-muted-foreground/30">{"—"}</span>}
                       </td>
                       <td className="px-2 py-2.5 text-right tabular-nums text-foreground font-medium">
                         {!isVoid ? fmtAmt(tx.runningBalance ?? 0) : "\u2014"}
