@@ -3,7 +3,7 @@ import { format } from "date-fns";
 import {
   CheckCircle2, AlertTriangle, RefreshCw, Lock, RotateCcw,
   Info, Plus, Trash2, Layers, Calendar, X, ArrowLeftRight,
-  Search, ChevronDown,
+  Search, ChevronDown, Download, Upload, Wand2, ShieldCheck, ShieldAlert,
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
@@ -574,7 +574,37 @@ export default function OpeningBalancePage() {
   const missingFund     = activeRows.some((r) => !r.fundId);
   const hasData         = activeRows.length >= 2;
 
-  const canPost = isBalanced && hasData && !futureDateError && !missingAccount && !missingFund;
+  // ── Accounting equation (needs to be above canPost) ───────────────────────
+  const eqAssets = useMemo(() =>
+    rows.reduce((s, r) => {
+      const acct = allCoa.find((a) => a.id === r.accountId);
+      if (acct?.type !== "ASSET") return s;
+      return s + rowDebit(r) - rowCredit(r);
+    }, 0), [rows, allCoa]);
+
+  const eqLiabilities = useMemo(() =>
+    rows.reduce((s, r) => {
+      const acct = allCoa.find((a) => a.id === r.accountId);
+      if (acct?.type !== "LIABILITY") return s;
+      return s + rowCredit(r) - rowDebit(r);
+    }, 0), [rows, allCoa]);
+
+  const eqNetAssets = useMemo(() =>
+    rows.reduce((s, r) => {
+      const acct = allCoa.find((a) => a.id === r.accountId);
+      if (acct?.type !== "EQUITY") return s;
+      return s + rowCredit(r) - rowDebit(r);
+    }, 0), [rows, allCoa]);
+
+  const equityGap = eqAssets - eqLiabilities - eqNetAssets;
+  const accountingEquationOk = Math.abs(equityGap) < 0.01;
+
+  const hasIncomeExpenseAccounts = activeRows.some((r) => {
+    const acct = allCoa.find((a) => a.id === r.accountId);
+    return acct && (acct.type === "INCOME" || acct.type === "EXPENSE");
+  });
+
+  const canPost = isBalanced && hasData && !futureDateError && !missingAccount && !missingFund && !hasIncomeExpenseAccounts && accountingEquationOk;
 
   // ── Submit ───────────────────────────────────────────────────────────────────
   async function handleFinalize() {
@@ -625,6 +655,113 @@ export default function OpeningBalancePage() {
     [...allCoa].sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true })),
     [allCoa]
   );
+
+  // ── Balance-sheet-only filter (GAAP: OB uses Assets, Liabilities, Equity) ──
+  const balanceSheetCoa = useMemo(
+    () => sortedCoa.filter((a) => ["ASSET", "LIABILITY", "EQUITY"].includes(a.type ?? "")),
+    [sortedCoa]
+  );
+
+  // ── Auto-calculate net asset offset ─────────────────────────────────────────
+  function handleAutoNetAssets() {
+    const equityAccounts = balanceSheetCoa.filter((a) => a.type === "EQUITY");
+    if (!equityAccounts.length) return;
+
+    const required = eqAssets - eqLiabilities; // what net assets should be
+    const entryType: EntryType = required >= 0 ? "CREDIT" : "DEBIT";
+    const amount = String(Math.abs(required).toFixed(2));
+    const targetFundId = defaultFundId || funds[0]?.id || "";
+
+    const existingEquityRow = rows.find((r) => {
+      const acct = allCoa.find((a) => a.id === r.accountId);
+      return acct?.type === "EQUITY";
+    });
+
+    if (existingEquityRow) {
+      updateRow(existingEquityRow.id, {
+        amount,
+        entryType,
+        memo: existingEquityRow.memo || "Net Assets (auto-calculated)",
+      });
+    } else {
+      const equityAcct = equityAccounts[0];
+      setRows((prev) => [
+        ...prev,
+        {
+          id: uid(),
+          accountId: equityAcct.id,
+          fundId: targetFundId,
+          amount,
+          entryType,
+          memo: "Net Assets (auto-calculated)",
+        },
+      ]);
+    }
+  }
+
+  // ── CSV template download ─────────────────────────────────────────────────────
+  function downloadTemplate() {
+    const header = ["Account Code", "Account Name", "Account Type", "Fund Name", "Amount", "DR/CR", "Memo"];
+    const examples = [
+      ["1010", "Checking Account", "ASSET", "General Fund", "50000.00", "DR", "Opening bank balance"],
+      ["1020", "Savings Account", "ASSET", "Restricted Fund", "10000.00", "DR", "Restricted cash"],
+      ["2010", "Accounts Payable", "LIABILITY", "General Fund", "5000.00", "CR", "Amount owed to vendors"],
+      ["3010", "Net Assets - Unrestricted", "EQUITY", "General Fund", "45000.00", "CR", "Opening net assets"],
+      ["3020", "Net Assets - Restricted", "EQUITY", "Restricted Fund", "10000.00", "CR", "Restricted net assets"],
+    ];
+    const csv = [header, ...examples].map((row) => row.map((c) => `"${c}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "opening-balance-template.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // ── CSV import ────────────────────────────────────────────────────────────────
+  function handleImportCSV(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = ""; // allow re-import of the same file
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string;
+      const lines = text.split(/\r?\n/).filter(Boolean);
+      if (lines.length < 2) return;
+
+      const parseCsv = (line: string) =>
+        line.split(",").map((c) => c.trim().replace(/^"|"$/g, "").trim());
+
+      const header = parseCsv(lines[0]).map((h) => h.toLowerCase());
+      const codeIdx  = header.findIndex((h) => h.includes("account code"));
+      const fundIdx  = header.findIndex((h) => h.includes("fund"));
+      const amtIdx   = header.findIndex((h) => h.includes("amount"));
+      const drcrIdx  = header.findIndex((h) => h.includes("dr") || h.includes("type"));
+      const memoIdx  = header.findIndex((h) => h.includes("memo"));
+
+      const newRows: GridRow[] = [];
+      for (let i = 1; i < lines.length; i++) {
+        const cols = parseCsv(lines[i]);
+        if (!cols[codeIdx]) continue;
+        const acct = allCoa.find((a) => a.code === cols[codeIdx]);
+        const fundName = (cols[fundIdx] ?? "").toLowerCase();
+        const fund = funds.find((f) => f.name.toLowerCase() === fundName);
+        const drcrRaw = (cols[drcrIdx] ?? "DR").toUpperCase().trim();
+        const entryType: EntryType = drcrRaw === "CR" || drcrRaw === "CREDIT" ? "CREDIT" : "DEBIT";
+        newRows.push({
+          id: uid(),
+          accountId: acct?.id ?? "",
+          fundId: fund?.id ?? defaultFundId ?? "",
+          amount: cols[amtIdx] ?? "",
+          entryType,
+          memo: cols[memoIdx] ?? "",
+        });
+      }
+      if (newRows.length > 0) setRows(newRows);
+    };
+    reader.readAsText(file);
+  }
 
   // ── Loading ──────────────────────────────────────────────────────────────────
   if (loading) {
@@ -716,10 +853,25 @@ export default function OpeningBalancePage() {
           <div>
             <h2 className="text-2xl font-bold text-[hsl(210,60%,25%)]">Opening Balance Wizard</h2>
             <p className="text-sm text-muted-foreground mt-0.5">
-              Enter your starting balances as explicit Debits and Credits — the entry must balance before posting.
+              GAAP-compliant opening balances — balance sheet accounts only (Assets, Liabilities, Net Assets).
             </p>
           </div>
-          <MethodToggle value={method} onChange={handleMethodChange} />
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* CSV download template */}
+            <button
+              onClick={downloadTemplate}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-sm text-gray-600 hover:bg-gray-50 transition-colors"
+              title="Download CSV import template"
+            >
+              <Download className="h-3.5 w-3.5" /> Template
+            </button>
+            {/* CSV import */}
+            <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-sm text-gray-600 hover:bg-gray-50 transition-colors cursor-pointer" title="Import from CSV">
+              <Upload className="h-3.5 w-3.5" /> Import CSV
+              <input type="file" accept=".csv" className="hidden" onChange={handleImportCSV} />
+            </label>
+            <MethodToggle value={method} onChange={handleMethodChange} />
+          </div>
         </div>
 
         {/* Date + Default Fund row */}
@@ -791,10 +943,11 @@ export default function OpeningBalancePage() {
         <div className="flex items-start gap-3 p-4 rounded-xl border border-blue-100 bg-blue-50 text-sm text-blue-800">
           <ArrowLeftRight className="h-4 w-4 shrink-0 mt-0.5 text-blue-500" />
           <div>
-            <strong>Double-entry opening balances:</strong> Enter each starting balance as a Debit (DR) or Credit (CR). 
-            Assets start with DR. Liabilities and Equity (Net Assets) start with CR. 
-            The entry posts only when <strong>Total Debits = Total Credits</strong>.
-            Entering a <strong>negative number</strong> automatically flips the DR/CR toggle.
+            <strong>GAAP double-entry opening balances:</strong> Only <strong>balance sheet accounts</strong> are permitted
+            (Assets, Liabilities, Net Assets / Equity). Revenue and expense accounts are blocked.
+            Assets start with <strong>DR</strong>; Liabilities and Net Assets start with <strong>CR</strong>.
+            The accounting equation <strong>Assets = Liabilities + Net Assets</strong> must hold.
+            Use <strong>"Auto-calculate Net Assets"</strong> to auto-fill the equity offset, then post.
           </div>
         </div>
 
@@ -827,9 +980,9 @@ export default function OpeningBalancePage() {
                   )}
                   style={{ gridTemplateColumns: "1fr 160px 120px 70px 140px 36px" }}
                 >
-                  {/* Account */}
+                  {/* Account — balance sheet only (ASSET/LIABILITY/EQUITY) */}
                   <AccountCombobox
-                    accounts={sortedCoa}
+                    accounts={balanceSheetCoa}
                     value={row.accountId}
                     onChange={(id) => handleAccountSelect(row.id, id)}
                     onAddNew={() => handleAddNew(row.id)}
@@ -903,6 +1056,89 @@ export default function OpeningBalancePage() {
           </div>
         </div>
 
+        {/* ── Validation Checklist ─────────────────────────────────────────────── */}
+        {activeRows.length > 0 && (
+          <div className="rounded-xl border border-gray-200 bg-gray-50/80 px-5 py-4">
+            <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-3">Validation Checklist</p>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {[
+                { ok: !hasIncomeExpenseAccounts, label: "Balance sheet accounts only" },
+                { ok: !missingAccount,           label: "All rows have an account" },
+                { ok: !missingFund,              label: "All rows have a fund" },
+                { ok: isBalanced,                label: "Total Debits = Total Credits" },
+                { ok: accountingEquationOk,      label: "Assets = Liabilities + Net Assets" },
+                { ok: !futureDateError,          label: "Valid opening date" },
+              ].map(({ ok, label }) => (
+                <div key={label} className={cn(
+                  "flex items-center gap-2 text-xs px-3 py-2 rounded-lg border",
+                  ok
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                    : "border-red-200 bg-red-50 text-red-700"
+                )}>
+                  {ok
+                    ? <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                    : <ShieldAlert className="h-3.5 w-3.5 shrink-0 text-red-500" />
+                  }
+                  {label}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── Accounting Equation Panel ─────────────────────────────────────────── */}
+        {(eqAssets > 0 || eqLiabilities > 0 || eqNetAssets > 0) && (
+          <div className={cn(
+            "rounded-xl border-2 px-5 py-4 transition-colors",
+            accountingEquationOk ? "border-emerald-200 bg-emerald-50/50" : "border-amber-200 bg-amber-50/50"
+          )}>
+            <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-3">Statement of Financial Position (Accounting Equation)</p>
+            <div className="flex flex-wrap items-center gap-3 justify-center">
+              {/* Assets */}
+              <div className="text-center min-w-[120px]">
+                <p className="text-[10px] font-semibold text-blue-700 uppercase tracking-wide">Total Assets</p>
+                <p className="text-xl font-bold tabular-nums text-blue-700 mt-0.5">{fmt(eqAssets)}</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">Debit-normal</p>
+              </div>
+              <span className="text-2xl text-muted-foreground font-light">=</span>
+              {/* Liabilities */}
+              <div className="text-center min-w-[120px]">
+                <p className="text-[10px] font-semibold text-orange-700 uppercase tracking-wide">Total Liabilities</p>
+                <p className="text-xl font-bold tabular-nums text-orange-700 mt-0.5">{fmt(eqLiabilities)}</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">Credit-normal</p>
+              </div>
+              <span className="text-2xl text-muted-foreground font-light">+</span>
+              {/* Net Assets */}
+              <div className="text-center min-w-[120px]">
+                <p className="text-[10px] font-semibold text-violet-700 uppercase tracking-wide">Net Assets</p>
+                <p className="text-xl font-bold tabular-nums text-violet-700 mt-0.5">{fmt(eqNetAssets)}</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">Credit-normal</p>
+              </div>
+              {/* Gap / Status */}
+              {!accountingEquationOk && eqAssets > 0 && (
+                <div className="flex flex-col items-center gap-2 ml-4">
+                  <p className="text-xs text-amber-700 font-semibold">
+                    Gap: {fmt(Math.abs(equityGap))} — net assets {equityGap > 0 ? "under" : "over"}stated
+                  </p>
+                  <button
+                    onClick={handleAutoNetAssets}
+                    disabled={balanceSheetCoa.filter(a => a.type === "EQUITY").length === 0}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-violet-600 hover:bg-violet-700 text-white transition-colors disabled:opacity-50"
+                    title={balanceSheetCoa.filter(a => a.type === "EQUITY").length === 0 ? "Add an equity/net assets account first" : ""}
+                  >
+                    <Wand2 className="h-3.5 w-3.5" /> Auto-calculate Net Assets
+                  </button>
+                </div>
+              )}
+              {accountingEquationOk && eqAssets > 0 && (
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-100 border border-emerald-300 text-emerald-800 text-xs font-semibold ml-2">
+                  <CheckCircle2 className="h-3.5 w-3.5" /> Equation balanced
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* ── Balance Footer ────────────────────────────────────────────────────── */}
         <div className={cn(
           "rounded-xl border-2 px-6 py-4 transition-all",
@@ -961,11 +1197,16 @@ export default function OpeningBalancePage() {
           </div>
 
           {/* Validation hints */}
-          {!isBalanced && (missingAccount || missingFund || futureDateError) && (
+          {(!canPost && activeRows.length > 0) && (
             <ul className="mt-3 space-y-0.5 border-t border-gray-200 pt-3">
               {futureDateError && (
                 <li className="text-xs text-red-700 flex items-center gap-1.5">
                   <span className="w-1 h-1 rounded-full bg-red-500 shrink-0" /> Opening balance date cannot be in the future
+                </li>
+              )}
+              {hasIncomeExpenseAccounts && (
+                <li className="text-xs text-red-700 flex items-center gap-1.5">
+                  <span className="w-1 h-1 rounded-full bg-red-500 shrink-0" /> Revenue/expense accounts are not allowed — remove them and use balance sheet accounts only
                 </li>
               )}
               {missingAccount && (
@@ -976,6 +1217,11 @@ export default function OpeningBalancePage() {
               {missingFund && (
                 <li className="text-xs text-amber-700 flex items-center gap-1.5">
                   <span className="w-1 h-1 rounded-full bg-amber-500 shrink-0" /> One or more rows is missing a fund
+                </li>
+              )}
+              {isBalanced && !accountingEquationOk && (
+                <li className="text-xs text-amber-700 flex items-center gap-1.5">
+                  <span className="w-1 h-1 rounded-full bg-amber-500 shrink-0" /> Debits = Credits but Assets ≠ Liabilities + Net Assets — use "Auto-calculate Net Assets" to fix
                 </li>
               )}
             </ul>

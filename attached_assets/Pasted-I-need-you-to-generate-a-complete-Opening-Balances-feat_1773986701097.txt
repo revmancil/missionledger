@@ -1,0 +1,77 @@
+I need you to generate a complete “Opening Balances” feature for a nonprofit fund accounting platform (similar to Aplos, QuickBooks, or Sage Intacct). This must follow GAAP and nonprofit fund accounting rules.
+
+SYSTEM REQUIREMENTS
+-------------------
+1. Opening balances must be stored as a dedicated journal entry type:
+   - entry_type = "OPENING_BALANCE"
+   - locked to a single conversion date
+   - cannot be edited after finalization without admin override
+
+2. Only balance sheet accounts are allowed:
+   - Assets
+   - Liabilities
+   - Net Assets (WDR/DR)
+   Block revenue and expense accounts.
+
+3. Each line must be tagged to a fund. Fund balances must be derived:
+   fund_balance = sum(opening_balance_lines for that fund)
+
+4. The system must auto-generate the net asset offset:
+   net_assets = total_assets - total_liabilities
+
+5. Opening balances must not appear as activity in the Statement of Activities. They must appear only as:
+   - Beginning balances in fund rollforwards
+   - Beginning balances in the Statement of Financial Position
+
+6. Multi-fund bank accounts must be supported.
+
+7. Include a validation engine that checks:
+   - Assets = Liabilities + Net Assets
+   - No fund is negative unless allowed
+   - No revenue/expense accounts used
+   - No unassigned funds
+   - No missing offsets
+
+8. Include an import template for migrations from Aplos/QuickBooks.
+
+TECHNICAL REQUIREMENTS
+----------------------
+Stack: Next.js, Prisma ORM, PostgreSQL, TypeScript.
+
+Generate:
+1. Database schema:
+   - accounts
+   - funds
+   - opening_balance_entries
+   - opening_balance_lines
+   - audit_log
+
+2. Prisma models for all tables.
+
+3. API routes:
+   - POST /opening-balances
+   - PUT /opening-balances/:id
+   - POST /opening-balances/validate
+   - POST /opening-balances/finalize
+
+4. Validation logic:
+   - account type enforcement
+   - fund assignment enforcement
+   - balance equation enforcement
+   - auto-calculation of net assets
+
+5. UI components (React/Next.js):
+   - Opening Balance Wizard
+   - Fund allocation grid
+   - Account picker (balance sheet only)
+   - Validation summary panel
+   - Finalization screen
+
+6. Reporting integration:
+   - Beginning balances for each fund
+   - Beginning net assets (WDR/DR)
+   - Exclude from activity reports
+
+7. Provide all code: schema, API, components, and helper functions.
+
+Deliver the full implementation.

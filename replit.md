@@ -21,7 +21,15 @@ MissionLedger is a full-stack nonprofit financial management SaaS app for church
 - **Reports**: P&L, Balance Sheet, Cash Flow, Budget vs Actual
 - **Bank Reconciliation**: 4-phase module (history → setup → workspace → done); two-column cleared/uncleared table, live math footer, Difference badge, locks cleared transactions as RECONCILED
 - **Executive Dashboard**: KPI cards (Total Cash, Net Monthly Income, Budget %, Monthly Deposits), spending by category donut, 6-month income/expenses bar chart, budget tracker with over-budget alerts, recent activity feed
-- **Opening Balance Wizard**: Three-column wizard (Assets 1000s / Liabilities 2000s / Equity 3000s); accounting equation check Assets = Liabilities + Equity; Cash/Accrual toggle (Cash hides Liabilities column); creates a posted journal entry on finalize; stores `accountingMethod` on the company record; "Edit Balances" re-voids and replaces the prior entry
+- **Opening Balance Wizard**: GAAP-compliant double-entry wizard with:
+  - Balance-sheet-only account picker (ASSET/LIABILITY/EQUITY — revenue/expense accounts blocked)
+  - Live accounting equation panel: Assets = Liabilities + Net Assets with color-coded totals
+  - Auto-calculate Net Assets button: computes equity offset and creates/updates the equity row
+  - 6-item validation checklist (green/red shield icons) covering all posting prerequisites
+  - CSV template download (pre-filled example with all 5 columns) and CSV import (parses and populates rows)
+  - Cash/Accrual method toggle; stores `accountingMethod` on the company record
+  - Finalize posts a journal entry with `sourceType = OPENING_BALANCE`; re-finalize voids and replaces prior entry
+  - Force Sync endpoint and Global Recalculate (replays all GL entries to reset bank balances)
 - **Stripe Billing** (`/billing`): Subscription management page showing current plan status (TRIAL/ACTIVE/etc.) and three pricing tiers (Starter $19/mo, Professional $49/mo, Enterprise $99/mo). Checkout via Stripe Checkout sessions; billing portal for existing subscribers. Stripe products seeded via `src/seeds/stripe-products.ts`. Uses Replit native Stripe connector for credentials.
 - **Plaid Bank Linking**: Each bank account card on `/bank-accounts` has a "Link Bank via Plaid" button. On click, fetches a Plaid Link token (`POST /api/plaid/create-link-token`), opens Plaid Link modal, exchanges the public token (`POST /api/plaid/exchange-token`), stores `plaidAccessToken` + `plaidItemId` + `plaidInstitutionName` + `isPlaidLinked` on the bank account. Sync button (`POST /api/plaid/sync/:id`) fetches 90 days of transactions. Unlink via `DELETE /api/plaid/unlink/:id`. Uses sandbox credentials.
 - **Responsive Design**: Full mobile + tablet support — sidebar collapses to a slide-over drawer with hamburger toggle on mobile; all tables wrapped in horizontal scroll containers; form grids stack to single column on small screens; page headers wrap instead of overflowing
