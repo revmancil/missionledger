@@ -3,7 +3,7 @@ import { format, parseISO } from "date-fns";
 import { toast } from "sonner";
 import {
   Plus, ChevronDown, ChevronUp, CheckCircle, Circle,
-  Ban, RefreshCw, Edit, Wallet, Scissors, Trash2, Search,
+  RefreshCw, Edit, Wallet, Scissors, Trash2, Search,
   AlertCircle, CheckCheck, Lock, FileText,
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -66,6 +66,7 @@ interface Transaction {
   checkNumber: string | null; referenceNumber: string | null; memo: string | null;
   isVoid: boolean; isSplit: boolean; isClosed?: boolean;
   journalEntryId: string | null;
+  plaidTransactionId?: string | null;
   chartAccount: ChartAccount | null;
   fund: Fund | null; bankAccount: BankAccount | null; vendor: Vendor | null;
   splits: Array<{ id: string; chartAccountId: string | null; vendorId: string | null; amount: number; memo: string | null; chartAccount: ChartAccount | null; vendor: Vendor | null; }>;
@@ -854,10 +855,10 @@ export default function BankRegisterPage() {
                                 className="p-1 rounded hover:bg-gray-100 text-muted-foreground hover:text-blue-600">
                                 <Edit className="h-4 w-4" />
                               </button>
-                              <button title="Void"
+                              <button title="Void / Delete"
                                 onClick={(e) => { e.stopPropagation(); setDeleteTarget(tx); }}
                                 className="p-1 rounded hover:bg-red-50 text-muted-foreground hover:text-red-600">
-                                <Ban className="h-4 w-4" />
+                                <Trash2 className="h-4 w-4" />
                               </button>
                             </>
                           )}
@@ -1021,11 +1022,25 @@ export default function BankRegisterPage() {
               </div>
               <div>
                 <Label className="text-xs">Bank Total *</Label>
-                <Input
-                  type="number" step="0.01" placeholder="0.00"
-                  value={form.amount}
-                  onChange={(e) => setForm({ ...form, amount: e.target.value })}
-                />
+                {editTx?.plaidTransactionId ? (
+                  <div className="relative">
+                    <Input
+                      type="number" step="0.01"
+                      value={form.amount}
+                      readOnly
+                      className="bg-slate-50 text-muted-foreground cursor-not-allowed pr-14"
+                    />
+                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-semibold text-blue-600 bg-blue-50 border border-blue-200 rounded px-1 py-0.5 leading-none">
+                      Plaid
+                    </span>
+                  </div>
+                ) : (
+                  <Input
+                    type="number" step="0.01" placeholder="0.00"
+                    value={form.amount}
+                    onChange={(e) => setForm({ ...form, amount: e.target.value })}
+                  />
+                )}
               </div>
               <div>
                 <Label className="text-xs">Status</Label>
@@ -1280,7 +1295,15 @@ export default function BankRegisterPage() {
             <Button variant="outline" onClick={() => setShowForm(false)}>Cancel</Button>
             <Button
               onClick={handleSave}
-              disabled={saving || !form.date || !form.payee || !form.amount || !splitValid}
+              disabled={
+                saving ||
+                !form.date ||
+                !form.payee ||
+                !form.amount ||
+                !splitValid ||
+                (!form.isSplit && !form.chartAccountId) ||
+                (!form.isSplit && !form.fundId)
+              }
               className="bg-[hsl(210,60%,25%)] hover:bg-[hsl(210,60%,20%)] text-white"
             >
               {saving ? "Saving\u2026" : editTx ? "Save Changes" : "Add Transaction"}
@@ -1315,17 +1338,16 @@ export default function BankRegisterPage() {
       <AlertDialog open={!!deleteTarget} onOpenChange={(o) => { if (!o) setDeleteTarget(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Void Transaction?</AlertDialogTitle>
+            <AlertDialogTitle>Delete Transaction?</AlertDialogTitle>
             <AlertDialogDescription>
-              This marks <strong>{deleteTarget?.payee}</strong> ({fmtAmt(deleteTarget?.amount ?? 0)}) as{" "}
-              <strong>VOID</strong>. The record is kept for audit purposes and cannot be deleted.
+              Are you sure? This will remove this record from the General Ledger and update your Bank Balance.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction className="bg-red-600 hover:bg-red-700"
               onClick={() => deleteTarget && handleVoid(deleteTarget)}>
-              Void Transaction
+              Delete
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
