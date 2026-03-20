@@ -32,8 +32,12 @@ export default function RegisterPage() {
     <div className="min-h-screen flex items-center justify-center bg-background p-4 relative overflow-hidden">
       <Card className="w-full max-w-xl relative z-10 shadow-2xl border-border bg-card animate-slide-up">
         <CardHeader className="text-center pb-6">
-          <div className="w-12 h-12 bg-primary rounded-xl mx-auto flex items-center justify-center text-primary-foreground mb-4">
-            <Building2 className="w-6 h-6" />
+          <div className="flex justify-center mb-2">
+            <img
+              src={`${import.meta.env.BASE_URL}images/logo.png`}
+              alt="MissionLedger"
+              className="h-16 w-auto object-contain"
+            />
           </div>
           <CardTitle className="text-2xl font-display font-bold">Register Organization</CardTitle>
           <CardDescription>Setup your new MissionLedger account</CardDescription>

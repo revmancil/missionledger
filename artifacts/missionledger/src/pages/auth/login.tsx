@@ -29,8 +29,12 @@ export default function LoginPage() {
       
       <Card className="w-full max-w-md relative z-10 shadow-2xl shadow-black/5 border-border/50 bg-card/95 backdrop-blur-xl animate-scale-in">
         <CardHeader className="space-y-2 text-center pb-6">
-          <div className="w-12 h-12 bg-primary rounded-xl mx-auto flex items-center justify-center text-primary-foreground mb-2 shadow-lg shadow-primary/20">
-            <Building2 className="w-6 h-6" />
+          <div className="flex justify-center mb-1">
+            <img
+              src={`${import.meta.env.BASE_URL}images/logo.png`}
+              alt="MissionLedger"
+              className="h-20 w-auto object-contain"
+            />
           </div>
           <CardTitle className="text-2xl font-display font-bold">Welcome back</CardTitle>
           <CardDescription>Enter your details to access your ledger</CardDescription>

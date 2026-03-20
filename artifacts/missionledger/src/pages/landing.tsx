@@ -6,9 +6,8 @@ export default function LandingPage() {
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <header className="px-6 py-4 flex items-center justify-between sticky top-0 bg-background/80 backdrop-blur-md z-50 border-b border-border/50">
-        <div className="flex items-center gap-2">
-          <img src={`${import.meta.env.BASE_URL}images/logo-icon.png`} alt="Logo" className="w-8 h-8 rounded-lg" />
-          <span className="font-display font-bold text-xl text-primary">MissionLedger</span>
+        <div className="flex items-center">
+          <img src={`${import.meta.env.BASE_URL}images/logo.png`} alt="MissionLedger" className="h-10 w-auto object-contain" />
         </div>
         <div className="flex items-center gap-4">
           <Link href="/login" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
