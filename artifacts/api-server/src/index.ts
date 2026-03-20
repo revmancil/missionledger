@@ -17,6 +17,63 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
+async function patchStripeEnums() {
+  // pg-node-migrations sends the full SQL file as one query(), so PostgreSQL
+  // parses ALL statements at once. Any CREATE TABLE that references a user-defined
+  // type fails at parse time if the type was scheduled to be created by an earlier
+  // DO $$ block in the same file. Pre-creating the enums here as separate queries
+  // guarantees they exist before the migration runner's parse step.
+  try {
+    await pool.query(`CREATE SCHEMA IF NOT EXISTS stripe`);
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_type t
+          JOIN pg_namespace n ON t.typnamespace = n.oid
+          WHERE t.typname = 'subscription_status' AND n.nspname = 'stripe'
+        ) THEN
+          CREATE TYPE stripe.subscription_status AS ENUM (
+            'trialing','active','canceled','incomplete',
+            'incomplete_expired','past_due','unpaid'
+          );
+        END IF;
+      END $$;
+    `);
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_type t
+          JOIN pg_namespace n ON t.typnamespace = n.oid
+          WHERE t.typname = 'invoice_status' AND n.nspname = 'stripe'
+        ) THEN
+          CREATE TYPE stripe.invoice_status AS ENUM (
+            'draft','open','paid','uncollectible','void'
+          );
+        END IF;
+      END $$;
+    `);
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_type t
+          JOIN pg_namespace n ON t.typnamespace = n.oid
+          WHERE t.typname = 'subscription_schedule_status' AND n.nspname = 'stripe'
+        ) THEN
+          CREATE TYPE stripe.subscription_schedule_status AS ENUM (
+            'not_started','active','completed','released','canceled'
+          );
+        END IF;
+      END $$;
+    `);
+    console.log("Stripe enum pre-patch complete");
+  } catch (err: any) {
+    console.error("Stripe enum pre-patch error:", err.message);
+  }
+}
+
 async function initStripe() {
   const hasConnector = !!process.env.REPLIT_CONNECTORS_HOSTNAME;
   const hasFallbackKey = !!process.env.STRIPE_SECRET_KEY;
@@ -26,6 +83,7 @@ async function initStripe() {
   }
   const databaseUrl = process.env.DATABASE_URL!;
   try {
+    await patchStripeEnums();
     console.log("Initializing Stripe schema...");
     await runMigrations({ databaseUrl });
     console.log("Stripe schema ready");
