@@ -1,6 +1,6 @@
 import { Router } from "express";
-import { db, accounts, chartOfAccounts, journalEntries, journalEntryLines, donations, expenses, budgets, budgetLines, glEntries, funds } from "@workspace/db";
-import { eq, and, gte, lte, inArray, sql } from "drizzle-orm";
+import { db, accounts, chartOfAccounts, journalEntries, journalEntryLines, donations, expenses, budgets, budgetLines, glEntries, funds, transactions, transactionSplits } from "@workspace/db";
+import { eq, and, gte, lte, inArray, sql, isNotNull, isNull, ne } from "drizzle-orm";
 import { requireAuth } from "../lib/auth";
 
 const router = Router();
@@ -705,6 +705,322 @@ router.get("/transaction-register", requireAuth, async (req, res) => {
     });
   } catch (error) {
     console.error("Transaction register error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 990 COMPLIANCE ENGINE
+// ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Map an expense account code to an IRS Form 990 / 990-EZ line number.
+ * Falls back to "Line 16 — Other Expenses" when no rule matches.
+ */
+function irsLineForCode(code: string, name: string): { line: string; label: string } {
+  const n = parseInt(code, 10);
+  const lower = name.toLowerCase();
+
+  // Keyword-first shortcuts (highest priority)
+  if (/grant|award|scholarship|assistance/i.test(lower))
+    return { line: "Line 10", label: "Grants and Similar Amounts Paid" };
+  if (/benefit.*member|member.*benefit/i.test(lower))
+    return { line: "Line 11", label: "Benefits Paid to Members" };
+  if (/salary|salaries|wage|compensation|payroll|personnel/i.test(lower))
+    return { line: "Line 12", label: "Salaries, Compensation & Employee Benefits" };
+  if (/benefit|insurance|health|retirement|401k|pension/i.test(lower))
+    return { line: "Line 12", label: "Salaries, Compensation & Employee Benefits" };
+  if (/professional|accounting|audit|legal|consulting|contractor|fees/i.test(lower))
+    return { line: "Line 13", label: "Professional Fees & Contract Services" };
+  if (/occupancy|rent|utilities|electric|gas|water|maintenance|janitorial/i.test(lower))
+    return { line: "Line 14", label: "Occupancy, Rent, Utilities & Maintenance" };
+  if (/printing|publication|postage|shipping|mailing/i.test(lower))
+    return { line: "Line 15", label: "Printing, Publications, Postage & Shipping" };
+
+  // Code-range fallbacks
+  if (n >= 8000 && n <= 8099) return { line: "Line 10", label: "Grants and Similar Amounts Paid" };
+  if (n >= 8100 && n <= 8299) return { line: "Line 12", label: "Salaries, Compensation & Employee Benefits" };
+  if (n >= 8300 && n <= 8499) return { line: "Line 13", label: "Professional Fees & Contract Services" };
+  if (n >= 8500 && n <= 8599) return { line: "Line 14", label: "Occupancy, Rent, Utilities & Maintenance" };
+  if (n >= 8600 && n <= 8699) return { line: "Line 15", label: "Printing, Publications, Postage & Shipping" };
+
+  return { line: "Line 16", label: "Other Expenses" };
+}
+
+// ── GET /reports/990-readiness ─────────────────────────────────────────────
+// Returns the readiness score (% of expense GL entries that have a
+// functional_type tag) plus a list of untagged expense transactions.
+router.get("/990-readiness", requireAuth, async (req, res) => {
+  try {
+    const { companyId } = (req as any).user;
+    const { startDate, endDate } = req.query;
+
+    const start = startDate ? new Date(startDate as string) : new Date(new Date().getFullYear(), 0, 1);
+    const end   = endDate   ? new Date(endDate   as string) : new Date();
+    const endOfDay = new Date(end); endOfDay.setHours(23, 59, 59, 999);
+
+    // All EXPENSE-side GL entries in the period (exclude bank/asset entries for the same tx)
+    const expenseRows = await db.execute(sql`
+      SELECT
+        g.id,
+        g.transaction_id,
+        g.journal_entry_id,
+        g.source_type,
+        g.account_code,
+        g.account_name,
+        g.amount,
+        g.date,
+        g.functional_type,
+        g.description,
+        g.fund_name
+      FROM gl_entries g
+      JOIN chart_of_accounts c ON c.id = g.account_id
+      WHERE g.company_id = ${companyId}
+        AND g.is_void = false
+        AND c.coa_type = 'EXPENSE'
+        AND g.date >= ${start}
+        AND g.date <= ${endOfDay}
+      ORDER BY g.date DESC
+    `);
+
+    const rows = expenseRows.rows as any[];
+    const total = rows.length;
+    const tagged = rows.filter((r) => r.functional_type).length;
+    const score = total === 0 ? 100 : Math.round((tagged / total) * 100);
+
+    // Build the untagged list — group by transaction for a cleaner display
+    const untagged = rows
+      .filter((r) => !r.functional_type)
+      .map((r) => ({
+        glEntryId: r.id,
+        transactionId: r.transaction_id,
+        journalEntryId: r.journal_entry_id,
+        sourceType: r.source_type,
+        date: r.date instanceof Date ? r.date.toISOString() : r.date,
+        description: r.description,
+        accountCode: r.account_code,
+        accountName: r.account_name,
+        amount: parseFloat(r.amount),
+        fundName: r.fund_name,
+      }));
+
+    res.json({
+      score,
+      total,
+      tagged,
+      untagged: untagged.length,
+      untaggedItems: untagged,
+      period: { startDate: start.toISOString(), endDate: endOfDay.toISOString() },
+    });
+  } catch (err) {
+    console.error("990 readiness error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ── GET /reports/990-preparer ──────────────────────────────────────────────
+// Returns expenses grouped by IRS line code with functional breakdown,
+// plus the Public Support Test calculation.
+router.get("/990-preparer", requireAuth, async (req, res) => {
+  try {
+    const { companyId } = (req as any).user;
+    const { startDate, endDate } = req.query;
+
+    const start = startDate ? new Date(startDate as string) : new Date(new Date().getFullYear(), 0, 1);
+    const end   = endDate   ? new Date(endDate   as string) : new Date();
+    const endOfDay = new Date(end); endOfDay.setHours(23, 59, 59, 999);
+
+    // ── Expense rows with functional breakdown ──────────────────────────────
+    const expenseRows = await db.execute(sql`
+      SELECT
+        g.account_code,
+        g.account_name,
+        g.amount,
+        g.functional_type
+      FROM gl_entries g
+      JOIN chart_of_accounts c ON c.id = g.account_id
+      WHERE g.company_id = ${companyId}
+        AND g.is_void = false
+        AND c.coa_type = 'EXPENSE'
+        AND g.date >= ${start}
+        AND g.date <= ${endOfDay}
+    `);
+
+    // ── Income rows for Public Support Test ────────────────────────────────
+    const incomeRows = await db.execute(sql`
+      SELECT
+        c.code AS account_code,
+        c.name AS account_name,
+        COALESCE(SUM(CASE WHEN g.entry_type = 'CREDIT' THEN g.amount ELSE -g.amount END), 0) AS net_amount
+      FROM chart_of_accounts c
+      LEFT JOIN gl_entries g
+        ON g.account_id = c.id
+        AND g.company_id = ${companyId}
+        AND g.is_void = false
+        AND g.date >= ${start}
+        AND g.date <= ${endOfDay}
+      WHERE c.company_id = ${companyId}
+        AND c.coa_type = 'INCOME'
+        AND c.is_active = true
+      GROUP BY c.code, c.name
+    `);
+
+    // Build IRS line groups
+    const lineMap: Record<string, {
+      line: string; label: string;
+      programService: number; managementGeneral: number; fundraising: number; untagged: number; total: number;
+      accounts: Record<string, { code: string; name: string; total: number }>;
+    }> = {};
+
+    for (const row of expenseRows.rows as any[]) {
+      const { line, label } = irsLineForCode(String(row.account_code), String(row.account_name));
+      if (!lineMap[line]) {
+        lineMap[line] = { line, label, programService: 0, managementGeneral: 0, fundraising: 0, untagged: 0, total: 0, accounts: {} };
+      }
+      const amount = parseFloat(row.amount);
+      lineMap[line].total += amount;
+      if (row.functional_type === "PROGRAM_SERVICE")       lineMap[line].programService    += amount;
+      else if (row.functional_type === "MANAGEMENT_GENERAL") lineMap[line].managementGeneral += amount;
+      else if (row.functional_type === "FUNDRAISING")       lineMap[line].fundraising       += amount;
+      else                                                   lineMap[line].untagged          += amount;
+
+      // Per-account sub-detail
+      const key = row.account_code;
+      if (!lineMap[line].accounts[key]) {
+        lineMap[line].accounts[key] = { code: row.account_code, name: row.account_name, total: 0 };
+      }
+      lineMap[line].accounts[key].total += amount;
+    }
+
+    // Convert to sorted array
+    const irsLines = Object.values(lineMap)
+      .sort((a, b) => a.line.localeCompare(b.line))
+      .map((l) => ({ ...l, accounts: Object.values(l.accounts) }));
+
+    const grandTotal = irsLines.reduce((s, l) => s + l.total, 0);
+    const totalProgram = irsLines.reduce((s, l) => s + l.programService, 0);
+    const totalMgmt    = irsLines.reduce((s, l) => s + l.managementGeneral, 0);
+    const totalFundraising = irsLines.reduce((s, l) => s + l.fundraising, 0);
+
+    // ── Public Support Test ────────────────────────────────────────────────
+    // IRS 501(c)(3) public support = contributions, government grants
+    // Test: publicSupport / totalRevenue >= 33.33%
+    const allIncome = incomeRows.rows as any[];
+    const totalRevenue = allIncome.reduce((s, r) => s + parseFloat(r.net_amount), 0);
+
+    const publicSupportAccounts = allIncome.filter((r) =>
+      /contribut|donat|grant|gift|pledge/i.test(String(r.account_name))
+      || (parseInt(r.account_code, 10) >= 4000 && parseInt(r.account_code, 10) <= 4199)
+    );
+    const totalPublicSupport = publicSupportAccounts.reduce((s, r) => s + parseFloat(r.net_amount), 0);
+    const publicSupportPct = totalRevenue > 0 ? (totalPublicSupport / totalRevenue) * 100 : 0;
+    const passesPublicSupportTest = publicSupportPct >= 33.33;
+
+    res.json({
+      period: { startDate: start.toISOString(), endDate: endOfDay.toISOString() },
+      irsLines,
+      totals: {
+        grandTotal,
+        totalProgram,
+        totalMgmt,
+        totalFundraising,
+      },
+      publicSupportTest: {
+        totalRevenue,
+        totalPublicSupport,
+        publicSupportPct: Math.round(publicSupportPct * 10) / 10,
+        threshold: 33.33,
+        passes: passesPublicSupportTest,
+        publicSupportAccounts: publicSupportAccounts.map((r) => ({
+          code: r.account_code,
+          name: r.account_name,
+          amount: parseFloat(r.net_amount),
+        })),
+      },
+    });
+  } catch (err) {
+    console.error("990 preparer error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ── GET /reports/990-export ────────────────────────────────────────────────
+// Returns a CSV file formatted for 990 CPA preparation software.
+router.get("/990-export", requireAuth, async (req, res) => {
+  try {
+    const { companyId } = (req as any).user;
+    const { startDate, endDate } = req.query;
+
+    const start = startDate ? new Date(startDate as string) : new Date(new Date().getFullYear(), 0, 1);
+    const end   = endDate   ? new Date(endDate   as string) : new Date();
+    const endOfDay = new Date(end); endOfDay.setHours(23, 59, 59, 999);
+
+    const rows = await db.execute(sql`
+      SELECT
+        g.date,
+        g.description,
+        g.account_code,
+        g.account_name,
+        g.fund_name,
+        g.amount,
+        g.entry_type,
+        g.functional_type,
+        g.source_type,
+        c.coa_type AS account_type
+      FROM gl_entries g
+      JOIN chart_of_accounts c ON c.id = g.account_id
+      WHERE g.company_id = ${companyId}
+        AND g.is_void = false
+        AND g.date >= ${start}
+        AND g.date <= ${endOfDay}
+      ORDER BY g.date, g.account_code
+    `);
+
+    const irs = (code: string, name: string) => irsLineForCode(code, name).line;
+    const functionalLabel: Record<string, string> = {
+      PROGRAM_SERVICE: "Program Service",
+      MANAGEMENT_GENERAL: "Management & General",
+      FUNDRAISING: "Fundraising",
+    };
+
+    const lines: string[] = [
+      [
+        "Date",
+        "Description",
+        "Account Code",
+        "Account Name",
+        "Account Type",
+        "Fund",
+        "Entry Type",
+        "Amount",
+        "Functional Type (990)",
+        "IRS 990 Line",
+      ].join(","),
+    ];
+
+    for (const r of rows.rows as any[]) {
+      const row = [
+        new Date(r.date).toISOString().substring(0, 10),
+        `"${String(r.description ?? "").replace(/"/g, '""')}"`,
+        r.account_code,
+        `"${String(r.account_name).replace(/"/g, '""')}"`,
+        r.account_type,
+        `"${String(r.fund_name ?? "").replace(/"/g, '""')}"`,
+        r.entry_type,
+        parseFloat(r.amount).toFixed(2),
+        functionalLabel[r.functional_type] ?? "",
+        r.account_type === "EXPENSE" ? irs(String(r.account_code), String(r.account_name)) : "",
+      ].join(",");
+      lines.push(row);
+    }
+
+    const csv = lines.join("\r\n");
+    const year = start.getFullYear();
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader("Content-Disposition", `attachment; filename="990-export-${year}.csv"`);
+    res.send(csv);
+  } catch (err) {
+    console.error("990 export error:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 });

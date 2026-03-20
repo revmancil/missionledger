@@ -9,6 +9,11 @@ export const glSourceTypeEnum = pgEnum("gl_source_type", [
   "OPENING_BALANCE",
   "MANUAL_JE",
 ]);
+export const glFunctionalTypeEnum = pgEnum("gl_functional_type", [
+  "PROGRAM_SERVICE",
+  "MANAGEMENT_GENERAL",
+  "FUNDRAISING",
+]);
 
 export const glEntries = pgTable("gl_entries", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -26,6 +31,7 @@ export const glEntries = pgTable("gl_entries", {
   description: text("description"),
   date: timestamp("date").notNull(),
   isVoid: boolean("is_void").notNull().default(false),
+  functionalType: glFunctionalTypeEnum("functional_type"), // 990 classification (nullable)
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

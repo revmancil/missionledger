@@ -9,6 +9,7 @@ export const transactionSplits = pgTable("transaction_splits", {
   vendorId: text("vendor_id"),
   amount: real("amount").notNull(),
   memo: text("memo"),
+  functionalType: text("functional_type"), // 990 tag: PROGRAM_SERVICE | MANAGEMENT_GENERAL | FUNDRAISING
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),

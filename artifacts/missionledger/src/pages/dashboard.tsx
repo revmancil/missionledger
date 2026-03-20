@@ -7,10 +7,11 @@ import {
 import {
   TrendingUp, TrendingDown, Wallet, Target,
   ArrowUpRight, ArrowDownRight, RefreshCw, Scissors,
-  CheckCircle, Circle, CheckCheck,
+  CheckCircle, Circle, CheckCheck, ShieldCheck, AlertTriangle, X,
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { cn } from "@/lib/utils";
+import { useLocation } from "wouter";
 
 const BASE = import.meta.env.BASE_URL;
 
@@ -155,18 +156,43 @@ function TxStatusIcon({ status }: { status: string }) {
   return <Circle className="h-4 w-4 text-amber-400 shrink-0" />;
 }
 
+interface Readiness990 {
+  score: number;
+  total: number;
+  tagged: number;
+  untagged: number;
+  untaggedItems: Array<{
+    glEntryId: string;
+    transactionId: string | null;
+    sourceType: string;
+    date: string;
+    description: string | null;
+    accountCode: string;
+    accountName: string;
+    amount: number;
+    fundName: string | null;
+  }>;
+}
+
 // ── Main Dashboard ────────────────────────────────────────────────────────────
 export default function Dashboard() {
+  const [, navigate] = useLocation();
   const [data, setData] = useState<DashData | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+  const [readiness, setReadiness] = useState<Readiness990 | null>(null);
+  const [showFixNow, setShowFixNow] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${BASE}api/dashboard`, { credentials: "include" });
-      if (res.ok) setData(await res.json());
+      const [dashRes, readRes] = await Promise.all([
+        fetch(`${BASE}api/dashboard`, { credentials: "include" }),
+        fetch(`${BASE}api/reports/990-readiness`, { credentials: "include" }),
+      ]);
+      if (dashRes.ok) setData(await dashRes.json());
+      if (readRes.ok) setReadiness(await readRes.json());
     } finally { setLoading(false); }
   }, []);
 
@@ -359,6 +385,165 @@ export default function Dashboard() {
           )}
         </div>
       </div>
+
+      {/* ── 990 Readiness Widget ──────────────────────────────────────────── */}
+      {readiness && (
+        <div className={cn(
+          "rounded-2xl border shadow-sm p-5",
+          readiness.score === 100
+            ? "bg-emerald-50 border-emerald-200"
+            : readiness.score >= 80
+              ? "bg-amber-50 border-amber-200"
+              : "bg-red-50 border-red-200"
+        )}>
+          <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+            {/* Icon + title */}
+            <div className="flex items-center gap-3 flex-1">
+              <div className={cn(
+                "p-2.5 rounded-xl",
+                readiness.score === 100
+                  ? "bg-emerald-100"
+                  : readiness.score >= 80
+                    ? "bg-amber-100"
+                    : "bg-red-100"
+              )}>
+                {readiness.score === 100
+                  ? <ShieldCheck className="h-6 w-6 text-emerald-700" />
+                  : <AlertTriangle className="h-6 w-6 text-amber-600" />
+                }
+              </div>
+              <div>
+                <h3 className="font-semibold text-[hsl(210,60%,25%)]">990 Readiness Score</h3>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Functional expense tags required for IRS Form 990 / 990-EZ filing
+                </p>
+              </div>
+            </div>
+
+            {/* Score + progress */}
+            <div className="flex items-center gap-6">
+              <div className="text-center">
+                <div className={cn(
+                  "text-4xl font-bold tabular-nums",
+                  readiness.score === 100
+                    ? "text-emerald-700"
+                    : readiness.score >= 80
+                      ? "text-amber-600"
+                      : "text-red-600"
+                )}>{readiness.score}%</div>
+                <div className="text-xs text-muted-foreground mt-0.5">
+                  {readiness.tagged}/{readiness.total} tagged
+                </div>
+              </div>
+
+              <div className="w-40">
+                <div className="h-3 bg-white/60 rounded-full overflow-hidden border border-black/5">
+                  <div
+                    className={cn(
+                      "h-full rounded-full transition-all",
+                      readiness.score === 100
+                        ? "bg-emerald-500"
+                        : readiness.score >= 80
+                          ? "bg-amber-400"
+                          : "bg-red-400"
+                    )}
+                    style={{ width: `${readiness.score}%` }}
+                  />
+                </div>
+                <p className="text-[10px] text-muted-foreground mt-1 text-center">
+                  {readiness.untagged > 0
+                    ? `${readiness.untagged} expense${readiness.untagged !== 1 ? "s" : ""} missing 990 tag`
+                    : "All expenses tagged — ready to file"
+                  }
+                </p>
+              </div>
+
+              <div className="flex flex-col gap-2">
+                {readiness.untagged > 0 && (
+                  <button
+                    onClick={() => setShowFixNow(true)}
+                    className="px-4 py-2 rounded-xl text-sm font-semibold text-white bg-red-500 hover:bg-red-600 transition-colors shadow-sm"
+                  >
+                    Fix Now
+                  </button>
+                )}
+                <button
+                  onClick={() => navigate("/reports")}
+                  className="px-4 py-2 rounded-xl text-sm font-medium border border-gray-300 bg-white hover:bg-gray-50 transition-colors text-[hsl(210,60%,25%)]"
+                >
+                  View 990 Report
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Fix Now Modal ──────────────────────────────────────────────────── */}
+      {showFixNow && readiness && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between px-6 py-4 border-b">
+              <div>
+                <h2 className="text-lg font-bold text-[hsl(210,60%,25%)]">Untagged Expense Transactions</h2>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {readiness.untagged} expense{readiness.untagged !== 1 ? "s" : ""} missing a 990 Functional Type tag.
+                  Open each transaction in the Bank Register to assign the tag.
+                </p>
+              </div>
+              <button onClick={() => setShowFixNow(false)} className="p-1.5 rounded-lg hover:bg-gray-100">
+                <X className="h-5 w-5 text-muted-foreground" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto divide-y divide-gray-50">
+              {readiness.untaggedItems.length === 0 ? (
+                <div className="flex items-center justify-center py-16 text-muted-foreground text-sm italic">
+                  All expenses are tagged!
+                </div>
+              ) : (
+                readiness.untaggedItems.map((item) => (
+                  <div key={item.glEntryId} className="px-6 py-3 flex items-start gap-4">
+                    <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-medium truncate">{item.description ?? "(no description)"}</span>
+                        <span className="text-sm font-semibold text-red-600 tabular-nums shrink-0">
+                          {fmtFull(item.amount)}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-3 mt-0.5 text-xs text-muted-foreground flex-wrap">
+                        <span>{item.date ? format(new Date(item.date), "MMM d, yyyy") : "—"}</span>
+                        <span>·</span>
+                        <span>{item.accountCode} — {item.accountName}</span>
+                        {item.fundName && <><span>·</span><span>{item.fundName}</span></>}
+                      </div>
+                    </div>
+                    {item.transactionId && (
+                      <button
+                        onClick={() => {
+                          setShowFixNow(false);
+                          navigate("/bank-register");
+                        }}
+                        className="shrink-0 text-xs text-blue-600 hover:text-blue-800 font-medium underline underline-offset-2"
+                      >
+                        Edit
+                      </button>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="px-6 py-3 border-t flex justify-end">
+              <button
+                onClick={() => setShowFixNow(false)}
+                className="px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 hover:bg-gray-200 transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Budget Tracker + Activity Feed ─────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">

@@ -44,12 +44,19 @@ function fundLabel(f: Fund) {
   return f.fundType ? `${f.name} — ${FUND_TYPE_SHORT[f.fundType] ?? f.fundType}` : f.name;
 }
 interface Vendor { id: string; name: string; email?: string; phone?: string; }
+const FUNCTIONAL_TYPES = [
+  { value: "PROGRAM_SERVICE",    label: "Program Service" },
+  { value: "MANAGEMENT_GENERAL", label: "Management & General" },
+  { value: "FUNDRAISING",        label: "Fundraising" },
+];
+
 interface SplitLine {
   id: string; // local key only
   chartAccountId: string;
   vendorId: string;
   amount: string; // raw string for input
   memo: string;
+  functionalType: string;
 }
 interface Transaction {
   id: string; date: string; payee: string; amount: number;
@@ -71,7 +78,7 @@ function fmtAmt(n: number) {
 }
 
 function newSplitLine(): SplitLine {
-  return { id: crypto.randomUUID(), chartAccountId: "", vendorId: "", amount: "", memo: "" };
+  return { id: crypto.randomUUID(), chartAccountId: "", vendorId: "", amount: "", memo: "", functionalType: "" };
 }
 
 const emptyForm = {
@@ -82,6 +89,7 @@ const emptyForm = {
   chartAccountId: "", fundId: "", bankAccountId: "",
   memo: "", checkNumber: "", referenceNumber: "",
   isSplit: false,
+  functionalType: "",
   splits: [newSplitLine()],
 };
 
@@ -520,6 +528,7 @@ export default function BankRegisterPage() {
       checkNumber: tx.checkNumber ?? "",
       referenceNumber: tx.referenceNumber ?? "",
       isSplit: tx.isSplit,
+      functionalType: (tx as any).functionalType ?? "",
       splits: tx.isSplit && tx.splits.length > 0
         ? tx.splits.map((s) => ({
             id: s.id,
@@ -527,6 +536,7 @@ export default function BankRegisterPage() {
             vendorId: s.vendorId ?? "",
             amount: String(s.amount),
             memo: s.memo ?? "",
+            functionalType: (s as any).functionalType ?? "",
           }))
         : [newSplitLine()],
     });
@@ -566,12 +576,14 @@ export default function BankRegisterPage() {
         referenceNumber: form.referenceNumber || null,
         memo: form.memo || null,
         isSplit: form.isSplit,
+        functionalType: form.isSplit ? null : (form.functionalType || null),
         splits: form.isSplit
           ? form.splits.map((s, i) => ({
               chartAccountId: s.chartAccountId || null,
               vendorId: s.vendorId || null,
               amount: parseFloat(s.amount) || 0,
               memo: s.memo || null,
+              functionalType: s.functionalType || null,
               sortOrder: i,
             }))
           : [],
@@ -1114,12 +1126,36 @@ export default function BankRegisterPage() {
                   <CoaSelect
                     value={form.chartAccountId}
                     coaList={coaList}
-                    onChange={(id) => setForm((f) => ({ ...f, chartAccountId: id }))}
+                    onChange={(id) => setForm((f) => ({ ...f, chartAccountId: id, functionalType: "" }))}
                     onAddNew={() => setShowAddAccount(true)}
                   />
                 </div>
               )}
             </div>
+
+            {/* Functional Type (990) — shown only when a non-split expense account is selected */}
+            {!form.isSplit && coaList.find((a) => a.id === form.chartAccountId)?.type === "EXPENSE" && (
+              <div className="flex items-center gap-3 px-1 pt-0.5">
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-blue-700 bg-blue-50 px-2 py-1 rounded-md border border-blue-200 shrink-0">
+                  990 Tag
+                </div>
+                <div className="flex-1">
+                  <select
+                    value={form.functionalType}
+                    onChange={(e) => setForm((f) => ({ ...f, functionalType: e.target.value }))}
+                    className={cn(
+                      "w-full text-sm rounded-md border px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-300",
+                      !form.functionalType ? "border-amber-300 bg-amber-50 text-amber-700" : "border-gray-200"
+                    )}
+                  >
+                    <option value="">— Select Functional Type (required for 990) —</option>
+                    {FUNCTIONAL_TYPES.map((ft) => (
+                      <option key={ft.value} value={ft.value}>{ft.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            )}
 
             {/* ── Split Rows ──────────────────────────── */}
             {form.isSplit && (
@@ -1152,41 +1188,69 @@ export default function BankRegisterPage() {
                   <span></span>
                 </div>
 
-                {form.splits.map((split, idx) => (
-                  <div key={split.id} className="grid grid-cols-[1fr_1fr_auto_80px_32px] gap-2 items-center px-4 py-2 border-b border-violet-50">
-                    <CoaSelect
-                      value={split.chartAccountId}
-                      coaList={coaList}
-                      onChange={(id) => updateSplit(idx, "chartAccountId", id)}
-                      onAddNew={() => setShowAddAccount(true)}
-                    />
-                    <VendorCombobox
-                      value={split.vendorId}
-                      vendors={vendorList}
-                      onChange={(id, _name) => updateSplit(idx, "vendorId", id)}
-                      onAddNew={() => setShowAddVendor(true)}
-                      placeholder="Vendor (optional)"
-                    />
-                    <Input
-                      className="text-sm" placeholder="Memo"
-                      value={split.memo}
-                      onChange={(e) => updateSplit(idx, "memo", e.target.value)}
-                    />
-                    <Input
-                      className="text-sm text-right font-mono"
-                      type="number" step="0.01" placeholder="0.00"
-                      value={split.amount}
-                      onChange={(e) => updateSplit(idx, "amount", e.target.value)}
-                    />
-                    <button
-                      onClick={() => removeSplitRow(idx)}
-                      disabled={form.splits.length === 1}
-                      className="p-1 rounded hover:bg-red-50 text-muted-foreground hover:text-red-600 disabled:opacity-30"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                ))}
+                {form.splits.map((split, idx) => {
+                  const splitAccountType = coaList.find((a) => a.id === split.chartAccountId)?.type;
+                  const isExpenseSplit = splitAccountType === "EXPENSE";
+                  return (
+                    <div key={split.id} className="border-b border-violet-50">
+                      <div className="grid grid-cols-[1fr_1fr_auto_80px_32px] gap-2 items-start px-4 pt-2 pb-1">
+                        <div className="space-y-1">
+                          <CoaSelect
+                            value={split.chartAccountId}
+                            coaList={coaList}
+                            onChange={(id) => {
+                              updateSplit(idx, "chartAccountId", id);
+                              updateSplit(idx, "functionalType", "");
+                            }}
+                            onAddNew={() => setShowAddAccount(true)}
+                          />
+                          {isExpenseSplit && (
+                            <select
+                              value={split.functionalType}
+                              onChange={(e) => updateSplit(idx, "functionalType", e.target.value)}
+                              className={cn(
+                                "w-full text-xs rounded border px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-300",
+                                !split.functionalType
+                                  ? "border-amber-300 bg-amber-50 text-amber-700"
+                                  : "border-gray-200 bg-white text-gray-700"
+                              )}
+                            >
+                              <option value="">990 Functional Type…</option>
+                              {FUNCTIONAL_TYPES.map((ft) => (
+                                <option key={ft.value} value={ft.value}>{ft.label}</option>
+                              ))}
+                            </select>
+                          )}
+                        </div>
+                        <VendorCombobox
+                          value={split.vendorId}
+                          vendors={vendorList}
+                          onChange={(id, _name) => updateSplit(idx, "vendorId", id)}
+                          onAddNew={() => setShowAddVendor(true)}
+                          placeholder="Vendor (optional)"
+                        />
+                        <Input
+                          className="text-sm" placeholder="Memo"
+                          value={split.memo}
+                          onChange={(e) => updateSplit(idx, "memo", e.target.value)}
+                        />
+                        <Input
+                          className="text-sm text-right font-mono"
+                          type="number" step="0.01" placeholder="0.00"
+                          value={split.amount}
+                          onChange={(e) => updateSplit(idx, "amount", e.target.value)}
+                        />
+                        <button
+                          onClick={() => removeSplitRow(idx)}
+                          disabled={form.splits.length === 1}
+                          className="p-1 mt-1 rounded hover:bg-red-50 text-muted-foreground hover:text-red-600 disabled:opacity-30"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
 
                 <div className="px-4 py-2 flex items-center justify-between bg-white">
                   <button

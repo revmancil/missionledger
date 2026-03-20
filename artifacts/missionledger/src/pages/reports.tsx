@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-import { TrendingUp, TrendingDown, DollarSign, BookOpen, FileText, Table2, Download, FileDown } from "lucide-react";
+import { TrendingUp, TrendingDown, DollarSign, BookOpen, FileText, Table2, Download, FileDown, ShieldCheck, AlertTriangle, CheckCircle } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
@@ -108,7 +108,26 @@ const SOURCE_LABELS: Record<string, string> = {
   MANUAL_JE:       "Manual JE",
 };
 
-type Tab = "financial" | "gl" | "journal" | "register";
+// ── 990 Preparer types ─────────────────────────────────────────────────────────
+interface IrsLineAccount { code: string; name: string; total: number; }
+interface IrsLine {
+  line: string; label: string;
+  programService: number; managementGeneral: number; fundraising: number; untagged: number; total: number;
+  accounts: IrsLineAccount[];
+}
+interface PublicSupportTest {
+  totalRevenue: number; totalPublicSupport: number; publicSupportPct: number;
+  threshold: number; passes: boolean;
+  publicSupportAccounts: { code: string; name: string; amount: number; }[];
+}
+interface PreparerData {
+  period: { startDate: string; endDate: string; };
+  irsLines: IrsLine[];
+  totals: { grandTotal: number; totalProgram: number; totalMgmt: number; totalFundraising: number; };
+  publicSupportTest: PublicSupportTest;
+}
+
+type Tab = "financial" | "gl" | "journal" | "register" | "prep990";
 
 export default function ReportsPage() {
   const currentYear = new Date().getFullYear();
@@ -156,10 +175,24 @@ export default function ReportsPage() {
     tab === "register" ? `${BASE}api/reports/transaction-register?${regParams}` : null
   );
 
+  // 990 Preparer
+  const prep990Params = new URLSearchParams({ startDate: applied.startDate, endDate: applied.endDate });
+  const { data: prep990Data, isLoading: prep990Loading } = useFetch<PreparerData>(
+    tab === "prep990" ? `${BASE}api/reports/990-preparer?${prep990Params}` : null
+  );
+
   const handleApply = () => {
     setApplied({ startDate, endDate });
     setAppliedSearch({ search, minAmount: minAmt, maxAmount: maxAmt });
   };
+
+  const handleExportCpa = useCallback(() => {
+    const url = `${BASE}api/reports/990-export?year=${applied.startDate.slice(0, 4)}`;
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `990-export-${applied.startDate.slice(0, 4)}.csv`;
+    a.click();
+  }, [applied]);
 
   const chartData = [
     { name: "Revenue",   amount: profitLoss?.totalRevenue  || 0 },
@@ -633,6 +666,7 @@ export default function ReportsPage() {
   const handleDownloadPdf = tab === "financial" ? downloadFinancialPdf
     : tab === "gl"      ? downloadGlPdf
     : tab === "journal" ? downloadJournalPdf
+    : tab === "prep990" ? (() => {}) as () => void
     : downloadRegisterPdf;
 
   const handleDownloadCsv = tab === "gl"      ? downloadGl
@@ -651,6 +685,7 @@ export default function ReportsPage() {
           { id: "gl",        label: "General Ledger",       icon: <BookOpen className="w-3.5 h-3.5" /> },
           { id: "journal",   label: "General Journal",      icon: <FileText className="w-3.5 h-3.5" /> },
           { id: "register",  label: "Transaction Register", icon: <Table2 className="w-3.5 h-3.5" /> },
+          { id: "prep990",   label: "990 Prep",             icon: <ShieldCheck className="w-3.5 h-3.5" /> },
         ] as { id: Tab; label: string; icon: React.ReactNode }[]).map(t => (
           <button
             key={t.id}
@@ -704,12 +739,19 @@ export default function ReportsPage() {
           </>
         )}
         <Button onClick={handleApply} className="h-9">Apply</Button>
-        <Button variant="outline" onClick={handleDownloadPdf} className="h-9 gap-1.5">
-          <FileDown className="w-4 h-4" />Download PDF
-        </Button>
-        {handleDownloadCsv && (
+        {tab !== "prep990" && (
+          <Button variant="outline" onClick={handleDownloadPdf} className="h-9 gap-1.5">
+            <FileDown className="w-4 h-4" />Download PDF
+          </Button>
+        )}
+        {handleDownloadCsv && tab !== "prep990" && (
           <Button variant="outline" onClick={handleDownloadCsv} className="h-9 gap-1.5">
             <Download className="w-4 h-4" />Download CSV
+          </Button>
+        )}
+        {tab === "prep990" && (
+          <Button variant="outline" onClick={handleExportCpa} className="h-9 gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50">
+            <Download className="w-4 h-4" />Export for CPA
           </Button>
         )}
       </div>
@@ -1185,6 +1227,153 @@ export default function ReportsPage() {
             </div>
           )}
         </Card>
+      )}
+      {/* ══════════════════════════════════════════════════════════════════════ */}
+      {/* 990 PREP TAB                                                         */}
+      {/* ══════════════════════════════════════════════════════════════════════ */}
+      {tab === "prep990" && (
+        prep990Loading ? (
+          <div className="py-12 text-center text-muted-foreground animate-pulse">Loading 990 data…</div>
+        ) : !prep990Data ? (
+          <div className="py-12 text-center text-muted-foreground">No data. Click Apply to load.</div>
+        ) : (
+          <div className="space-y-6">
+
+            {/* ── Functional Expense Summary ─────────────────────────────────── */}
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+              {[
+                { label: "Total Expenses",       value: prep990Data.totals.grandTotal,      color: "text-foreground",    bg: "bg-card" },
+                { label: "Program Service",      value: prep990Data.totals.totalProgram,    color: "text-blue-700",      bg: "bg-blue-50/60" },
+                { label: "Mgmt & General",       value: prep990Data.totals.totalMgmt,       color: "text-amber-700",     bg: "bg-amber-50/60" },
+                { label: "Fundraising",          value: prep990Data.totals.totalFundraising, color: "text-purple-700",   bg: "bg-purple-50/60" },
+              ].map(s => (
+                <Card key={s.label} className={`${s.bg} border border-border`}>
+                  <CardContent className="p-5">
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">{s.label}</p>
+                    <p className={`text-xl font-bold tabular-nums ${s.color}`}>{formatCurrency(s.value)}</p>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+
+            {/* ── Public Support Test ────────────────────────────────────────── */}
+            {(() => {
+              const pst = prep990Data.publicSupportTest;
+              const passes = pst.passes;
+              return (
+                <Card className={`border ${passes ? "border-emerald-200 bg-emerald-50/40" : "border-red-200 bg-red-50/40"}`}>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-base flex items-center gap-2">
+                      {passes
+                        ? <CheckCircle className="w-5 h-5 text-emerald-600" />
+                        : <AlertTriangle className="w-5 h-5 text-red-500" />}
+                      Public Support Test (IRS 501(c)(3))
+                      <span className={`ml-auto text-sm font-semibold px-2.5 py-0.5 rounded-full ${passes ? "bg-emerald-100 text-emerald-800" : "bg-red-100 text-red-800"}`}>
+                        {passes ? "PASS" : "FAIL"}
+                      </span>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex flex-wrap gap-6 text-sm mb-3">
+                      <div>
+                        <span className="text-muted-foreground">Total Revenue:</span>{" "}
+                        <span className="font-semibold">{formatCurrency(pst.totalRevenue)}</span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Public Support:</span>{" "}
+                        <span className="font-semibold">{formatCurrency(pst.totalPublicSupport)}</span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Support %:</span>{" "}
+                        <span className={`font-bold ${passes ? "text-emerald-700" : "text-red-600"}`}>{pst.publicSupportPct.toFixed(1)}%</span>
+                        <span className="text-muted-foreground ml-1">(threshold: {pst.threshold}%)</span>
+                      </div>
+                    </div>
+                    {/* Progress bar */}
+                    <div className="h-2.5 rounded-full bg-gray-200 mb-3 overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all ${passes ? "bg-emerald-500" : "bg-red-400"}`}
+                        style={{ width: `${Math.min(100, pst.publicSupportPct)}%` }}
+                      />
+                    </div>
+                    {pst.publicSupportAccounts.length > 0 && (
+                      <div>
+                        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">Qualifying Support Accounts</p>
+                        <div className="flex flex-wrap gap-2">
+                          {pst.publicSupportAccounts.map(a => (
+                            <span key={a.code} className="text-xs bg-white border border-emerald-200 rounded px-2 py-0.5">
+                              {a.code} {a.name} — {formatCurrency(a.amount)}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              );
+            })()}
+
+            {/* ── IRS Line Groups Table ──────────────────────────────────────── */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">IRS Form 990 — Expense Line Items</CardTitle>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
+                        <th className="px-4 py-3 text-left w-[220px]">IRS Line</th>
+                        <th className="px-4 py-3 text-right">Program Service</th>
+                        <th className="px-4 py-3 text-right">Mgmt & General</th>
+                        <th className="px-4 py-3 text-right">Fundraising</th>
+                        <th className="px-4 py-3 text-right text-amber-700">Untagged</th>
+                        <th className="px-4 py-3 text-right font-semibold">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {prep990Data.irsLines.length === 0 ? (
+                        <tr><td colSpan={6} className="px-4 py-10 text-center text-muted-foreground">No expense data for this period.</td></tr>
+                      ) : prep990Data.irsLines.map(line => (
+                        <tr key={line.line} className="hover:bg-muted/30 transition-colors">
+                          <td className="px-4 py-2.5">
+                            <p className="font-medium text-[hsl(210,60%,25%)]">{line.line}</p>
+                            <p className="text-xs text-muted-foreground">{line.label}</p>
+                            {line.accounts.length > 0 && (
+                              <div className="mt-1 flex flex-wrap gap-1">
+                                {line.accounts.map(a => (
+                                  <span key={a.code} className="text-[10px] bg-muted px-1.5 py-0.5 rounded text-muted-foreground">
+                                    {a.code}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </td>
+                          <td className="px-4 py-2.5 text-right tabular-nums text-blue-700">{line.programService > 0 ? formatCurrency(line.programService) : "—"}</td>
+                          <td className="px-4 py-2.5 text-right tabular-nums text-amber-700">{line.managementGeneral > 0 ? formatCurrency(line.managementGeneral) : "—"}</td>
+                          <td className="px-4 py-2.5 text-right tabular-nums text-purple-700">{line.fundraising > 0 ? formatCurrency(line.fundraising) : "—"}</td>
+                          <td className="px-4 py-2.5 text-right tabular-nums text-amber-600">{line.untagged > 0 ? formatCurrency(line.untagged) : "—"}</td>
+                          <td className="px-4 py-2.5 text-right tabular-nums font-semibold">{formatCurrency(line.total)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="border-t-2 border-border bg-muted/30 font-bold text-sm">
+                        <td className="px-4 py-2.5 text-muted-foreground">Grand Total</td>
+                        <td className="px-4 py-2.5 text-right tabular-nums text-blue-700">{formatCurrency(prep990Data.totals.totalProgram)}</td>
+                        <td className="px-4 py-2.5 text-right tabular-nums text-amber-700">{formatCurrency(prep990Data.totals.totalMgmt)}</td>
+                        <td className="px-4 py-2.5 text-right tabular-nums text-purple-700">{formatCurrency(prep990Data.totals.totalFundraising)}</td>
+                        <td className="px-4 py-2.5 text-right tabular-nums text-amber-600" />
+                        <td className="px-4 py-2.5 text-right tabular-nums">{formatCurrency(prep990Data.totals.grandTotal)}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+
+          </div>
+        )
       )}
     </AppLayout>
   );

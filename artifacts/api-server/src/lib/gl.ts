@@ -11,6 +11,8 @@
  *  - sum(debits) MUST equal sum(credits) for each transactionId.
  *  - Voided transactions: existing GL entries are soft-voided (isVoid = true).
  *  - Fund linkage: fundId and fundName are denormalised onto every GL entry.
+ *  - functionalType: propagated from transaction/split onto the category-side
+ *    GL entry only when the account is an EXPENSE account.
  */
 
 import {
@@ -30,11 +32,13 @@ interface RawEntry {
   accountId: string;
   accountCode: string;
   accountName: string;
+  accountType: string;
   entryType: "DEBIT" | "CREDIT";
   amount: number; // always positive
   description: string | null;
   fundId: string | null;
   fundName: string | null;
+  functionalType?: string | null;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -155,33 +159,37 @@ export async function generateGlEntries(
   if (!tx.isSplit) {
     const catCoa = tx.chartAccountId ? coaById[tx.chartAccountId] ?? null : null;
 
-    // Bank side
+    // Bank side (no functional type)
     if (bankCoa) {
       const bankEntryType = tx.type === "CREDIT" ? "DEBIT" : "CREDIT";
       rawEntries.push({
         accountId: bankCoa.id,
         accountCode: bankCoa.code,
         accountName: bankCoa.name,
+        accountType: bankCoa.type,
         entryType: bankEntryType,
         amount: Math.abs(tx.amount),
         description: tx.payee,
         fundId: tx.fundId ?? null,
         fundName: txFundName,
+        functionalType: null,
       });
     }
 
-    // Category side
+    // Category side: propagate functionalType only for EXPENSE accounts
     if (catCoa) {
       const catType = categoryEntryType(tx.type, catCoa.type);
       rawEntries.push({
         accountId: catCoa.id,
         accountCode: catCoa.code,
         accountName: catCoa.name,
+        accountType: catCoa.type,
         entryType: catType,
         amount: Math.abs(tx.amount),
         description: tx.payee,
         fundId: tx.fundId ?? null,
         fundName: txFundName,
+        functionalType: catCoa.type === "EXPENSE" ? (tx.functionalType ?? null) : null,
       });
     }
   } else {
@@ -199,11 +207,13 @@ export async function generateGlEntries(
         accountId: bankCoa.id,
         accountCode: bankCoa.code,
         accountName: bankCoa.name,
+        accountType: bankCoa.type,
         entryType: bankEntryType,
         amount: Math.abs(tx.amount),
         description: tx.payee,
         fundId: tx.fundId ?? null,
         fundName: txFundName,
+        functionalType: null,
       });
     }
 
@@ -226,11 +236,13 @@ export async function generateGlEntries(
         accountId: splitCoa.id,
         accountCode: splitCoa.code,
         accountName: splitCoa.name,
+        accountType: splitCoa.type,
         entryType: et,
         amount: Math.abs(split.amount),
         description: split.memo ?? tx.payee,
         fundId: splitFundId,
         fundName: splitFundName,
+        functionalType: splitCoa.type === "EXPENSE" ? (split.functionalType ?? null) : null,
       });
     }
   }
@@ -267,6 +279,7 @@ export async function generateGlEntries(
       description: e.description,
       date: tx.date,
       isVoid: false,
+      functionalType: (e.functionalType as any) ?? null,
     });
   }
 }

@@ -80,7 +80,7 @@ function serializeTx(
 
 async function upsertSplits(
   transactionId: string,
-  rawSplits: Array<{ chartAccountId?: string | null; vendorId?: string | null; amount: number; memo?: string | null; sortOrder?: number }>
+  rawSplits: Array<{ chartAccountId?: string | null; vendorId?: string | null; amount: number; memo?: string | null; functionalType?: string | null; sortOrder?: number }>
 ) {
   await db.delete(transactionSplits).where(eq(transactionSplits.transactionId, transactionId));
   if (rawSplits.length === 0) return;
@@ -92,6 +92,7 @@ async function upsertSplits(
       vendorId: s.vendorId ?? null,
       amount: s.amount,
       memo: s.memo ?? null,
+      functionalType: s.functionalType ?? null,
       sortOrder: s.sortOrder ?? i,
     });
   }
@@ -151,7 +152,7 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
       bankAccountId, date, payee, vendorId,
       amount, type, status,
       chartAccountId, memo, checkNumber, referenceNumber,
-      fundId, splits: rawSplits,
+      fundId, splits: rawSplits, functionalType,
     } = req.body ?? {};
 
     if (!date || !payee || amount === undefined)
@@ -197,6 +198,7 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
         referenceNumber: referenceNumber ?? null,
         fundId: fundId ?? null,
         isVoid: false,
+        functionalType: isSplit ? null : (functionalType ?? null),
       })
       .returning();
 
@@ -295,7 +297,7 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
     const {
       date, payee, vendorId, amount, type, status,
       chartAccountId, memo, checkNumber, referenceNumber,
-      fundId, bankAccountId, splits: rawSplits,
+      fundId, bankAccountId, splits: rawSplits, functionalType,
     } = req.body ?? {};
 
     const [existing] = await db
@@ -343,6 +345,7 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
         referenceNumber: referenceNumber ?? null,
         fundId: fundId ?? null,
         bankAccountId: bankAccountId ?? null,
+        functionalType: isSplit ? null : (functionalType ?? null),
         updatedAt: new Date(),
       })
       .where(eq(transactions.id, req.params.id))

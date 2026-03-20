@@ -24,6 +24,7 @@ export const transactions = pgTable("transactions", {
   journalEntryId: text("journal_entry_id"),
   plaidTransactionId: text("plaid_transaction_id"),
   isVoid: boolean("is_void").notNull().default(false),
+  functionalType: text("functional_type"), // 990 tag: PROGRAM_SERVICE | MANAGEMENT_GENERAL | FUNDRAISING
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
