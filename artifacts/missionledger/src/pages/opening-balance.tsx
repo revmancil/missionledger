@@ -646,18 +646,14 @@ export default function OpeningBalancePage() {
   // ── Equity totals by account (Section 3 data) ────────────────────────────────
   const equityTotals = useMemo(() => {
     const map: Record<string, { total: number; fundNames: string[] }> = {};
-    for (const fundId of activeFundIds) {
-      const eqAcctId = fundEquityMap[fundId];
+    // Walk ALL funds (not just those with rows) so Section 3 shows as soon as equity is assigned
+    for (const f of funds) {
+      const eqAcctId = fundEquityMap[f.id];
       if (!eqAcctId) continue;
-      const net  = fundNetMap[fundId] ?? 0;
-      const fund = funds.find((f) => f.id === fundId);
+      const net = fundNetMap[f.id] ?? 0;
       if (!map[eqAcctId]) map[eqAcctId] = { total: 0, fundNames: [] };
       map[eqAcctId].total += net;
-      if (fund) map[eqAcctId].fundNames.push(fund.name);
-    }
-    // Also show equity accounts in fundEquityMap that have 0 balance (funds with no rows yet)
-    for (const [, eqAcctId] of Object.entries(fundEquityMap)) {
-      if (eqAcctId && !map[eqAcctId]) map[eqAcctId] = { total: 0, fundNames: [] };
+      map[eqAcctId].fundNames.push(f.name);
     }
     return Object.entries(map).map(([equityAccountId, { total, fundNames }]) => ({
       equityAccountId,
@@ -668,21 +664,19 @@ export default function OpeningBalancePage() {
       const codeB = equityCoa.find((e) => e.id === b.equityAccountId)?.code ?? "";
       return codeA.localeCompare(codeB, undefined, { numeric: true });
     });
-  }, [activeFundIds, fundEquityMap, fundNetMap, funds, equityCoa]);
+  }, [funds, fundEquityMap, fundNetMap, equityCoa]);
 
   const totalEquity = equityTotals.reduce((s, e) => s + e.total, 0);
 
   // ── Fund Balances (Section 4 data) ───────────────────────────────────────────
+  // Show ALL active funds — not just those with rows — so users can assign equity accounts up front
   const fundBalances = useMemo(() => {
-    // Show all funds that appear in any row
-    const seen = new Set([...activeFundIds]);
-    // Also include funds that have an equity assignment even if no balance yet
-    return funds.filter((f) => seen.has(f.id)).map((f) => ({
+    return funds.map((f) => ({
       fund: f,
       netAmount: fundNetMap[f.id] ?? 0,
       equityAccountId: fundEquityMap[f.id] ?? "",
     }));
-  }, [activeFundIds, funds, fundNetMap, fundEquityMap]);
+  }, [funds, fundNetMap, fundEquityMap]);
 
   const totalFundBalances = fundBalances.reduce((s, fb) => s + fb.netAmount, 0);
 
@@ -1057,8 +1051,14 @@ export default function OpeningBalancePage() {
           </div>
 
           {fundBalances.length === 0 ? (
-            <div className="px-5 py-10 text-center text-sm text-muted-foreground">
-              Enter asset balances above to see fund totals here.
+            <div className="px-5 py-10 text-center space-y-2">
+              <p className="text-sm text-muted-foreground">No funds found. Create your funds first, then return here to set opening balances.</p>
+              <a
+                href={`${BASE}funds`}
+                className="inline-flex items-center gap-1.5 text-sm font-semibold text-emerald-700 hover:underline"
+              >
+                <Plus className="h-3.5 w-3.5" /> Go to Funds to create funds
+              </a>
             </div>
           ) : (
             <>
