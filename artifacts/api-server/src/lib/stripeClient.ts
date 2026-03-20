@@ -3,6 +3,22 @@ import { StripeSync, runMigrations } from "stripe-replit-sync";
 
 let connectionSettings: any;
 
+async function fetchConnectorKey(hostname: string, token: string, environment: string) {
+  const url = new URL(`https://${hostname}/api/v2/connection`);
+  url.searchParams.set("include_secrets", "true");
+  url.searchParams.set("connector_names", "stripe");
+  url.searchParams.set("environment", environment);
+  const response = await fetch(url.toString(), {
+    headers: { Accept: "application/json", "X-Replit-Token": token },
+  });
+  const data = await response.json();
+  const settings = data.items?.[0];
+  if (settings?.settings?.secret) {
+    return { publishableKey: settings.settings.publishable || "", secretKey: settings.settings.secret };
+  }
+  return null;
+}
+
 async function getCredentials() {
   const hostname = process.env.REPLIT_CONNECTORS_HOSTNAME;
   const xReplitToken = process.env.REPL_IDENTITY
@@ -11,41 +27,31 @@ async function getCredentials() {
     ? "depl " + process.env.WEB_REPL_RENEWAL
     : null;
 
-  // Try the Replit connector first (preferred path)
+  // Try the Replit connector (preferred path — works with mk_ managed keys)
   if (hostname && xReplitToken) {
     try {
       const isProduction = process.env.REPLIT_DEPLOYMENT === "1";
-      const targetEnvironment = isProduction ? "production" : "development";
 
-      const url = new URL(`https://${hostname}/api/v2/connection`);
-      url.searchParams.set("include_secrets", "true");
-      url.searchParams.set("connector_names", "stripe");
-      url.searchParams.set("environment", targetEnvironment);
-
-      const response = await fetch(url.toString(), {
-        headers: {
-          Accept: "application/json",
-          "X-Replit-Token": xReplitToken,
-        },
-      });
-
-      const data = await response.json();
-      connectionSettings = data.items?.[0];
-
-      if (connectionSettings?.settings?.secret) {
-        return {
-          publishableKey: connectionSettings.settings.publishable || "",
-          secretKey: connectionSettings.settings.secret,
-        };
+      // Try the target environment first, then fall back to "development" if needed.
+      // Replit managed keys (mk_...) only work through the connector proxy, not directly.
+      const environments = isProduction ? ["production", "development"] : ["development"];
+      for (const env of environments) {
+        const creds = await fetchConnectorKey(hostname, xReplitToken, env);
+        if (creds) {
+          if (isProduction && env === "development") {
+            console.log("[Stripe] Using development connector key in production (no production key configured)");
+          }
+          connectionSettings = creds;
+          return creds;
+        }
       }
-
-      console.warn(`[Stripe] Connector has no ${targetEnvironment} key — falling back to STRIPE_SECRET_KEY`);
+      console.warn("[Stripe] Connector returned no key for any environment — falling back to STRIPE_SECRET_KEY");
     } catch (err) {
       console.warn("[Stripe] Connector lookup failed — falling back to STRIPE_SECRET_KEY:", err);
     }
   }
 
-  // Fallback: manually configured secret key
+  // Final fallback: raw secret key (must be a real sk_test_ or sk_live_ key, not mk_)
   const secret = process.env.STRIPE_SECRET_KEY;
   const publishable = process.env.STRIPE_PUBLISHABLE_KEY || "";
   if (!secret) {
