@@ -80,8 +80,11 @@ export default function ReportsPage() {
   const [queryParams, setQueryParams] = useState({ startDate: `${currentYear}-01-01`, endDate: `${currentYear}-12-31` });
   const [glFundFilter, setGlFundFilter] = useState("");
 
+  const [bsAsOfDate, setBsAsOfDate] = useState(`${currentYear}-12-31`);
+  const [bsQueryDate, setBsQueryDate] = useState(`${currentYear}-12-31`);
+
   const { data: profitLoss, isLoading: plLoading } = useGetProfitLossReport({ startDate: queryParams.startDate, endDate: queryParams.endDate });
-  const { data: balanceSheet, isLoading: bsLoading } = useGetBalanceSheetReport();
+  const { data: balanceSheet, isLoading: bsLoading } = useGetBalanceSheetReport({ asOfDate: bsQueryDate });
   const { data: cashFlow, isLoading: cfLoading } = useGetCashFlowReport({ startDate: queryParams.startDate, endDate: queryParams.endDate });
   const { data: funds = [] } = useGetFunds();
 
@@ -256,28 +259,116 @@ export default function ReportsPage() {
                   </CardContent>
                 </Card>
 
-                <Card>
-                  <CardHeader><CardTitle className="text-base">Balance Sheet (Assets)</CardTitle></CardHeader>
-                  <CardContent>
-                    <div className="space-y-2 text-sm max-h-64 overflow-y-auto">
-                      <div className="font-semibold text-muted-foreground text-xs uppercase tracking-wider pb-1">Assets</div>
-                      {(balanceSheet?.assets || []).map((a: any) => (
-                        <div key={a.accountId} className="flex justify-between py-1 border-b border-border/50">
-                          <span className="text-muted-foreground">{a.accountCode} {a.accountName}</span>
-                          <span className="font-medium">{formatCurrency(a.amount)}</span>
-                        </div>
-                      ))}
-                      <div className="font-semibold text-muted-foreground text-xs uppercase tracking-wider pb-1 pt-3">Liabilities</div>
-                      {(balanceSheet?.liabilities || []).map((l: any) => (
-                        <div key={l.accountId} className="flex justify-between py-1 border-b border-border/50">
-                          <span className="text-muted-foreground">{l.accountCode} {l.accountName}</span>
-                          <span className="font-medium">{formatCurrency(l.amount)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
               </div>
+
+              {/* ── Statement of Financial Position (Balance Sheet) ─── */}
+              <Card className="lg:col-span-2">
+                <CardHeader>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <CardTitle className="text-base">Statement of Financial Position</CardTitle>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {balanceSheet?.asOfDate ? `As of ${new Date(balanceSheet.asOfDate).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}` : "Balance Sheet"}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs font-medium text-muted-foreground">As of</label>
+                      <Input
+                        type="date"
+                        value={bsAsOfDate}
+                        onChange={e => setBsAsOfDate(e.target.value)}
+                        className="h-8 w-40 text-xs"
+                      />
+                      <Button size="sm" className="h-8 text-xs" onClick={() => setBsQueryDate(bsAsOfDate)}>Apply</Button>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {bsLoading ? (
+                    <div className="py-8 text-center text-muted-foreground animate-pulse text-sm">Loading balance sheet…</div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 text-sm">
+
+                      {/* Left column: Assets */}
+                      <div className="space-y-1">
+                        <div className="font-bold text-xs uppercase tracking-widest text-muted-foreground pb-2 border-b border-border">Assets</div>
+                        {(balanceSheet?.assets || []).length === 0 && (
+                          <p className="text-xs text-muted-foreground py-2">No asset balances as of this date.</p>
+                        )}
+                        {(balanceSheet?.assets || []).map((a: any) => (
+                          <div key={a.accountId} className="flex justify-between py-1 gap-4">
+                            <span className="text-muted-foreground">{a.accountCode} · {a.accountName}</span>
+                            <span className="font-medium tabular-nums shrink-0">{formatCurrency(a.amount)}</span>
+                          </div>
+                        ))}
+                        <div className="flex justify-between pt-3 mt-2 border-t-2 border-foreground font-bold">
+                          <span>Total Assets</span>
+                          <span className="tabular-nums">{formatCurrency(balanceSheet?.totalAssets ?? 0)}</span>
+                        </div>
+                      </div>
+
+                      {/* Right column: Liabilities + Net Assets */}
+                      <div className="space-y-1">
+                        <div className="font-bold text-xs uppercase tracking-widest text-muted-foreground pb-2 border-b border-border">Liabilities</div>
+                        {(balanceSheet?.liabilities || []).length === 0 && (
+                          <p className="text-xs text-muted-foreground py-2">No liability balances as of this date.</p>
+                        )}
+                        {(balanceSheet?.liabilities || []).map((l: any) => (
+                          <div key={l.accountId} className="flex justify-between py-1 gap-4">
+                            <span className="text-muted-foreground">{l.accountCode} · {l.accountName}</span>
+                            <span className="font-medium tabular-nums shrink-0">{formatCurrency(l.amount)}</span>
+                          </div>
+                        ))}
+                        <div className="flex justify-between pt-2 mt-1 border-t border-border font-semibold text-muted-foreground">
+                          <span>Total Liabilities</span>
+                          <span className="tabular-nums">{formatCurrency(balanceSheet?.totalLiabilities ?? 0)}</span>
+                        </div>
+
+                        <div className="font-bold text-xs uppercase tracking-widest text-muted-foreground pb-2 pt-5 border-b border-border">Net Assets</div>
+                        {(balanceSheet?.equity || []).length === 0 && (balanceSheet?.netIncome ?? 0) === 0 && (
+                          <p className="text-xs text-muted-foreground py-2">No net asset balances as of this date.</p>
+                        )}
+                        {(balanceSheet?.equity || []).map((e: any) => (
+                          <div key={e.accountId} className="flex justify-between py-1 gap-4">
+                            <span className="text-muted-foreground">{e.accountCode} · {e.accountName}</span>
+                            <span className="font-medium tabular-nums shrink-0">{formatCurrency(e.amount)}</span>
+                          </div>
+                        ))}
+                        {/* Current period net income, shown separately if non-zero */}
+                        {(balanceSheet?.netIncome ?? 0) !== 0 && (
+                          <div className="flex justify-between py-1 gap-4">
+                            <span className="text-muted-foreground italic">Current Period Net Income</span>
+                            <span className={`font-medium tabular-nums shrink-0 ${(balanceSheet?.netIncome ?? 0) >= 0 ? "text-emerald-600" : "text-destructive"}`}>
+                              {formatCurrency(balanceSheet?.netIncome ?? 0)}
+                            </span>
+                          </div>
+                        )}
+                        <div className="flex justify-between pt-2 mt-1 border-t border-border font-semibold text-muted-foreground">
+                          <span>Total Net Assets</span>
+                          <span className="tabular-nums">{formatCurrency(balanceSheet?.totalNetAssets ?? 0)}</span>
+                        </div>
+
+                        <div className="flex justify-between pt-3 mt-2 border-t-2 border-foreground font-bold">
+                          <span>Total Liabilities + Net Assets</span>
+                          <span className="tabular-nums">{formatCurrency((balanceSheet?.totalLiabilities ?? 0) + (balanceSheet?.totalNetAssets ?? 0))}</span>
+                        </div>
+
+                        {/* Balance verification */}
+                        {balanceSheet && Math.abs(balanceSheet.difference) > 0.01 && (
+                          <div className="mt-3 p-2 rounded-md bg-destructive/10 border border-destructive/30 text-xs text-destructive font-medium">
+                            ⚠ Out of balance by {formatCurrency(Math.abs(balanceSheet.difference))} — check for missing or un-posted journal entries.
+                          </div>
+                        )}
+                        {balanceSheet && Math.abs(balanceSheet.difference) <= 0.01 && balanceSheet.totalAssets > 0 && (
+                          <div className="mt-3 p-2 rounded-md bg-emerald-50 border border-emerald-200 text-xs text-emerald-700 font-medium">
+                            ✓ Books are in balance
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
             </>
           )}
         </>

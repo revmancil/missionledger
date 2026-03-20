@@ -388,9 +388,12 @@ export interface BalanceSheetReport {
   assets: ReportLineItem[];
   liabilities: ReportLineItem[];
   equity: ReportLineItem[];
+  netIncome: number;
   totalAssets: number;
   totalLiabilities: number;
   totalEquity: number;
+  totalNetAssets: number;
+  difference: number;
 }
 
 export interface CashFlowReport {

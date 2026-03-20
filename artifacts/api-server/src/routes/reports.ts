@@ -5,76 +5,88 @@ import { requireAuth } from "../lib/auth";
 
 const router = Router();
 
-// GET /reports/profit-loss
+// GET /reports/profit-loss  — Statement of Activities from GL entries
 router.get("/profit-loss", requireAuth, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
     const { startDate, endDate } = req.query;
 
     const start = startDate ? new Date(startDate as string) : new Date(new Date().getFullYear(), 0, 1);
-    const end = endDate ? new Date(endDate as string) : new Date();
+    const end   = endDate   ? new Date(endDate   as string) : new Date();
+    // Include full end day
+    const endOfDay = new Date(end);
+    endOfDay.setHours(23, 59, 59, 999);
 
-    const allDonations = await db.select().from(donations).where(eq(donations.companyId, companyId));
-    const allExpenses = await db.select().from(expenses).where(eq(expenses.companyId, companyId));
+    const glRows = await db.execute(sql`
+      SELECT
+        c.id        AS account_id,
+        c.code      AS account_code,
+        c.name      AS account_name,
+        c.coa_type  AS account_type,
+        c.sort_order AS sort_order,
+        COALESCE(SUM(CASE WHEN g.entry_type = 'DEBIT'  THEN g.amount ELSE 0 END), 0) AS total_debit,
+        COALESCE(SUM(CASE WHEN g.entry_type = 'CREDIT' THEN g.amount ELSE 0 END), 0) AS total_credit
+      FROM chart_of_accounts c
+      LEFT JOIN gl_entries g
+        ON g.account_id = c.id
+        AND g.company_id = ${companyId}
+        AND g.is_void = false
+        AND g.date >= ${start}
+        AND g.date <= ${endOfDay}
+      WHERE c.company_id = ${companyId}
+        AND c.is_active = true
+        AND c.coa_type IN ('INCOME', 'EXPENSE')
+      GROUP BY c.id, c.code, c.name, c.coa_type, c.sort_order
+      ORDER BY c.sort_order, c.code
+    `);
 
-    const filteredDonations = allDonations.filter(d => {
-      const date = new Date(d.date);
-      return date >= start && date <= end;
+    const rows = (glRows.rows as any[]).map((r) => {
+      const debit  = parseFloat(r.total_debit)  || 0;
+      const credit = parseFloat(r.total_credit) || 0;
+      // INCOME: credit-normal; EXPENSE: debit-normal
+      const amount = r.account_type === "INCOME" ? credit - debit : debit - credit;
+      return {
+        accountId:   r.account_id,
+        accountCode: r.account_code,
+        accountName: r.account_name,
+        accountType: r.account_type,
+        amount,
+        children: [],
+      };
     });
-    const filteredExpenses = allExpenses.filter(e => {
-      const date = new Date(e.date);
-      return date >= start && date <= end;
-    });
 
-    const revenueMap: Record<string, number> = {};
-    for (const d of filteredDonations) {
-      const key = `Donations - ${d.type}`;
-      revenueMap[key] = (revenueMap[key] || 0) + (d.amount || 0);
-    }
-
-    const expenseMap: Record<string, number> = {};
-    for (const e of filteredExpenses) {
-      expenseMap[e.category] = (expenseMap[e.category] || 0) + (e.amount || 0);
-    }
-
-    const totalRevenue = Object.values(revenueMap).reduce((s, v) => s + v, 0);
-    const totalExpenses = Object.values(expenseMap).reduce((s, v) => s + v, 0);
+    const revenueRows  = rows.filter(r => r.accountType === "INCOME"   && r.amount !== 0);
+    const expenseRows  = rows.filter(r => r.accountType === "EXPENSE"  && r.amount !== 0);
+    const totalRevenue  = revenueRows.reduce((s, r) => s + r.amount, 0);
+    const totalExpenses = expenseRows.reduce((s, r) => s + r.amount, 0);
 
     res.json({
       startDate: start.toISOString(),
-      endDate: end.toISOString(),
-      revenue: Object.entries(revenueMap).map(([name, amount], i) => ({
-        accountId: `rev-${i}`,
-        accountCode: `4${String(i).padStart(3, "0")}`,
-        accountName: name,
-        amount,
-        children: [],
-      })),
-      expenses: Object.entries(expenseMap).map(([name, amount], i) => ({
-        accountId: `exp-${i}`,
-        accountCode: `5${String(i).padStart(3, "0")}`,
-        accountName: name,
-        amount,
-        children: [],
-      })),
+      endDate:   endOfDay.toISOString(),
+      revenue:   revenueRows,
+      expenses:  expenseRows,
       totalRevenue,
       totalExpenses,
       netIncome: totalRevenue - totalExpenses,
     });
   } catch (error) {
+    console.error("P&L error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });
 
-// GET /reports/balance-sheet
+// GET /reports/balance-sheet  — Statement of Financial Position
 router.get("/balance-sheet", requireAuth, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
     const { asOfDate } = req.query;
 
     const asOf = asOfDate ? new Date(asOfDate as string) : new Date();
+    // Include the full as-of day
+    const asOfEnd = new Date(asOf);
+    asOfEnd.setHours(23, 59, 59, 999);
 
-    // Aggregate GL entries per account up to the asOf date
+    // Fetch ALL account types so we can roll revenue/expenses into Net Assets
     const glRows = await db.execute(sql`
       SELECT
         c.id              AS account_id,
@@ -89,21 +101,26 @@ router.get("/balance-sheet", requireAuth, async (req, res) => {
         ON g.account_id = c.id
         AND g.company_id = ${companyId}
         AND g.is_void = false
-        AND g.date <= ${asOf}
+        AND g.date <= ${asOfEnd}
       WHERE c.company_id = ${companyId}
         AND c.is_active = true
-        AND c.coa_type IN ('ASSET', 'LIABILITY', 'EQUITY')
+        AND c.coa_type IN ('ASSET', 'LIABILITY', 'EQUITY', 'INCOME', 'EXPENSE')
       GROUP BY c.id, c.code, c.name, c.coa_type, c.sort_order
       ORDER BY c.sort_order, c.code
     `);
 
     const rows = (glRows.rows as any[]).map((r) => {
-      const debit = parseFloat(r.total_debit) || 0;
+      const debit  = parseFloat(r.total_debit)  || 0;
       const credit = parseFloat(r.total_credit) || 0;
-      // Normal balance: ASSET = debit normal; LIABILITY/EQUITY = credit normal
-      const amount = r.account_type === "ASSET" ? debit - credit : credit - debit;
+      // Normal balance convention
+      // ASSET, EXPENSE: debit-normal  (positive = debit > credit)
+      // LIABILITY, EQUITY, INCOME: credit-normal (positive = credit > debit)
+      const amount =
+        r.account_type === "ASSET" || r.account_type === "EXPENSE"
+          ? debit - credit
+          : credit - debit;
       return {
-        accountId: r.account_id,
+        accountId:   r.account_id,
         accountCode: r.account_code,
         accountName: r.account_name,
         accountType: r.account_type,
@@ -115,19 +132,32 @@ router.get("/balance-sheet", requireAuth, async (req, res) => {
     const assets      = rows.filter(r => r.accountType === "ASSET"     && r.amount !== 0);
     const liabilities = rows.filter(r => r.accountType === "LIABILITY" && r.amount !== 0);
     const equity      = rows.filter(r => r.accountType === "EQUITY"    && r.amount !== 0);
+    // INCOME/EXPENSE accounts roll up into net income, which is added to Net Assets
+    const incomeRows  = rows.filter(r => r.accountType === "INCOME"    && r.amount !== 0);
+    const expenseRows = rows.filter(r => r.accountType === "EXPENSE"   && r.amount !== 0);
 
     const totalAssets      = assets.reduce((s, r) => s + r.amount, 0);
     const totalLiabilities = liabilities.reduce((s, r) => s + r.amount, 0);
     const totalEquity      = equity.reduce((s, r) => s + r.amount, 0);
+    const totalIncome      = incomeRows.reduce((s, r) => s + r.amount, 0);
+    const totalExpenses    = expenseRows.reduce((s, r) => s + r.amount, 0);
+    // Current period net income is the change in net assets not yet closed to equity
+    const netIncome        = totalIncome - totalExpenses;
+    // Total Net Assets = permanent equity accounts + current period net income
+    const totalNetAssets   = totalEquity + netIncome;
 
     res.json({
-      asOfDate: asOf.toISOString(),
+      asOfDate:        asOfEnd.toISOString(),
       assets,
       liabilities,
       equity,
+      netIncome,
       totalAssets,
       totalLiabilities,
       totalEquity,
+      totalNetAssets,
+      // Balance check: should be 0 if books are in balance
+      difference: totalAssets - (totalLiabilities + totalNetAssets),
     });
   } catch (error) {
     console.error("Balance sheet error:", error);
