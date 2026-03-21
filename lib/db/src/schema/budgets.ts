@@ -19,7 +19,7 @@ export const budgetLines = pgTable("budget_lines", {
   budgetId: text("budget_id").notNull(),
   companyId: text("company_id").notNull(),
   accountId: text("account_id").notNull(),
-  amount: numeric("amount", { precision: 15, scale: 2 }).notNull().default("0").$type<number>(),
+  amount: numeric("amount", { precision: 15, scale: 2, mode: "number" }).notNull().default("0").$type<number>(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

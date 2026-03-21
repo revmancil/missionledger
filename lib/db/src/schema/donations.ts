@@ -9,7 +9,7 @@ export const donations = pgTable("donations", {
   companyId: text("company_id").notNull(),
   donorName: text("donor_name").notNull(),
   donorEmail: text("donor_email"),
-  amount: numeric("amount", { precision: 15, scale: 2 }).notNull().$type<number>(),
+  amount: numeric("amount", { precision: 15, scale: 2, mode: "number" }).notNull().$type<number>(),
   date: timestamp("date").notNull(),
   type: donationTypeEnum("type").notNull().default("CASH"),
   fundId: text("fund_id"),

@@ -12,7 +12,7 @@ export const bankTransactions = pgTable("bank_transactions", {
   date: timestamp("date").notNull(),
   description: text("description").notNull(),
   merchantName: text("merchant_name"),
-  amount: numeric("amount", { precision: 15, scale: 2 }).notNull().$type<number>(),
+  amount: numeric("amount", { precision: 15, scale: 2, mode: "number" }).notNull().$type<number>(),
   type: bankTransactionTypeEnum("type").notNull(),
   status: bankTransactionStatusEnum("status").notNull().default("PENDING"),
   fundId: text("fund_id"),

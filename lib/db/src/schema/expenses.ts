@@ -6,7 +6,7 @@ export const expenses = pgTable("expenses", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   companyId: text("company_id").notNull(),
   description: text("description").notNull(),
-  amount: numeric("amount", { precision: 15, scale: 2 }).notNull().$type<number>(),
+  amount: numeric("amount", { precision: 15, scale: 2, mode: "number" }).notNull().$type<number>(),
   date: timestamp("date").notNull(),
   category: text("category").notNull(),
   fundId: text("fund_id"),
