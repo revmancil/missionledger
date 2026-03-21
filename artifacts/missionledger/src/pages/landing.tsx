@@ -1,6 +1,189 @@
 import { Link } from "wouter";
-import { Building2, PieChart, ShieldCheck, ArrowRight } from "lucide-react";
+import { Building2, PieChart, ShieldCheck, ArrowRight, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useEffect, useState } from "react";
+
+const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+
+interface Price {
+  id: string;
+  unit_amount: number | null;
+  currency: string;
+  recurring: { interval: string; interval_count: number } | null;
+}
+
+interface Plan {
+  id: string;
+  name: string;
+  description: string | null;
+  metadata: Record<string, string>;
+  prices: Price[];
+}
+
+function formatPrice(price: Price): string {
+  if (price.unit_amount == null) return "Contact us";
+  const dollars = price.unit_amount / 100;
+  const period = price.recurring?.interval === "year" ? "/year" : "/month";
+  return `$${dollars % 1 === 0 ? dollars.toFixed(0) : dollars.toFixed(2)}${period}`;
+}
+
+function getPrimaryPrice(prices: Price[]): Price | null {
+  if (!prices.length) return null;
+  const monthly = prices.find((p) => p.recurring?.interval === "month");
+  return monthly ?? prices[0];
+}
+
+function getFeatures(plan: Plan): string[] {
+  const featuresStr = plan.metadata?.features;
+  if (featuresStr) {
+    try {
+      const parsed = JSON.parse(featuresStr);
+      if (Array.isArray(parsed)) return parsed;
+    } catch {}
+    const separator = featuresStr.includes("|") ? "|" : ",";
+    return featuresStr.split(separator).map((f) => f.trim()).filter(Boolean);
+  }
+  if (plan.description) return [plan.description];
+  return [];
+}
+
+function getRecommendedId(plans: Plan[]): string | null {
+  const byMetadata = plans.find(
+    (p) => p.metadata?.recommended === "true" || p.metadata?.popular === "true"
+  );
+  if (byMetadata) return byMetadata.id;
+  const byName = plans.find((p) => {
+    const n = p.name.toLowerCase();
+    return n.includes("pro") || n.includes("standard");
+  });
+  return byName?.id ?? null;
+}
+
+function PlanCards({ plans }: { plans: Plan[] }) {
+  const recommendedId = getRecommendedId(plans);
+  return (
+    <div className={`grid gap-8 ${plans.length === 1 ? "max-w-sm mx-auto" : plans.length === 2 ? "md:grid-cols-2 max-w-3xl mx-auto" : "md:grid-cols-3"}`}>
+      {plans.map((plan) => {
+        const price = getPrimaryPrice(plan.prices);
+        const features = getFeatures(plan);
+        const recommended = plan.id === recommendedId;
+        return (
+          <div
+            key={plan.id}
+            className={`relative flex flex-col rounded-2xl border p-8 shadow-sm transition-all hover:shadow-md ${
+              recommended
+                ? "border-primary bg-primary/5 ring-2 ring-primary shadow-primary/10"
+                : "border-border bg-card"
+            }`}
+          >
+            {recommended && (
+              <span className="absolute -top-3.5 left-1/2 -translate-x-1/2 bg-primary text-primary-foreground text-xs font-semibold px-4 py-1 rounded-full shadow">
+                Most Popular
+              </span>
+            )}
+            <div className="mb-6">
+              <h3 className="text-xl font-bold mb-2">{plan.name}</h3>
+              {price ? (
+                <p className="text-4xl font-extrabold text-foreground">
+                  {formatPrice(price)}
+                </p>
+              ) : (
+                <p className="text-2xl font-bold text-muted-foreground">Contact us</p>
+              )}
+            </div>
+
+            {features.length > 0 && (
+              <ul className="flex-1 space-y-3 mb-8">
+                {features.map((feat, i) => (
+                  <li key={i} className="flex items-start gap-2 text-sm text-muted-foreground">
+                    <Check className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
+                    <span>{feat}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            <div className={features.length === 0 ? "mt-6" : ""}>
+              <Link href="/register">
+                <Button className="w-full" variant={recommended ? "default" : "outline"}>
+                  Get Started
+                </Button>
+              </Link>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function PricingSection() {
+  const [plans, setPlans] = useState<Plan[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    fetch(`${BASE}/api/stripe/plans`)
+      .then((r) => {
+        if (!r.ok) throw new Error("Non-ok response");
+        return r.json();
+      })
+      .then((json) => {
+        const data: Plan[] = json.data ?? [];
+        setPlans(data);
+        setLoading(false);
+      })
+      .catch(() => {
+        setError(true);
+        setLoading(false);
+      });
+  }, []);
+
+  return (
+    <section id="pricing" className="py-24 bg-background">
+      <div className="max-w-7xl mx-auto px-6">
+        <div className="text-center mb-16">
+          <h2 className="text-3xl font-display font-bold">Simple, transparent pricing</h2>
+          <p className="mt-4 text-muted-foreground max-w-xl mx-auto">
+            Start with a free trial. No credit card required.
+          </p>
+        </div>
+
+        {loading && (
+          <div className="flex justify-center py-12">
+            <div className="w-8 h-8 rounded-full border-4 border-primary border-t-transparent animate-spin" />
+          </div>
+        )}
+
+        {!loading && error && (
+          <div className="text-center py-12">
+            <p className="text-muted-foreground text-lg">
+              Contact us for pricing at{" "}
+              <a href="mailto:hello@missionledger.com" className="text-primary underline underline-offset-2">
+                hello@missionledger.com
+              </a>
+            </p>
+          </div>
+        )}
+
+        {!loading && !error && plans.length === 0 && (
+          <div className="text-center py-12">
+            <p className="text-muted-foreground text-lg">
+              Contact us for pricing at{" "}
+              <a href="mailto:hello@missionledger.com" className="text-primary underline underline-offset-2">
+                hello@missionledger.com
+              </a>
+            </p>
+          </div>
+        )}
+
+        {!loading && !error && plans.length > 0 && (
+          <PlanCards plans={plans} />
+        )}
+      </div>
+    </section>
+  );
+}
 
 export default function LandingPage() {
   return (
@@ -9,7 +192,17 @@ export default function LandingPage() {
         <div className="flex items-center">
           <img src={`${import.meta.env.BASE_URL}images/logo.png`} alt="MissionLedger" className="h-10 w-auto object-contain" />
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-6">
+          <a
+            href="#pricing"
+            className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+            onClick={(e) => {
+              e.preventDefault();
+              document.getElementById("pricing")?.scrollIntoView({ behavior: "smooth" });
+            }}
+          >
+            Pricing
+          </a>
           <Link href="/login" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
             Log in
           </Link>
@@ -88,6 +281,8 @@ export default function LandingPage() {
             </div>
           </div>
         </section>
+
+        <PricingSection />
       </main>
 
       <footer className="bg-foreground text-background py-12 text-center">
