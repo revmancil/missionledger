@@ -8,7 +8,7 @@ import {
   Ban, Eye, EyeOff, RefreshCw, Search, ToggleLeft, ToggleRight,
   Wifi, WifiOff, CreditCard, ChevronDown, ChevronRight, X,
   TrendingUp, Activity, Lock, Wrench, Globe, KeyRound,
-  MessageSquare, Send, Bell,
+  MessageSquare, Send, Bell, Gift,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -43,6 +43,8 @@ type OrgRow = {
   dbHealth: { plaidActive: boolean; stripeActive: boolean };
   unreconciledAlert: boolean;
   lastReconciledAt?: string | null;
+  isComped?: boolean;
+  compedNote?: string | null;
 };
 
 type Stats = {
@@ -201,10 +203,52 @@ function OrgDetailDrawer({ org, onClose, onRefresh }: { org: OrgRow; onClose: ()
   const [showNewPw, setShowNewPw]       = useState(false);
   const [resetting, setResetting]       = useState(false);
   const [resetMsg, setResetMsg]         = useState<{ ok: boolean; text: string } | null>(null);
+  const [isComped, setIsComped]         = useState(org.isComped ?? false);
+  const [compedNote, setCompedNote]     = useState(org.compedNote ?? "");
+  const [compedNoteInput, setCompedNoteInput] = useState("");
+  const [compedSaving, setCompedSaving] = useState(false);
+  const [compedMsg, setCompedMsg]       = useState<{ ok: boolean; text: string } | null>(null);
 
   useEffect(() => {
     apiFetch(`/api/master-admin/organizations/${org.id}`).then(setDetail).catch(() => {});
   }, [org.id]);
+
+  async function handleMarkComped() {
+    setCompedSaving(true);
+    setCompedMsg(null);
+    try {
+      await apiFetch(`/api/master-admin/organizations/${org.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isComped: true, compedNote: compedNoteInput }),
+      });
+      setIsComped(true);
+      setCompedNote(compedNoteInput);
+      setCompedNoteInput("");
+      setCompedMsg({ ok: true, text: "Account marked as comped." });
+      onRefresh();
+    } catch (e: any) {
+      setCompedMsg({ ok: false, text: e.message ?? "Failed to update comp status." });
+    } finally { setCompedSaving(false); }
+  }
+
+  async function handleRemoveComp() {
+    setCompedSaving(true);
+    setCompedMsg(null);
+    try {
+      await apiFetch(`/api/master-admin/organizations/${org.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isComped: false, compedNote: "" }),
+      });
+      setIsComped(false);
+      setCompedNote("");
+      setCompedMsg({ ok: true, text: "Comp status removed." });
+      onRefresh();
+    } catch (e: any) {
+      setCompedMsg({ ok: false, text: e.message ?? "Failed to remove comp status." });
+    } finally { setCompedSaving(false); }
+  }
 
   async function handleImpersonate() {
     setImpersonating(true);
@@ -314,6 +358,61 @@ function OrgDetailDrawer({ org, onClose, onRefresh }: { org: OrgRow; onClose: ()
               {resetMsg.text}
             </div>
           )}
+
+          {/* Comped / Free Account */}
+          <div className="rounded-xl border border-purple-800/40 bg-purple-950/20 p-4 space-y-3">
+            <h4 className="text-[11px] text-purple-400 uppercase tracking-wide font-semibold flex items-center gap-1.5">
+              <Gift className="h-3.5 w-3.5" /> Comped / Free Account
+            </h4>
+            {isComped ? (
+              <div className="space-y-2">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm text-purple-300 font-medium">This account has complimentary access</p>
+                    {compedNote && <p className="text-xs text-purple-400/80 mt-0.5">{compedNote}</p>}
+                  </div>
+                  <button
+                    onClick={handleRemoveComp}
+                    disabled={compedSaving}
+                    className="shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-800 border border-purple-800 text-purple-400 text-xs font-semibold hover:bg-slate-700 disabled:opacity-50 transition-colors"
+                  >
+                    {compedSaving ? <RefreshCw className="h-3 w-3 animate-spin" /> : null}
+                    Remove Comp
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-xs text-slate-500">Grant this organization free access without a subscription.</p>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="Note (e.g. beta partner, grant-funded)…"
+                    value={compedNoteInput}
+                    onChange={e => setCompedNoteInput(e.target.value)}
+                    className="flex-1 h-8 px-3 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-purple-700 placeholder:text-slate-500"
+                  />
+                  <button
+                    onClick={handleMarkComped}
+                    disabled={compedSaving}
+                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-purple-700 hover:bg-purple-600 disabled:opacity-50 text-white text-xs font-semibold transition-colors shrink-0"
+                  >
+                    {compedSaving ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Gift className="h-3 w-3" />}
+                    Mark Comped
+                  </button>
+                </div>
+              </div>
+            )}
+            {compedMsg && (
+              <div className={cn(
+                "flex items-center gap-2 text-xs rounded-lg px-3 py-2",
+                compedMsg.ok ? "text-purple-400 bg-purple-950/50" : "text-red-400 bg-red-950/40"
+              )}>
+                {compedMsg.ok ? <CheckCircle2 className="h-3.5 w-3.5 shrink-0" /> : <AlertTriangle className="h-3.5 w-3.5 shrink-0" />}
+                {compedMsg.text}
+              </div>
+            )}
+          </div>
 
           {/* Team Members + Password Reset */}
           <div>
@@ -772,6 +871,11 @@ export default function AdminCommandCenter() {
                           <Lock className="h-3.5 w-3.5 text-red-500 shrink-0" title="Suspended" />
                         )}
                         <span className="font-medium text-slate-200">{org.name}</span>
+                        {org.isComped && (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-purple-900/60 text-purple-400 border border-purple-800">
+                            <Gift className="h-2.5 w-2.5" /> Comped
+                          </span>
+                        )}
                       </div>
                       {org.email && <div className="text-[11px] text-slate-500 mt-0.5">{org.email}</div>}
                     </td>
