@@ -14,6 +14,18 @@ function getBaseUrl(req: any): string {
   return `${req.protocol}://${req.get("host")}`;
 }
 
+function getLowestMonthlyAmount(plan: { prices: Array<{ unit_amount: number | null; recurring?: { interval: string } | null }> }): number {
+  const monthlyPrices = plan.prices.filter((p) => p.recurring?.interval === "month");
+  if (monthlyPrices.length > 0) {
+    return Math.min(...monthlyPrices.map((p) => p.unit_amount ?? Infinity));
+  }
+  return plan.prices[0]?.unit_amount ?? Infinity;
+}
+
+function sortPlansByLowestPrice(plans: any[]): any[] {
+  return plans.slice().sort((a, b) => getLowestMonthlyAmount(a) - getLowestMonthlyAmount(b));
+}
+
 router.get("/plans", async (_req, res) => {
   try {
     const rows = await stripeStorage.listProductsWithPrices();
@@ -63,10 +75,10 @@ router.get("/plans", async (_req, res) => {
         metadata: p.metadata || {},
         prices: pricesByProduct.get(p.id) || [],
       }));
-      return res.json({ data: fallbackPlans });
+      return res.json({ data: sortPlansByLowestPrice(fallbackPlans) });
     }
 
-    res.json({ data: Array.from(productsMap.values()) });
+    res.json({ data: sortPlansByLowestPrice(Array.from(productsMap.values())) });
   } catch (err: any) {
     console.error("Error fetching plans:", err.message);
     res.status(503).json({ error: "Billing not configured", data: [] });

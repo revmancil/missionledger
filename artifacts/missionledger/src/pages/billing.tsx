@@ -67,8 +67,17 @@ export default function BillingPage() {
     fetch("/api/stripe/plans", { credentials: "include" })
       .then((r) => r.json())
       .then((json) => {
-        setPlans(json.data || []);
-        if ((json.data || []).length === 0) setStripeConfigured(false);
+        const data: Plan[] = json.data || [];
+        data.sort((a, b) => {
+          const lowestMonthly = (plan: Plan): number => {
+            const monthly = plan.prices.filter((p) => p.recurring?.interval === "month");
+            if (monthly.length > 0) return Math.min(...monthly.map((p) => p.unit_amount ?? Infinity));
+            return plan.prices[0]?.unit_amount ?? Infinity;
+          };
+          return lowestMonthly(a) - lowestMonthly(b);
+        });
+        setPlans(data);
+        if (data.length === 0) setStripeConfigured(false);
       })
       .catch(() => setStripeConfigured(false))
       .finally(() => setLoadingPlans(false));
