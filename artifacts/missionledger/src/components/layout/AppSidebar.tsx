@@ -4,7 +4,7 @@ import {
   HandHeart, LogOut, BarChart3, Building,
   Banknote, ClipboardList, RefreshCcw, Wand2, Scale, CalendarCheck,
   ChevronDown, ArrowLeftRight, Shield, AlertTriangle, CheckCircle2,
-  CreditCard, PenLine, X,
+  CreditCard, PenLine, X, Heart,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
@@ -32,6 +32,7 @@ const navGroups = [
     label: "Transactions",
     items: [
       { href: "/pledges", label: "Pledges", icon: HandHeart },
+      { href: "/donor-giving", label: "Donor Giving", icon: Heart },
     ]
   },
   {

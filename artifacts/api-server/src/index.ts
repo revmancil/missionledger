@@ -241,6 +241,12 @@ async function ensureSchema() {
     console.error("Schema migration error (is_comped):", err.message);
   }
   try {
+    await pool.query(`ALTER TABLE transactions ADD COLUMN IF NOT EXISTS donor_name TEXT`);
+    console.log("Schema check: transactions.donor_name OK");
+  } catch (err: any) {
+    console.error("Schema migration error (donor_name):", err.message);
+  }
+  try {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS system_settings (
         key VARCHAR(64) PRIMARY KEY,

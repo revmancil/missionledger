@@ -183,7 +183,7 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
       bankAccountId, date, payee, vendorId,
       amount, type, status,
       chartAccountId, memo, checkNumber, referenceNumber,
-      fundId, splits: rawSplits, functionalType,
+      fundId, splits: rawSplits, functionalType, donorName,
     } = req.body ?? {};
 
     if (!date || !payee || amount === undefined)
@@ -243,6 +243,7 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
           referenceNumber: referenceNumber ?? null,
           fundId: fundId ?? null,
           isVoid: false,
+          donorName: donorName ?? null,
           functionalType: isSplit ? null : (functionalType ?? null),
           transactionFingerprint: fingerprint,
         })
@@ -372,7 +373,7 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
     const {
       date, payee, vendorId, amount, type, status,
       chartAccountId, memo, checkNumber, referenceNumber,
-      fundId, bankAccountId, splits: rawSplits, functionalType,
+      fundId, bankAccountId, splits: rawSplits, functionalType, donorName,
     } = req.body ?? {};
 
     const [existing] = await db
@@ -436,6 +437,7 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
           referenceNumber: referenceNumber ?? null,
           fundId: fundId ?? null,
           bankAccountId: bankAccountId ?? null,
+          donorName: donorName !== undefined ? (donorName || null) : undefined,
           functionalType: isSplit ? null : (functionalType ?? null),
           transactionFingerprint: newFingerprint,
           updatedAt: new Date(),

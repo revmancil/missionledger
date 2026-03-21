@@ -90,6 +90,7 @@ const emptyForm = {
   status: "UNCLEARED" as "UNCLEARED" | "CLEARED",
   chartAccountId: "", fundId: "", bankAccountId: "",
   memo: "", checkNumber: "", referenceNumber: "",
+  donorName: "",
   isSplit: false,
   functionalType: "",
   splits: [newSplitLine()],
@@ -530,6 +531,7 @@ export default function BankRegisterPage() {
       memo: tx.memo ?? "",
       checkNumber: tx.checkNumber ?? "",
       referenceNumber: tx.referenceNumber ?? "",
+      donorName: (tx as any).donorName ?? "",
       isSplit: tx.isSplit,
       functionalType: (tx as any).functionalType ?? "",
       splits: tx.isSplit && tx.splits.length > 0
@@ -579,6 +581,7 @@ export default function BankRegisterPage() {
         referenceNumber: form.referenceNumber || null,
         memo: form.memo || null,
         isSplit: form.isSplit,
+        donorName: form.donorName || null,
         functionalType: form.isSplit ? null : (form.functionalType || null),
         splits: form.isSplit
           ? form.splits.map((s, i) => ({
@@ -1079,6 +1082,22 @@ export default function BankRegisterPage() {
                 />
               </div>
             </div>
+
+            {/* Donor Name (shown only for credit/income transactions) */}
+            {form.type === "CREDIT" && (
+              <div className="flex items-start gap-2 rounded-md border border-emerald-200 bg-emerald-50/60 px-3 py-2.5">
+                <div className="flex-1">
+                  <Label className="text-xs text-emerald-800 font-semibold">Donor Name <span className="font-normal text-emerald-600">(optional)</span></Label>
+                  <Input
+                    className="mt-1 bg-white border-emerald-200 focus-visible:ring-emerald-300"
+                    placeholder="e.g. Jane Smith or Smith Family Foundation"
+                    value={form.donorName}
+                    onChange={(e) => setForm({ ...form, donorName: e.target.value })}
+                  />
+                  <p className="text-[10px] text-emerald-700 mt-1">Tagging a donor links this gift to the Donor Giving tracker.</p>
+                </div>
+              </div>
+            )}
 
             {/* Bank + Fund */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

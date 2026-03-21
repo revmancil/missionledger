@@ -8,6 +8,7 @@ MissionLedger is a full-stack nonprofit financial management SaaS app for church
 
 - **Dashboard**: KPIs (total donations, expenses, net income), charts (monthly bar, expense pie), recent activity
 - **Donations**: Track donor contributions with fund/account allocation, donation type
+- **Donor Giving Tracker**: (`/donor-giving`) Aggregates donor giving from bank register (credit transactions tagged with donor name) and donation records. Summary table by donor (rank, name, gift count, first/last gift, total given), expandable gift history rows, year filter, search, and printable year-end giving statement per donor. `donor_name` TEXT column added to `transactions` table via `ensureSchema()`.
 - **Expenses**: Record expenses by category with vendor and fund association
 - **Funds**: Fund accounting with balance tracking (donations − expenses per fund)
 - **Chart of Accounts**: 26 default nonprofit accounts auto-created on registration
