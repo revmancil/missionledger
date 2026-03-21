@@ -459,13 +459,16 @@ async function ensureSchema() {
             LIMIT 1
           ) AS last_entry_id
         FROM imbalanced i
-        WHERE ABS(i.delta) > 0 AND ABS(i.delta) <= 0.20
+        WHERE ABS(i.delta) > 0 AND ABS(i.delta) <= 2.00
       )
       UPDATE gl_entries g
-      SET amount = ROUND(g.amount - ta.delta, 2)
+      SET amount = ROUND(
+        g.amount + (CASE WHEN g.entry_type = 'CREDIT' THEN ta.delta ELSE -ta.delta END),
+        2
+      )
       FROM to_adjust ta
       WHERE g.id = ta.last_entry_id
-        AND ROUND(g.amount - ta.delta, 2) >= 0
+        AND ROUND(g.amount + (CASE WHEN g.entry_type = 'CREDIT' THEN ta.delta ELSE -ta.delta END), 2) >= 0
     `);
     if (repairResult.rowCount && repairResult.rowCount > 0) {
       console.log(`Schema check: GL balance repair — fixed ${repairResult.rowCount} rounding artifact(s)`);
