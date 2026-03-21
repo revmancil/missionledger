@@ -88,7 +88,7 @@ function useDonorYears() {
 }
 
 /* ─── Print Statement ──────────────────────────────────────────────────── */
-function printStatement(donor: DonorSummary, gifts: GiftRecord[], year: string, orgName: string) {
+function buildStatementHtml(donor: DonorSummary, gifts: GiftRecord[], year: string, orgName: string) {
   const yearLabel = year && year !== "all" ? `Year ${year}` : "All Time";
   const rows = gifts.map(g => `
     <tr>
@@ -100,8 +100,7 @@ function printStatement(donor: DonorSummary, gifts: GiftRecord[], year: string, 
     </tr>
   `).join("");
 
-  const html = `
-    <!DOCTYPE html><html><head>
+  return `<!DOCTYPE html><html><head>
     <title>Donor Statement — ${donor.donorName}</title>
     <style>
       body { font-family: Arial, sans-serif; padding: 40px; color: #111; font-size: 13px; }
@@ -141,13 +140,51 @@ function printStatement(donor: DonorSummary, gifts: GiftRecord[], year: string, 
       Please retain this document for your tax records.
     </div>
     </body></html>`;
+}
 
-  const w = window.open("", "_blank");
-  if (!w) return;
-  w.document.write(html);
-  w.document.close();
-  w.focus();
-  setTimeout(() => { w.print(); }, 400);
+function printStatement(donor: DonorSummary, gifts: GiftRecord[], year: string, orgName: string) {
+  const html = buildStatementHtml(donor, gifts, year, orgName);
+
+  // Use a hidden iframe to print — works even when popup windows are blocked
+  const iframe = document.createElement("iframe");
+  iframe.style.cssText = "position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;border:none;";
+  document.body.appendChild(iframe);
+
+  const doc = iframe.contentDocument || iframe.contentWindow?.document;
+  if (!doc) {
+    // Fallback: try opening a new window
+    const w = window.open("", "_blank");
+    if (w) { w.document.write(html); w.document.close(); w.focus(); setTimeout(() => w.print(), 400); }
+    document.body.removeChild(iframe);
+    return;
+  }
+
+  doc.open();
+  doc.write(html);
+  doc.close();
+
+  iframe.onload = () => {
+    try {
+      iframe.contentWindow?.focus();
+      iframe.contentWindow?.print();
+    } finally {
+      setTimeout(() => {
+        if (document.body.contains(iframe)) document.body.removeChild(iframe);
+      }, 2000);
+    }
+  };
+}
+
+function downloadStatement(donor: DonorSummary, gifts: GiftRecord[], year: string, orgName: string) {
+  const html = buildStatementHtml(donor, gifts, year, orgName);
+  const blob = new Blob([html], { type: "text/html" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const yearLabel = year && year !== "all" ? `_${year}` : "";
+  a.href = url;
+  a.download = `${donor.donorName.replace(/\s+/g, "_")}_Statement${yearLabel}.html`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 /* ─── Donor Row ─────────────────────────────────────────────────────────── */
@@ -191,10 +228,14 @@ function DonorRow({
             className="h-7 px-2 text-xs"
             onClick={(e) => {
               e.stopPropagation();
-              if (history) printStatement(donor, history, year, orgName);
+              if (history) {
+                printStatement(donor, history, year, orgName);
+              } else {
+                // Expand the row to load history first, then the user can print from the expanded view
+                onToggle();
+              }
             }}
-            disabled={!history}
-            title="Print Giving Statement"
+            title={history ? "Print Giving Statement" : "Expand to load statement"}
           >
             <Printer className="h-3.5 w-3.5" />
           </Button>
@@ -251,7 +292,17 @@ function DonorRow({
                     </tr>
                   </tfoot>
                 </table>
-                <div className="px-3 py-2 flex justify-end border-t border-border bg-muted/20">
+                <div className="px-3 py-2 flex justify-end gap-2 border-t border-border bg-muted/20">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs gap-1.5"
+                    onClick={() => downloadStatement(donor, history, year, orgName)}
+                    title="Download as HTML file — open in browser then print"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    Download
+                  </Button>
                   <Button
                     size="sm"
                     variant="outline"

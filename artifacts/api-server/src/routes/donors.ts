@@ -116,7 +116,7 @@ router.get("/:name/history", requireAuth, async (req, res) => {
       SELECT
         d.id,
         d.date,
-        d.type AS description,
+        d.type::text AS description,
         d.amount,
         d.notes AS memo,
         NULL AS "checkNumber",
