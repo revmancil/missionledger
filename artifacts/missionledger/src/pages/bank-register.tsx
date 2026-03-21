@@ -654,16 +654,16 @@ export default function BankRegisterPage() {
       <div className="flex flex-col -m-4 md:-m-8 min-h-[calc(100vh-8rem)]">
 
         {/* ── Toolbar ─────────────────────────────────── */}
-        <div className="border-b bg-white px-6 py-4">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h1 className="text-xl font-bold text-[hsl(210,60%,25%)]">Bank Register</h1>
-              <p className="text-sm text-muted-foreground mt-0.5">
+        <div className="border-b bg-white px-4 md:px-6 py-4">
+          <div className="flex items-center justify-between mb-4 gap-3">
+            <div className="min-w-0">
+              <h1 className="text-lg md:text-xl font-bold text-[hsl(210,60%,25%)]">Bank Register</h1>
+              <p className="text-xs md:text-sm text-muted-foreground mt-0.5 hidden sm:block">
                 Double-row register with split transactions and vendor tracking
               </p>
             </div>
-            <Button onClick={openAdd} className="bg-[hsl(210,60%,25%)] hover:bg-[hsl(210,60%,20%)] text-white gap-2">
-              <Plus className="h-4 w-4" /> Add Transaction
+            <Button onClick={openAdd} className="bg-[hsl(210,60%,25%)] hover:bg-[hsl(210,60%,20%)] text-white gap-2 shrink-0">
+              <Plus className="h-4 w-4" /><span className="hidden sm:inline">Add Transaction</span><span className="sm:hidden">Add</span>
             </Button>
           </div>
 
@@ -676,11 +676,11 @@ export default function BankRegisterPage() {
             </div>
           )}
 
-          <div className="flex flex-wrap gap-3 items-center">
-            <div className="flex items-center gap-2">
-              <Wallet className="h-4 w-4 text-muted-foreground" />
+          <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 sm:items-center">
+            <div className="flex items-center gap-2 shrink-0">
+              <Wallet className="h-4 w-4 text-muted-foreground shrink-0" />
               <Select value={selectedBank} onValueChange={setSelectedBank}>
-                <SelectTrigger className="w-52 h-8 text-sm"><SelectValue placeholder="All Accounts" /></SelectTrigger>
+                <SelectTrigger className="w-44 sm:w-52 h-8 text-sm"><SelectValue placeholder="All Accounts" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="ALL">All Bank Accounts</SelectItem>
                   {bankAccounts.map((b) => (
@@ -691,13 +691,13 @@ export default function BankRegisterPage() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="flex gap-1">
+            <div className="flex gap-1 overflow-x-auto pb-0.5 scrollbar-none">
               {(["ALL","UNCLEARED","CLEARED","RECONCILED","VOID"] as StatusFilter[]).map((s) => (
                 <button
                   key={s}
                   onClick={() => setStatusFilter(s)}
                   className={cn(
-                    "px-3 py-1 rounded-full text-xs font-medium border transition-colors",
+                    "px-2.5 sm:px-3 py-1 rounded-full text-xs font-medium border transition-colors whitespace-nowrap shrink-0",
                     statusFilter === s
                       ? "bg-[hsl(210,60%,25%)] text-white border-[hsl(210,60%,25%)]"
                       : "bg-white text-gray-600 border-gray-200 hover:border-gray-400"
@@ -745,14 +745,14 @@ export default function BankRegisterPage() {
           <table className="w-full text-sm border-collapse">
             <thead className="sticky top-0 z-10 bg-[hsl(210,40%,96%)] border-b">
               <tr>
-                <th className="text-left px-4 py-2 font-semibold text-xs text-muted-foreground w-28">DATE</th>
-                <th className="text-left px-2 py-2 font-semibold text-xs text-muted-foreground w-24">CHECK #</th>
+                <th className="text-left px-3 md:px-4 py-2 font-semibold text-xs text-muted-foreground w-24 md:w-28">DATE</th>
+                <th className="text-left px-2 py-2 font-semibold text-xs text-muted-foreground w-24 hidden md:table-cell">CHECK #</th>
                 <th className="text-left px-2 py-2 font-semibold text-xs text-muted-foreground">PAYEE / ACCOUNT</th>
-                <th className="text-right px-2 py-2 font-semibold text-xs text-muted-foreground w-32">PAYMENT</th>
-                <th className="text-right px-2 py-2 font-semibold text-xs text-muted-foreground w-32">DEPOSIT</th>
-                <th className="text-right px-2 py-2 font-semibold text-xs text-muted-foreground w-32">BALANCE</th>
-                <th className="text-center px-2 py-2 font-semibold text-xs text-muted-foreground w-28">STATUS</th>
-                <th className="px-2 py-2 w-24"></th>
+                <th className="text-right px-2 py-2 font-semibold text-xs text-muted-foreground w-24 md:w-32">PAYMENT</th>
+                <th className="text-right px-2 py-2 font-semibold text-xs text-muted-foreground w-24 md:w-32 hidden sm:table-cell">DEPOSIT</th>
+                <th className="text-right px-2 py-2 font-semibold text-xs text-muted-foreground w-28 hidden lg:table-cell">BALANCE</th>
+                <th className="text-center px-2 py-2 font-semibold text-xs text-muted-foreground w-24 md:w-28 hidden sm:table-cell">STATUS</th>
+                <th className="px-2 py-2 w-20 md:w-24"></th>
               </tr>
             </thead>
             <tbody>
@@ -782,19 +782,19 @@ export default function BankRegisterPage() {
                       )}
                       onClick={() => toggleRow(tx.id)}
                     >
-                      <td className="px-4 py-2.5 text-muted-foreground text-xs whitespace-nowrap">
-                        {format(parseISO(tx.date), "MM/dd/yyyy")}
+                      <td className="px-3 md:px-4 py-2.5 text-muted-foreground text-xs whitespace-nowrap">
+                        {format(parseISO(tx.date), "MM/dd/yy")}
                       </td>
-                      <td className="px-2 py-2.5 text-xs text-muted-foreground">
+                      <td className="px-2 py-2.5 text-xs text-muted-foreground hidden md:table-cell">
                         {tx.checkNumber ?? "\u2014"}
                       </td>
-                      <td className="px-2 py-2.5">
-                        <div className="flex items-center gap-2">
+                      <td className="px-2 py-2.5 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
                           {tx.journalEntryId ? (
                             <button
                               className="font-semibold text-[hsl(210,60%,40%)] underline underline-offset-2 hover:text-[hsl(210,60%,25%)] text-left transition-colors"
                               title="Click to view journal entry details"
-                              onClick={() => openSplitsModal(tx.id, tx.journalEntryId ?? null)}
+                              onClick={(e) => { e.stopPropagation(); openSplitsModal(tx.id, tx.journalEntryId ?? null); }}
                             >
                               {tx.payee}
                             </button>
@@ -808,25 +808,28 @@ export default function BankRegisterPage() {
                           )}
                         </div>
                         {tx.vendor && (
-                          <div className="text-xs text-muted-foreground mt-0.5">{tx.vendor.name}</div>
+                          <div className="text-xs text-muted-foreground mt-0.5 truncate">{tx.vendor.name}</div>
                         )}
+                        {/* Mobile-only: show status badge inline under payee */}
+                        <div className="sm:hidden mt-1"><StatusBadge status={tx.status} /></div>
                       </td>
                       <td className="px-2 py-2.5 text-right tabular-nums">
                         {isDebit && !isVoid
-                          ? <span className="text-red-600 font-medium">{fmtAmt(tx.amount)}</span>
-                          : <span className="text-muted-foreground/30">{"—"}</span>}
+                          ? <span className="text-red-600 font-medium text-xs md:text-sm">{fmtAmt(tx.amount)}</span>
+                          : <span className="text-muted-foreground/30 text-xs">{"—"}</span>}
                       </td>
-                      <td className="px-2 py-2.5 text-right tabular-nums">
+                      <td className="px-2 py-2.5 text-right tabular-nums hidden sm:table-cell">
                         {!isDebit && !isVoid
                           ? <span className="text-emerald-600 font-medium">{fmtAmt(tx.amount)}</span>
                           : <span className="text-muted-foreground/30">{"—"}</span>}
                       </td>
-                      <td className="px-2 py-2.5 text-right tabular-nums text-foreground font-medium">
+                      <td className="px-2 py-2.5 text-right tabular-nums text-foreground font-medium hidden lg:table-cell">
                         {!isVoid ? fmtAmt(tx.runningBalance ?? 0) : "\u2014"}
                       </td>
-                      <td className="px-2 py-2.5 text-center"><StatusBadge status={tx.status} /></td>
-                      <td className="px-2 py-2.5">
-                        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <td className="px-2 py-2.5 text-center hidden sm:table-cell"><StatusBadge status={tx.status} /></td>
+                      <td className="px-1 md:px-2 py-2.5">
+                        {/* Always visible on mobile/tablet, hover-only on desktop */}
+                        <div className="flex items-center gap-0.5 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                           {tx.journalEntryId && (
                             <button
                               title="View Journal Entry Details"
@@ -988,7 +991,7 @@ export default function BankRegisterPage() {
 
       {/* ── Transaction Form Dialog ──────────────────────────────────────────── */}
       <Dialog open={showForm} onOpenChange={setShowForm}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="w-[calc(100vw-1rem)] max-w-2xl max-h-[90dvh] overflow-y-auto p-4 md:p-6">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               {editTx ? "Edit Transaction" : "Add Transaction"}
@@ -1005,7 +1008,7 @@ export default function BankRegisterPage() {
             )}
 
             {/* Row 1: Date + Type + Amount + Status */}
-            <div className="grid grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <div>
                 <Label className="text-xs">Date *</Label>
                 <Input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
@@ -1112,7 +1115,7 @@ export default function BankRegisterPage() {
             </div>
 
             {/* Check + Ref + Memo */}
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <Label className="text-xs">Check #</Label>
                 <Input placeholder="e.g. 1042" value={form.checkNumber}
@@ -1203,8 +1206,8 @@ export default function BankRegisterPage() {
                   </div>
                 </div>
 
-                {/* Column headers */}
-                <div className="grid grid-cols-[1fr_1fr_auto_80px_32px] gap-2 px-4 py-1.5 bg-violet-50/50 border-b border-violet-100">
+                {/* Column headers — desktop only */}
+                <div className="hidden sm:grid grid-cols-[1fr_1fr_auto_80px_32px] gap-2 px-4 py-1.5 bg-violet-50/50 border-b border-violet-100">
                   <span className="text-[10px] font-semibold text-muted-foreground uppercase">Account</span>
                   <span className="text-[10px] font-semibold text-muted-foreground uppercase">Vendor</span>
                   <span className="text-[10px] font-semibold text-muted-foreground uppercase">Memo</span>
@@ -1217,7 +1220,47 @@ export default function BankRegisterPage() {
                   const isExpenseSplit = splitAccountType === "EXPENSE";
                   return (
                     <div key={split.id} className="border-b border-violet-50">
-                      <div className="grid grid-cols-[1fr_1fr_auto_80px_32px] gap-2 items-start px-4 pt-2 pb-1">
+                      {/* Mobile layout: stacked */}
+                      <div className="sm:hidden px-3 pt-2 pb-2 space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[10px] font-semibold text-muted-foreground uppercase">Line {idx + 1}</span>
+                          <button
+                            onClick={() => removeSplitRow(idx)}
+                            disabled={form.splits.length === 1}
+                            className="p-1 rounded hover:bg-red-50 text-muted-foreground hover:text-red-600 disabled:opacity-30"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                        <CoaSelect
+                          value={split.chartAccountId}
+                          coaList={coaList}
+                          onChange={(id) => { updateSplit(idx, "chartAccountId", id); updateSplit(idx, "functionalType", ""); }}
+                          onAddNew={() => setShowAddAccount(true)}
+                        />
+                        {isExpenseSplit && (
+                          <select
+                            value={split.functionalType}
+                            onChange={(e) => updateSplit(idx, "functionalType", e.target.value)}
+                            className={cn("w-full text-xs rounded border px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-300",
+                              !split.functionalType ? "border-amber-300 bg-amber-50 text-amber-700" : "border-gray-200 bg-white")}
+                          >
+                            <option value="">990 Functional Type…</option>
+                            {FUNCTIONAL_TYPES.map((ft) => <option key={ft.value} value={ft.value}>{ft.label}</option>)}
+                          </select>
+                        )}
+                        <div className="grid grid-cols-2 gap-2">
+                          <VendorCombobox value={split.vendorId} vendors={vendorList}
+                            onChange={(id) => updateSplit(idx, "vendorId", id)}
+                            onAddNew={() => setShowAddVendor(true)} placeholder="Vendor (optional)" />
+                          <Input className="text-sm text-right font-mono" type="number" step="0.01" placeholder="0.00"
+                            value={split.amount} onChange={(e) => updateSplit(idx, "amount", e.target.value)} />
+                        </div>
+                        <Input className="text-sm" placeholder="Memo (optional)"
+                          value={split.memo} onChange={(e) => updateSplit(idx, "memo", e.target.value)} />
+                      </div>
+                      {/* Desktop layout: grid */}
+                      <div className="hidden sm:grid grid-cols-[1fr_1fr_auto_80px_32px] gap-2 items-start px-4 pt-2 pb-1">
                         <div className="space-y-1">
                           <CoaSelect
                             value={split.chartAccountId}
