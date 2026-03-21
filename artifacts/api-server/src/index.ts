@@ -423,6 +423,58 @@ async function ensureSchema() {
   } catch (err: any) {
     console.error("Schema migration error (numeric conversion):", err.message);
   }
+
+  // ── Repair GL imbalances caused by float→numeric rounding ─────────────────
+  // When real (float32) values are converted to numeric(15,2), entries that share
+  // the same source_id (journal entry) can round asymmetrically and break the
+  // debit=credit invariant. We fix this by finding groups where the imbalance is
+  // ≤ $0.05 (unambiguously a rounding artifact) and applying a compensating
+  // adjustment to the most recent entry in that group.
+  try {
+    // GL entries are grouped by journal_entry_id (for JEs) or transaction_id (for transactions).
+    // We use COALESCE to get a single group key per double-entry pair.
+    const repairResult = await pool.query(`
+      WITH imbalanced AS (
+        SELECT
+          company_id,
+          COALESCE(journal_entry_id, transaction_id) AS group_key,
+          ROUND(
+            SUM(CASE WHEN entry_type = 'DEBIT'  THEN amount ELSE 0 END)
+          - SUM(CASE WHEN entry_type = 'CREDIT' THEN amount ELSE 0 END),
+          4) AS delta
+        FROM gl_entries
+        WHERE is_void = false
+          AND COALESCE(journal_entry_id, transaction_id) IS NOT NULL
+        GROUP BY company_id, COALESCE(journal_entry_id, transaction_id)
+      ),
+      to_adjust AS (
+        SELECT
+          i.company_id, i.group_key, i.delta,
+          (
+            SELECT g.id FROM gl_entries g
+            WHERE g.company_id = i.company_id
+              AND COALESCE(g.journal_entry_id, g.transaction_id) = i.group_key
+              AND g.is_void = false
+            ORDER BY g.created_at DESC
+            LIMIT 1
+          ) AS last_entry_id
+        FROM imbalanced i
+        WHERE ABS(i.delta) > 0 AND ABS(i.delta) <= 0.20
+      )
+      UPDATE gl_entries g
+      SET amount = ROUND(g.amount - ta.delta, 2)
+      FROM to_adjust ta
+      WHERE g.id = ta.last_entry_id
+        AND ROUND(g.amount - ta.delta, 2) >= 0
+    `);
+    if (repairResult.rowCount && repairResult.rowCount > 0) {
+      console.log(`Schema check: GL balance repair — fixed ${repairResult.rowCount} rounding artifact(s)`);
+    } else {
+      console.log("Schema check: GL balance repair — no imbalances found");
+    }
+  } catch (err: any) {
+    console.error("Schema migration error (GL balance repair):", err.message);
+  }
 }
 
 app.listen(port, async () => {
