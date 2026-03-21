@@ -36,6 +36,7 @@ import AdminCommandCenter from "@/pages/admin/index";
 import AdminLoginPage from "@/pages/admin/login";
 import AdminGlobalCoaPage from "@/pages/admin/global-coa";
 import AdminAuditLogsPage from "@/pages/admin/audit-logs";
+import BudgetPage from "@/pages/budget";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -118,6 +119,7 @@ function Router() {
       <Route path="/trial-balance"><SubscriptionGatedRoute component={TrialBalancePage} /></Route>
       <Route path="/period-close"><SubscriptionGatedRoute component={PeriodClosePage} /></Route>
       <Route path="/reports"><SubscriptionGatedRoute component={ReportsPage} /></Route>
+      <Route path="/budget"><SubscriptionGatedRoute component={BudgetPage} /></Route>
       <Route path="/donor-giving"><SubscriptionGatedRoute component={DonorGivingPage} /></Route>
       <Route path="/master-admin"><SubscriptionGatedRoute component={MasterAdminPage} /></Route>
       <Route path="/billing"><ProtectedRoute component={BillingPage} /></Route>
