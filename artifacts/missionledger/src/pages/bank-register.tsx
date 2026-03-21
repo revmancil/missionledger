@@ -185,36 +185,160 @@ function VendorCombobox({
   );
 }
 
-// ── COA Combobox (with + Add New Account) ─────────────────────────────────────
+// ── COA Combobox (searchable, scrollable, grouped) ────────────────────────────
+const COA_TYPE_ORDER = ["ASSET", "LIABILITY", "EQUITY", "INCOME", "EXPENSE"] as const;
+const COA_TYPE_LABELS: Record<string, string> = {
+  ASSET: "Assets", LIABILITY: "Liabilities", EQUITY: "Equity",
+  INCOME: "Income", EXPENSE: "Expenses",
+};
+
 function CoaSelect({
   value, onChange, coaList, onAddNew,
 }: {
   value: string; onChange: (id: string) => void; coaList: ChartAccount[]; onAddNew: () => void;
 }) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const selected = coaList.find((a) => a.id === value);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return coaList;
+    return coaList.filter(
+      (a) => a.code.toLowerCase().includes(q) || a.name.toLowerCase().includes(q)
+    );
+  }, [coaList, query]);
+
+  // Group by type, preserving order
+  const grouped = useMemo(() => {
+    const map = new Map<string, ChartAccount[]>();
+    for (const type of COA_TYPE_ORDER) map.set(type, []);
+    for (const acct of filtered) {
+      const bucket = map.get(acct.type) ?? [];
+      bucket.push(acct);
+      map.set(acct.type, bucket);
+    }
+    return map;
+  }, [filtered]);
+
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+        setQuery("");
+      }
+    }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  function handleOpen() {
+    setOpen(true);
+    setQuery("");
+    setTimeout(() => inputRef.current?.focus(), 30);
+  }
+
+  function handleSelect(id: string) {
+    onChange(id);
+    setOpen(false);
+    setQuery("");
+  }
+
   return (
-    <Select
-      value={value || "__none__"}
-      onValueChange={(v) => {
-        if (v === "__add__") { onAddNew(); return; }
-        onChange(v === "__none__" ? "" : v);
-      }}
-    >
-      <SelectTrigger className="text-sm">
-        <SelectValue placeholder="Account / Category\u2026" />
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem value="__none__">— None —</SelectItem>
-        {coaList.map((a) => (
-          <SelectItem key={a.id} value={a.id}>
-            <span className="font-mono text-xs mr-1 text-muted-foreground">{a.code}</span>
-            {a.name}
-          </SelectItem>
-        ))}
-        <SelectItem value="__add__" className="text-[hsl(174,60%,40%)] font-medium border-t mt-1">
-          <Plus className="h-3.5 w-3.5 inline mr-1" /> Add New Account
-        </SelectItem>
-      </SelectContent>
-    </Select>
+    <div ref={ref} className="relative">
+      {/* Trigger */}
+      <button
+        type="button"
+        onClick={handleOpen}
+        className={cn(
+          "w-full flex items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm bg-white text-left transition-colors",
+          open ? "border-ring ring-2 ring-ring/20" : "border-input hover:border-muted-foreground/40"
+        )}
+      >
+        <span className={cn("flex-1 truncate", !selected && "text-muted-foreground")}>
+          {selected
+            ? <><span className="font-mono text-xs text-muted-foreground mr-1">{selected.code}</span>{selected.name}</>
+            : "Account / Category…"}
+        </span>
+        <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+      </button>
+
+      {/* Dropdown */}
+      {open && (
+        <div className="absolute z-[200] left-0 right-0 mt-1 bg-white border border-gray-200 rounded-md shadow-xl flex flex-col"
+          style={{ maxHeight: "min(320px, 60vh)" }}>
+          {/* Search */}
+          <div className="p-2 border-b border-gray-100 shrink-0">
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+              <input
+                ref={inputRef}
+                type="text"
+                className="w-full pl-8 pr-3 py-1.5 text-sm border border-gray-200 rounded-md outline-none focus:ring-2 focus:ring-ring/30 focus:border-ring"
+                placeholder="Search by code or name…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </div>
+          </div>
+
+          {/* Scrollable list */}
+          <div className="overflow-y-auto flex-1">
+            {/* Clear selection */}
+            <button
+              type="button"
+              className="w-full text-left px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted/50 italic"
+              onMouseDown={(e) => { e.preventDefault(); handleSelect(""); }}
+            >
+              — None —
+            </button>
+
+            {filtered.length === 0 ? (
+              <p className="px-3 py-3 text-sm text-muted-foreground text-center italic">No accounts match "{query}"</p>
+            ) : (
+              COA_TYPE_ORDER.map((type) => {
+                const items = grouped.get(type) ?? [];
+                if (items.length === 0) return null;
+                return (
+                  <div key={type}>
+                    <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground bg-muted/30 sticky top-0">
+                      {COA_TYPE_LABELS[type]}
+                    </div>
+                    {items.map((acct) => (
+                      <button
+                        key={acct.id}
+                        type="button"
+                        className={cn(
+                          "w-full text-left px-3 py-2 text-sm hover:bg-[hsl(210,60%,97%)] transition-colors flex items-center gap-2",
+                          acct.id === value && "bg-[hsl(210,60%,95%)] font-medium"
+                        )}
+                        onMouseDown={(e) => { e.preventDefault(); handleSelect(acct.id); }}
+                      >
+                        <span className="font-mono text-xs text-muted-foreground w-10 shrink-0">{acct.code}</span>
+                        <span className="flex-1 truncate">{acct.name}</span>
+                        {acct.id === value && <CheckCheck className="h-3.5 w-3.5 text-primary shrink-0" />}
+                      </button>
+                    ))}
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Add new */}
+          <button
+            type="button"
+            className="w-full text-left px-3 py-2 text-sm text-[hsl(174,60%,40%)] hover:bg-emerald-50 border-t border-gray-100 flex items-center gap-2 font-medium shrink-0"
+            onMouseDown={(e) => { e.preventDefault(); setOpen(false); onAddNew(); }}
+          >
+            <Plus className="h-3.5 w-3.5 shrink-0" /> Add New Account
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
