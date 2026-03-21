@@ -308,6 +308,84 @@ async function ensureSchema() {
   } catch (err: any) {
     console.error("Schema migration error (coa_templates):", err.message);
   }
+  // Backfill: add any missing default COA accounts to companies that were seeded before the full COA was introduced
+  try {
+    await pool.query(`
+      INSERT INTO chart_of_accounts (id, company_id, code, name, coa_type, is_system, is_active, sort_order, created_at, updated_at)
+      SELECT gen_random_uuid(), c.id, acct.code, acct.name, acct.coa_type::coa_type, true, true, acct.sort_order::int, NOW(), NOW()
+      FROM companies c
+      CROSS JOIN (VALUES
+        ('1000','Cash & Bank Accounts','ASSET',10),
+        ('1010','Checking Account','ASSET',11),
+        ('1020','Savings Account','ASSET',12),
+        ('1100','Accounts Receivable','ASSET',20),
+        ('1200','Pledges Receivable','ASSET',30),
+        ('1500','Property & Equipment','ASSET',40),
+        ('2000','Accounts Payable','LIABILITY',110),
+        ('2100','Accrued Liabilities','LIABILITY',120),
+        ('2200','Deferred Revenue','LIABILITY',130),
+        ('3000','Net Assets','EQUITY',210),
+        ('3100','Unrestricted Net Assets','EQUITY',211),
+        ('3200','Temporarily Restricted','EQUITY',212),
+        ('3300','Permanently Restricted','EQUITY',213),
+        ('4000','Revenue','INCOME',310),
+        ('4100','Individual Contributions','INCOME',311),
+        ('4110','Online Donations','INCOME',312),
+        ('4120','Cash Offerings','INCOME',313),
+        ('4130','Check Donations','INCOME',314),
+        ('4200','Grants','INCOME',320),
+        ('4210','Government Grants','INCOME',321),
+        ('4220','Foundation Grants','INCOME',322),
+        ('4300','Membership Dues','INCOME',330),
+        ('4400','Program Revenue','INCOME',340),
+        ('4500','Special Events Revenue','INCOME',350),
+        ('4600','In-Kind Contributions','INCOME',360),
+        ('4700','Investment Income','INCOME',370),
+        ('4800','Rental Income','INCOME',380),
+        ('4900','Miscellaneous Income','INCOME',390),
+        ('8000','Expenses','EXPENSE',410),
+        ('8100','Personnel Expenses','EXPENSE',411),
+        ('8110','Salaries & Wages','EXPENSE',412),
+        ('8120','Payroll Taxes','EXPENSE',413),
+        ('8130','Employee Benefits','EXPENSE',414),
+        ('8140','Contract Labor','EXPENSE',415),
+        ('8200','Occupancy & Facilities','EXPENSE',420),
+        ('8210','Rent & Lease','EXPENSE',421),
+        ('8220','Utilities','EXPENSE',422),
+        ('8230','Maintenance & Repairs','EXPENSE',423),
+        ('8300','Program Expenses','EXPENSE',430),
+        ('8310','Program Supplies','EXPENSE',431),
+        ('8320','Program Services','EXPENSE',432),
+        ('8400','Administrative Expenses','EXPENSE',440),
+        ('8410','Office Supplies','EXPENSE',441),
+        ('8420','Postage & Shipping','EXPENSE',442),
+        ('8430','Printing & Copying','EXPENSE',443),
+        ('8440','Software & Technology','EXPENSE',444),
+        ('8500','Professional Services','EXPENSE',450),
+        ('8510','Accounting & Audit','EXPENSE',451),
+        ('8520','Legal Fees','EXPENSE',452),
+        ('8530','Consulting Fees','EXPENSE',453),
+        ('8600','Travel & Transportation','EXPENSE',460),
+        ('8610','Mileage & Vehicle','EXPENSE',461),
+        ('8620','Airfare & Lodging','EXPENSE',462),
+        ('8700','Marketing & Communications','EXPENSE',470),
+        ('8710','Advertising','EXPENSE',471),
+        ('8720','Website & Social Media','EXPENSE',472),
+        ('8800','Fundraising Expenses','EXPENSE',480),
+        ('8900','Depreciation','EXPENSE',490),
+        ('8950','Insurance','EXPENSE',491),
+        ('8990','Miscellaneous Expenses','EXPENSE',499)
+      ) AS acct(code, name, coa_type, sort_order)
+      WHERE
+        -- only for companies that have been seeded (have at least one COA account)
+        EXISTS (SELECT 1 FROM chart_of_accounts x WHERE x.company_id = c.id)
+        -- skip accounts the company already has
+        AND NOT EXISTS (SELECT 1 FROM chart_of_accounts ca WHERE ca.company_id = c.id AND ca.code = acct.code)
+    `);
+    console.log("Schema check: COA backfill OK");
+  } catch (err: any) {
+    console.error("Schema migration error (COA backfill):", err.message);
+  }
 }
 
 app.listen(port, async () => {
