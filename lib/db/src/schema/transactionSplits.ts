@@ -1,4 +1,4 @@
-import { pgTable, text, real, integer, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, text, numeric, integer, timestamp } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -7,7 +7,7 @@ export const transactionSplits = pgTable("transaction_splits", {
   transactionId: text("transaction_id").notNull(),
   chartAccountId: text("chart_account_id"),
   vendorId: text("vendor_id"),
-  amount: real("amount").notNull(),
+  amount: numeric("amount", { precision: 15, scale: 2 }).notNull().$type<number>(),
   memo: text("memo"),
   functionalType: text("functional_type"), // 990 tag: PROGRAM_SERVICE | MANAGEMENT_GENERAL | FUNDRAISING
   sortOrder: integer("sort_order").notNull().default(0),

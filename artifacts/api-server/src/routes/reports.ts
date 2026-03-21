@@ -23,8 +23,8 @@ router.get("/profit-loss", requireAuth, async (req, res) => {
         c.name      AS account_name,
         c.coa_type  AS account_type,
         c.sort_order AS sort_order,
-        COALESCE(SUM(CASE WHEN g.entry_type = 'DEBIT'  THEN g.amount ELSE 0 END), 0) AS total_debit,
-        COALESCE(SUM(CASE WHEN g.entry_type = 'CREDIT' THEN g.amount ELSE 0 END), 0) AS total_credit
+        ROUND(COALESCE(SUM(CASE WHEN g.entry_type = 'DEBIT'  THEN g.amount ELSE 0 END), 0)::numeric, 2) AS total_debit,
+        ROUND(COALESCE(SUM(CASE WHEN g.entry_type = 'CREDIT' THEN g.amount ELSE 0 END), 0)::numeric, 2) AS total_credit
       FROM chart_of_accounts c
       LEFT JOIN gl_entries g
         ON g.account_id = c.id
@@ -91,8 +91,8 @@ router.get("/balance-sheet", requireAuth, async (req, res) => {
         c.name            AS account_name,
         c.coa_type        AS account_type,
         c.sort_order      AS sort_order,
-        COALESCE(SUM(CASE WHEN g.entry_type = 'DEBIT'  THEN g.amount ELSE 0 END), 0) AS total_debit,
-        COALESCE(SUM(CASE WHEN g.entry_type = 'CREDIT' THEN g.amount ELSE 0 END), 0) AS total_credit
+        ROUND(COALESCE(SUM(CASE WHEN g.entry_type = 'DEBIT'  THEN g.amount ELSE 0 END), 0)::numeric, 2) AS total_debit,
+        ROUND(COALESCE(SUM(CASE WHEN g.entry_type = 'CREDIT' THEN g.amount ELSE 0 END), 0)::numeric, 2) AS total_credit
       FROM chart_of_accounts c
       LEFT JOIN gl_entries g
         ON g.account_id = c.id
@@ -119,8 +119,8 @@ router.get("/balance-sheet", requireAuth, async (req, res) => {
         c.sort_order      AS sort_order,
         COALESCE(f.fund_type, 'UNRESTRICTED') AS fund_type,
         COALESCE(f.name, 'General') AS fund_name,
-        COALESCE(SUM(CASE WHEN g.entry_type = 'DEBIT'  THEN g.amount ELSE 0 END), 0) AS total_debit,
-        COALESCE(SUM(CASE WHEN g.entry_type = 'CREDIT' THEN g.amount ELSE 0 END), 0) AS total_credit
+        ROUND(COALESCE(SUM(CASE WHEN g.entry_type = 'DEBIT'  THEN g.amount ELSE 0 END), 0)::numeric, 2) AS total_debit,
+        ROUND(COALESCE(SUM(CASE WHEN g.entry_type = 'CREDIT' THEN g.amount ELSE 0 END), 0)::numeric, 2) AS total_credit
       FROM chart_of_accounts c
       LEFT JOIN gl_entries g
         ON g.account_id = c.id
@@ -411,8 +411,8 @@ router.get("/gl-by-account", requireAuth, async (req, res) => {
         c.name            AS account_name,
         c.coa_type        AS account_type,
         c.sort_order      AS sort_order,
-        COALESCE(SUM(CASE WHEN g.entry_type = 'DEBIT'  THEN g.amount ELSE 0 END), 0) AS total_debit,
-        COALESCE(SUM(CASE WHEN g.entry_type = 'CREDIT' THEN g.amount ELSE 0 END), 0) AS total_credit
+        ROUND(COALESCE(SUM(CASE WHEN g.entry_type = 'DEBIT'  THEN g.amount ELSE 0 END), 0)::numeric, 2) AS total_debit,
+        ROUND(COALESCE(SUM(CASE WHEN g.entry_type = 'CREDIT' THEN g.amount ELSE 0 END), 0)::numeric, 2) AS total_credit
       FROM chart_of_accounts c
       JOIN gl_entries g
         ON g.account_id = c.id

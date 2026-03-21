@@ -1,4 +1,4 @@
-import { pgTable, text, real, timestamp, pgEnum, boolean } from "drizzle-orm/pg-core";
+import { pgTable, text, numeric, timestamp, pgEnum, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -12,7 +12,7 @@ export const transactions = pgTable("transactions", {
   date: timestamp("date").notNull(),
   payee: text("payee").notNull(),
   vendorId: text("vendor_id"),
-  amount: real("amount").notNull(),
+  amount: numeric("amount", { precision: 15, scale: 2 }).notNull().$type<number>(),
   type: transactionTypeEnum("transaction_type").notNull().default("DEBIT"),
   status: transactionStatusEnum("transaction_status").notNull().default("UNCLEARED"),
   chartAccountId: text("chart_account_id"),

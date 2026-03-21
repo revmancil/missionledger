@@ -1,4 +1,4 @@
-import { pgTable, text, real, boolean, timestamp, pgEnum } from "drizzle-orm/pg-core";
+import { pgTable, text, numeric, boolean, timestamp, pgEnum } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -9,10 +9,10 @@ export const reconciliations = pgTable("reconciliations", {
   companyId: text("company_id").notNull(),
   bankAccountId: text("bank_account_id").notNull(),
   statementDate: timestamp("statement_date").notNull(),
-  statementBalance: real("statement_balance").notNull(),
-  openingBalance: real("opening_balance").notNull().default(0),
-  clearedBalance: real("cleared_balance"),
-  difference: real("difference"),
+  statementBalance: numeric("statement_balance", { precision: 15, scale: 2 }).notNull().$type<number>(),
+  openingBalance: numeric("opening_balance", { precision: 15, scale: 2 }).notNull().default("0").$type<number>(),
+  clearedBalance: numeric("cleared_balance", { precision: 15, scale: 2 }).$type<number>(),
+  difference: numeric("difference", { precision: 15, scale: 2 }).$type<number>(),
   status: reconciliationStatusEnum("status").notNull().default("IN_PROGRESS"),
   reconciledBy: text("reconciled_by"),
   reconciledAt: timestamp("reconciled_at"),

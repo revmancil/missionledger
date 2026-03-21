@@ -1,4 +1,4 @@
-import { pgTable, text, real, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, text, numeric, timestamp } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -6,7 +6,7 @@ export const expenses = pgTable("expenses", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   companyId: text("company_id").notNull(),
   description: text("description").notNull(),
-  amount: real("amount").notNull(),
+  amount: numeric("amount", { precision: 15, scale: 2 }).notNull().$type<number>(),
   date: timestamp("date").notNull(),
   category: text("category").notNull(),
   fundId: text("fund_id"),

@@ -386,6 +386,43 @@ async function ensureSchema() {
   } catch (err: any) {
     console.error("Schema migration error (COA backfill):", err.message);
   }
+
+  // ── Migrate real → numeric(15,2) for all monetary columns ─────────────────
+  // This fixes floating-point rounding errors ($0.01 discrepancies) in financial statements.
+  // The USING clause safely converts existing float4 data to exact decimal storage.
+  try {
+    const monetaryAlterations = [
+      "ALTER TABLE transactions      ALTER COLUMN amount              TYPE numeric(15,2) USING amount::numeric(15,2)",
+      "ALTER TABLE gl_entries        ALTER COLUMN amount              TYPE numeric(15,2) USING amount::numeric(15,2)",
+      "ALTER TABLE transaction_splits ALTER COLUMN amount             TYPE numeric(15,2) USING amount::numeric(15,2)",
+      "ALTER TABLE donations         ALTER COLUMN amount              TYPE numeric(15,2) USING amount::numeric(15,2)",
+      "ALTER TABLE expenses          ALTER COLUMN amount              TYPE numeric(15,2) USING amount::numeric(15,2)",
+      "ALTER TABLE bills             ALTER COLUMN amount              TYPE numeric(15,2) USING amount::numeric(15,2)",
+      "ALTER TABLE bill_payments     ALTER COLUMN amount              TYPE numeric(15,2) USING amount::numeric(15,2)",
+      "ALTER TABLE pledges           ALTER COLUMN total_amount        TYPE numeric(15,2) USING total_amount::numeric(15,2)",
+      "ALTER TABLE pledges           ALTER COLUMN paid_amount         TYPE numeric(15,2) USING paid_amount::numeric(15,2)",
+      "ALTER TABLE budget_lines      ALTER COLUMN amount              TYPE numeric(15,2) USING amount::numeric(15,2)",
+      "ALTER TABLE reconciliations   ALTER COLUMN statement_balance   TYPE numeric(15,2) USING statement_balance::numeric(15,2)",
+      "ALTER TABLE reconciliations   ALTER COLUMN opening_balance     TYPE numeric(15,2) USING opening_balance::numeric(15,2)",
+      "ALTER TABLE reconciliations   ALTER COLUMN cleared_balance     TYPE numeric(15,2) USING cleared_balance::numeric(15,2)",
+      "ALTER TABLE reconciliations   ALTER COLUMN difference          TYPE numeric(15,2) USING difference::numeric(15,2)",
+      "ALTER TABLE bank_accounts     ALTER COLUMN current_balance     TYPE numeric(15,2) USING current_balance::numeric(15,2)",
+      "ALTER TABLE bank_transactions ALTER COLUMN amount              TYPE numeric(15,2) USING amount::numeric(15,2)",
+    ];
+    for (const stmt of monetaryAlterations) {
+      try {
+        await pool.query(stmt);
+      } catch (e: any) {
+        // "cannot alter type" means already numeric — safe to ignore
+        if (!e.message?.includes("cannot alter type") && !e.message?.includes("already exists")) {
+          throw e;
+        }
+      }
+    }
+    console.log("Schema check: monetary columns → numeric(15,2) OK");
+  } catch (err: any) {
+    console.error("Schema migration error (numeric conversion):", err.message);
+  }
 }
 
 app.listen(port, async () => {

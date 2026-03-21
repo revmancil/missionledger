@@ -1,4 +1,4 @@
-import { pgTable, text, real, integer, boolean, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, text, numeric, integer, boolean, timestamp } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -19,7 +19,7 @@ export const budgetLines = pgTable("budget_lines", {
   budgetId: text("budget_id").notNull(),
   companyId: text("company_id").notNull(),
   accountId: text("account_id").notNull(),
-  amount: real("amount").notNull().default(0),
+  amount: numeric("amount", { precision: 15, scale: 2 }).notNull().default("0").$type<number>(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

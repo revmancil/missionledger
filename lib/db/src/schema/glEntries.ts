@@ -1,4 +1,4 @@
-import { pgTable, text, real, boolean, timestamp, pgEnum } from "drizzle-orm/pg-core";
+import { pgTable, text, numeric, boolean, timestamp, pgEnum } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -27,7 +27,7 @@ export const glEntries = pgTable("gl_entries", {
   fundId: text("fund_id"),                     // fund this entry belongs to
   fundName: text("fund_name"),                 // denormalised for fast queries
   entryType: glEntryTypeEnum("entry_type").notNull(),
-  amount: real("amount").notNull(),            // always positive
+  amount: numeric("amount", { precision: 15, scale: 2 }).notNull().$type<number>(),  // always positive
   description: text("description"),
   date: timestamp("date").notNull(),
   isVoid: boolean("is_void").notNull().default(false),

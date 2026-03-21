@@ -1,4 +1,4 @@
-import { pgTable, text, real, boolean, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, text, numeric, boolean, timestamp } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -8,7 +8,7 @@ export const bankAccounts = pgTable("bank_accounts", {
   name: text("name").notNull(),
   accountType: text("account_type").notNull().default("CHECKING"),
   lastFour: text("last_four"),
-  currentBalance: real("current_balance").notNull().default(0),
+  currentBalance: numeric("current_balance", { precision: 15, scale: 2 }).notNull().default("0").$type<number>(),
   glAccountId: text("gl_account_id"),
   isActive: boolean("is_active").notNull().default(true),
   plaidAccessToken: text("plaid_access_token"),

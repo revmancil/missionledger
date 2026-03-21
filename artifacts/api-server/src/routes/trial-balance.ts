@@ -17,8 +17,8 @@ router.get("/", requireAuth, async (req, res) => {
         account_id,
         account_code,
         account_name,
-        SUM(CASE WHEN entry_type = 'DEBIT'  THEN amount ELSE 0 END) AS total_debit,
-        SUM(CASE WHEN entry_type = 'CREDIT' THEN amount ELSE 0 END) AS total_credit
+        ROUND(SUM(CASE WHEN entry_type = 'DEBIT'  THEN amount ELSE 0 END)::numeric, 2) AS total_debit,
+        ROUND(SUM(CASE WHEN entry_type = 'CREDIT' THEN amount ELSE 0 END)::numeric, 2) AS total_credit
       FROM gl_entries
       WHERE company_id = ${companyId} AND is_void = false
       GROUP BY account_id, account_code, account_name
@@ -74,8 +74,8 @@ router.get("/health", requireAuth, async (req, res) => {
 
     const result = await db.execute(sql`
       SELECT
-        SUM(CASE WHEN entry_type = 'DEBIT'  THEN amount ELSE 0 END) AS total_debit,
-        SUM(CASE WHEN entry_type = 'CREDIT' THEN amount ELSE 0 END) AS total_credit,
+        ROUND(SUM(CASE WHEN entry_type = 'DEBIT'  THEN amount ELSE 0 END)::numeric, 2) AS total_debit,
+        ROUND(SUM(CASE WHEN entry_type = 'CREDIT' THEN amount ELSE 0 END)::numeric, 2) AS total_credit,
         COUNT(*)::int AS entry_count
       FROM gl_entries
       WHERE company_id = ${companyId} AND is_void = false

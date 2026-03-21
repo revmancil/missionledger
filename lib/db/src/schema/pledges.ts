@@ -1,4 +1,4 @@
-import { pgTable, text, real, timestamp, pgEnum } from "drizzle-orm/pg-core";
+import { pgTable, text, numeric, timestamp, pgEnum } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -10,8 +10,8 @@ export const pledges = pgTable("pledges", {
   companyId: text("company_id").notNull(),
   donorName: text("donor_name").notNull(),
   donorEmail: text("donor_email"),
-  totalAmount: real("total_amount").notNull(),
-  paidAmount: real("paid_amount").notNull().default(0),
+  totalAmount: numeric("total_amount", { precision: 15, scale: 2 }).notNull().$type<number>(),
+  paidAmount: numeric("paid_amount", { precision: 15, scale: 2 }).notNull().default("0").$type<number>(),
   pledgeDate: timestamp("pledge_date").notNull(),
   startDate: timestamp("start_date"),
   endDate: timestamp("end_date"),
