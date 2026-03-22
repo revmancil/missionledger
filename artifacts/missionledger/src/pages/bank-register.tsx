@@ -955,8 +955,7 @@ export default function BankRegisterPage() {
                       </td>
                       <td className="px-2 py-2.5 text-center hidden sm:table-cell"><StatusBadge status={tx.status} /></td>
                       <td className="px-1 md:px-2 py-2.5">
-                        {/* Always visible on mobile/tablet, hover-only on desktop */}
-                        <div className="flex items-center gap-0.5 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                        <div className="flex items-center gap-0.5">
                           {tx.journalEntryId && (
                             <button
                               title="View Journal Entry Details"

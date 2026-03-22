@@ -87,7 +87,7 @@ export default function FundsPage() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
         {funds.map(fund => (
           <div key={fund.id} className="bg-card rounded-xl border border-border p-6 shadow-sm hover:shadow-md transition-shadow relative group overflow-hidden">
-            <div className="absolute top-0 right-0 p-4 opacity-0 group-hover:opacity-100 transition-opacity">
+            <div className="absolute top-0 right-0 p-4">
               <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive/10"
                 onClick={() => { if (confirm('Delete fund?')) deleteFund.mutate({ id: fund.id }) }}>
                 <Trash2 className="w-4 h-4" />

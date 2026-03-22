@@ -412,7 +412,7 @@ export default function BudgetPage() {
                                 className="group flex items-center gap-1 ml-auto hover:text-primary transition-colors"
                               >
                                 <span className="font-medium">{fmt(line.amount)}</span>
-                                <Edit2 className="w-3 h-3 opacity-0 group-hover:opacity-60 shrink-0" />
+                                <Edit2 className="w-3 h-3 opacity-60 shrink-0" />
                               </button>
                             )}
                           </td>
