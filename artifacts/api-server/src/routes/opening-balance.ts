@@ -232,7 +232,19 @@ router.post("/finalize", requireAuth, requireAdmin, async (req, res) => {
     }
     const entryNumber = `JE-${String(nextNum).padStart(6, "0")}`;
 
-    // Void existing OB entry (journal entry + its GL entries + its JE lines)
+    // ── Pre-flight: propagate void status from any historically-voided JEs whose
+    // GL entries were not properly voided (e.g. from an older code path).
+    await db.execute(sql`
+      UPDATE gl_entries ge
+      SET is_void = true, updated_at = NOW()
+      FROM journal_entries je
+      WHERE ge.journal_entry_id = je.id
+        AND ge.company_id = ${companyId}
+        AND je.status = 'VOID'
+        AND ge.is_void = false
+    `);
+
+    // Void existing OB entry (journal entry + its GL entries)
     const [company] = await db.select().from(companies).where(eq(companies.id, companyId));
     if (company?.openingBalanceEntryId) {
       const oldJeId = company.openingBalanceEntryId;
