@@ -137,8 +137,21 @@ export default function ReportsPage() {
   const [applied, setApplied]     = useState({ startDate: `${currentYear}-01-01`, endDate: `${currentYear}-12-31` });
   const [fundFilter, setFundFilter] = useState("");
 
-  const [bsAsOfDate, setBsAsOfDate] = useState(`${currentYear}-12-31`);
-  const [bsQueryDate, setBsQueryDate] = useState(`${currentYear}-12-31`);
+  const currentMonth = new Date().getMonth() + 1;
+  const defaultBsMonth = `${currentYear}-${String(currentMonth).padStart(2, "0")}`;
+  const [bsMonth, setBsMonth] = useState(defaultBsMonth);
+
+  function lastDayOfMonth(ym: string): string {
+    if (!ym || !ym.includes("-")) return `${currentYear}-12-31`;
+    const [y, m] = ym.split("-").map(Number);
+    if (isNaN(y) || isNaN(m) || m < 1 || m > 12) return `${currentYear}-12-31`;
+    const d = new Date(Date.UTC(y, m, 0));
+    const yy = d.getUTCFullYear();
+    const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+    const dd = String(d.getUTCDate()).padStart(2, "0");
+    return `${yy}-${mm}-${dd}`;
+  }
+  const bsQueryDate = lastDayOfMonth(bsMonth);
 
   // Transaction register extra filters
   const [search, setSearch]       = useState("");
@@ -859,12 +872,11 @@ export default function ReportsPage() {
                       </div>
                       <div className="flex items-center gap-2">
                         <Input
-                          type="date"
-                          value={bsAsOfDate}
-                          onChange={e => setBsAsOfDate(e.target.value)}
+                          type="month"
+                          value={bsMonth}
+                          onChange={e => { if (e.target.value) setBsMonth(e.target.value); }}
                           className="w-36 h-7 text-xs"
                         />
-                        <Button size="sm" variant="outline" className="h-7 text-xs px-2" onClick={() => setBsQueryDate(bsAsOfDate)}>Go</Button>
                       </div>
                     </div>
                   </CardHeader>
