@@ -84,6 +84,9 @@ router.get("/balance-sheet", requireAuth, async (req, res) => {
     asOfEnd.setHours(23, 59, 59, 999);
 
     // ── 1. Asset & Liability rows (no fund split needed) ──────────────────────
+    // LEFT JOIN journal_entries and filter je.status != 'VOID' to exclude any
+    // orphaned GL entries whose parent journal entry was voided without propagating
+    // is_void to the child GL rows (data-integrity guard).
     const assetLiabRows = await db.execute(sql`
       SELECT
         c.id              AS account_id,
@@ -99,17 +102,71 @@ router.get("/balance-sheet", requireAuth, async (req, res) => {
         AND g.company_id = ${companyId}
         AND g.is_void = false
         AND g.date <= ${asOfEnd}
+      LEFT JOIN journal_entries je
+        ON je.id = g.journal_entry_id
+        AND je.status != 'VOID'
       WHERE c.company_id = ${companyId}
         AND c.is_active = true
         AND c.coa_type IN ('ASSET', 'LIABILITY')
+        AND (g.id IS NULL OR je.id IS NOT NULL)
       GROUP BY c.id, c.code, c.name, c.coa_type, c.sort_order
       ORDER BY c.sort_order, c.code
     `);
+
+    // ── 1b. Bank-register override for bank-linked asset accounts ─────────────
+    // For any COA account that is linked to a bank account we compute:
+    //   balance = OB GL net (OPENING_BALANCE source only, posted entries) +
+    //             net of all non-void bank register transactions up to asOfDate
+    // This way ALL imported transactions (categorized or not) are reflected in
+    // the cash balance, not just the three that made it into the GL.
+    const bankRegisterRows = await db.execute(sql`
+      SELECT
+        ba.gl_account_id,
+        ba.name AS bank_account_name,
+        COALESCE((
+          SELECT ROUND((
+            SUM(CASE WHEN g.entry_type = 'DEBIT'  THEN g.amount ELSE 0 END) -
+            SUM(CASE WHEN g.entry_type = 'CREDIT' THEN g.amount ELSE 0 END)
+          )::numeric, 2)
+          FROM gl_entries g
+          JOIN journal_entries je ON je.id = g.journal_entry_id
+          WHERE g.account_id = ba.gl_account_id
+            AND g.company_id = ${companyId}
+            AND g.is_void = false
+            AND je.status = 'POSTED'
+            AND g.source_type = 'OPENING_BALANCE'
+            AND g.date <= ${asOfEnd}
+        ), 0) AS ob_balance,
+        COALESCE((
+          SELECT ROUND((
+            SUM(CASE WHEN t.transaction_type = 'CREDIT' THEN t.amount ELSE 0 END) -
+            SUM(CASE WHEN t.transaction_type = 'DEBIT'  THEN t.amount ELSE 0 END)
+          )::numeric, 2)
+          FROM transactions t
+          WHERE t.bank_account_id = ba.id
+            AND t.is_void = false
+            AND t.payee != 'Opening Balance'
+            AND t.date <= ${asOfEnd}
+        ), 0) AS register_net
+      FROM bank_accounts ba
+      WHERE ba.company_id = ${companyId}
+        AND ba.gl_account_id IS NOT NULL
+    `);
+
+    // Build a map: gl_account_id → register-based balance
+    const bankBalanceMap = new Map<string, number>();
+    for (const row of bankRegisterRows.rows as any[]) {
+      const ob  = parseFloat(row.ob_balance)     || 0;
+      const net = parseFloat(row.register_net)   || 0;
+      const existing = bankBalanceMap.get(row.gl_account_id) || 0;
+      bankBalanceMap.set(row.gl_account_id, existing + ob + net);
+    }
 
     // ── 2. Net Assets split by fund type (EQUITY + INCOME/EXPENSE by fund) ───
     // Join GL entries with funds table to get the fund_type for each entry.
     // UNRESTRICTED fund_type = 'UNRESTRICTED'
     // Everything else = restricted (RESTRICTED_TEMP, RESTRICTED_PERM, BOARD_DESIGNATED)
+    // Also join journal_entries to exclude orphaned GL rows from VOID JEs.
     const netAssetRows = await db.execute(sql`
       SELECT
         c.id              AS account_id,
@@ -127,20 +184,28 @@ router.get("/balance-sheet", requireAuth, async (req, res) => {
         AND g.company_id = ${companyId}
         AND g.is_void = false
         AND g.date <= ${asOfEnd}
+      LEFT JOIN journal_entries je
+        ON je.id = g.journal_entry_id
+        AND je.status != 'VOID'
       LEFT JOIN funds f ON f.id = g.fund_id AND f.company_id = ${companyId}
       WHERE c.company_id = ${companyId}
         AND c.is_active = true
         AND c.coa_type IN ('EQUITY', 'INCOME', 'EXPENSE')
+        AND (g.id IS NULL OR je.id IS NOT NULL)
       GROUP BY c.id, c.code, c.name, c.coa_type, c.sort_order, f.fund_type, f.name
       ORDER BY c.sort_order, c.code
     `);
 
-    // Map asset/liability rows
+    // Map asset/liability rows — override GL balance with bank register for bank-linked accounts
     const assetLiabMapped = (assetLiabRows.rows as any[]).map((r) => {
       const debit  = parseFloat(r.total_debit)  || 0;
       const credit = parseFloat(r.total_credit) || 0;
-      const amount = r.account_type === "ASSET" ? debit - credit : credit - debit;
-      return { accountId: r.account_id, accountCode: r.account_code, accountName: r.account_name, accountType: r.account_type, amount };
+      let amount = r.account_type === "ASSET" ? debit - credit : credit - debit;
+      // If this account is linked to a bank account use the register-based balance
+      if (r.account_type === "ASSET" && bankBalanceMap.has(r.account_id)) {
+        amount = bankBalanceMap.get(r.account_id)!;
+      }
+      return { accountId: r.account_id, accountCode: r.account_code, accountName: r.account_name, accountType: r.account_type, amount, isBankLinked: bankBalanceMap.has(r.account_id) };
     });
 
     const assets      = assetLiabMapped.filter(r => r.accountType === "ASSET"     && r.amount !== 0);
@@ -204,6 +269,13 @@ router.get("/balance-sheet", requireAuth, async (req, res) => {
     const totalNetAssets   = totalUnrestrictedNetAssets + totalRestrictedNetAssets;
     const netIncome        = unrestrictedNetIncome + restrictedNetIncome;
 
+    // Unposted / uncategorized activity: the net difference between what the bank
+    // register says (register-based assets) and what the GL income/expense accounts
+    // reflect.  Non-zero when bank transactions have been imported but not yet
+    // categorized to an income or expense account.  Displayed as a reconciling line
+    // in the Net Assets section so the SoFP shows clearly what's unclassified.
+    const unpostedActivity = Math.round((totalAssets - (totalLiabilities + totalNetAssets)) * 100) / 100;
+
     res.json({
       asOfDate: asOfEnd.toISOString(),
       assets,
@@ -218,11 +290,13 @@ router.get("/balance-sheet", requireAuth, async (req, res) => {
       restrictedNetIncome,
       totalNetAssets,
       netIncome,
+      // Reconciling item for uncategorized bank transactions
+      unpostedActivity,
       // Legacy fields kept for compatibility
       equity: [],
       totalEquity: totalUnrestrictedNetAssets,
-      // Balance check
-      difference: totalAssets - (totalLiabilities + totalNetAssets),
+      // Balance check (should always be 0 after unpostedActivity is applied)
+      difference: totalAssets - (totalLiabilities + totalNetAssets + unpostedActivity),
     });
   } catch (error) {
     console.error("Balance sheet error:", error);

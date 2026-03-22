@@ -412,6 +412,10 @@ export default function ReportsPage() {
       [{ content: "Unrestricted (General & Payroll)", colSpan: 2 }, formatCurrency(bsData?.totalUnrestrictedNetAssets ?? 0)],
       ...(bsData?.restrictedFundDetails ?? []).map((f: any) => [`  ${f.fundName}`, FUND_TYPE_LABELS[f.fundType] ?? f.fundType, formatCurrency(f.netAssets)]),
       [{ content: "Total Net Assets", colSpan: 2, styles: { fontStyle: "bold" } }, { content: formatCurrency(bsData?.totalNetAssets ?? 0), styles: { fontStyle: "bold" } }],
+      ...((bsData?.unpostedActivity ?? 0) !== 0 ? [[
+        { content: "Uncategorized Transactions (Net)", colSpan: 2, styles: { fontStyle: "italic", textColor: [180, 100, 0] } },
+        { content: `${(bsData?.unpostedActivity ?? 0) < 0 ? "(" : ""}${formatCurrency(Math.abs(bsData?.unpostedActivity ?? 0))}${(bsData?.unpostedActivity ?? 0) < 0 ? ")" : ""}`, styles: { fontStyle: "italic", textColor: [180, 100, 0] } }
+      ]] : []),
     ];
 
     autoTable(doc, {
@@ -965,20 +969,37 @@ export default function ReportsPage() {
                             <span>Total Net Assets</span>
                             <span className="tabular-nums">{formatCurrency(bs?.totalNetAssets ?? 0)}</span>
                           </div>
+
+                          {/* Unposted / uncategorized activity reconciling line */}
+                          {(bs?.unpostedActivity ?? 0) !== 0 && (
+                            <div className="mt-2">
+                              <div className="flex justify-between py-0.5 pl-2 text-amber-700">
+                                <span className="text-xs italic">Uncategorized Transactions (Net)</span>
+                                <span className={`tabular-nums text-xs italic ${(bs?.unpostedActivity ?? 0) >= 0 ? "" : "text-destructive"}`}>
+                                  {(bs?.unpostedActivity ?? 0) < 0 ? "(" : ""}{formatCurrency(Math.abs(bs?.unpostedActivity ?? 0))}{(bs?.unpostedActivity ?? 0) < 0 ? ")" : ""}
+                                </span>
+                              </div>
+                            </div>
+                          )}
                         </div>
 
                         {/* Total Liabilities + Net Assets */}
                         <div className="flex justify-between font-bold text-base pt-1 border-t-2 border-border">
                           <span>Total Liab. + Net Assets</span>
-                          <span className="tabular-nums">{formatCurrency((bs?.totalLiabilities ?? 0) + (bs?.totalNetAssets ?? 0))}</span>
+                          <span className="tabular-nums">{formatCurrency((bs?.totalLiabilities ?? 0) + (bs?.totalNetAssets ?? 0) + (bs?.unpostedActivity ?? 0))}</span>
                         </div>
 
+                        {/* Unposted activity note */}
+                        {(bs?.unpostedActivity ?? 0) !== 0 && (
+                          <div className="mt-2 p-2 rounded-md text-xs bg-amber-50 border border-amber-200 text-amber-800">
+                            ⚠ {Math.round(Math.abs(bs?.unpostedActivity ?? 0) * 100) / 100 > 0 ? formatCurrency(Math.abs(bs?.unpostedActivity ?? 0)) : ""} in bank transactions are imported but not yet categorized. Categorize them in the Bank Register to record income &amp; expenses properly.
+                          </div>
+                        )}
+
                         {/* Balance check */}
-                        {(bs?.totalAssets ?? 0) > 0 && (
-                          <div className={`mt-2 p-2 rounded-md text-xs font-medium ${Math.abs(bs?.difference ?? 0) <= 0.01 ? "bg-emerald-50 border border-emerald-200 text-emerald-700" : "bg-red-50 border border-red-200 text-red-700"}`}>
-                            {Math.abs(bs?.difference ?? 0) <= 0.01
-                              ? "✓ Books are in balance"
-                              : `⚠ Out of balance by ${formatCurrency(Math.abs(bs?.difference ?? 0))}`}
+                        {(bs?.totalAssets ?? 0) > 0 && Math.abs(bs?.difference ?? 0) > 0.01 && (
+                          <div className="mt-2 p-2 rounded-md text-xs font-medium bg-red-50 border border-red-200 text-red-700">
+                            ⚠ Out of balance by {formatCurrency(Math.abs(bs?.difference ?? 0))}
                           </div>
                         )}
                       </div>
