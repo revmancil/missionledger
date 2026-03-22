@@ -19,25 +19,27 @@ async function fetchConnectorKey(hostname: string, token: string, environment: s
   return null;
 }
 
-// Returns true when the app is using its own API keys (sk_/rk_ prefixes)
-// rather than Replit-managed mk_ keys through the connector proxy.
+// Returns true when the app is using its own live/test API keys
+// (STRIPE_LIVE_SECRET_KEY takes absolute priority; connector mk_ keys are bypassed).
 export function isUsingOwnStripeKey(): boolean {
-  const key = process.env.STRIPE_SECRET_KEY ?? "";
-  return (
-    !key.startsWith("mk_") &&
-    (key.startsWith("sk_test_") || key.startsWith("sk_live_") ||
-     key.startsWith("rk_test_") || key.startsWith("rk_live_"))
-  );
+  return !!process.env.STRIPE_LIVE_SECRET_KEY;
 }
 
 async function getCredentials() {
-  // If explicit API keys are provided, always use them — they take priority over
-  // the Replit connector (which defaults to test/managed keys).
-  // NOTE: Skip mk_ keys — those are Replit-managed proxy keys that cannot be used
-  // directly against the Stripe API; they must go through the connector path below.
+  // STRIPE_LIVE_SECRET_KEY always wins — the Replit connector cannot override a
+  // differently-named secret, so this is the safe way to inject live keys.
+  const liveSecret = process.env.STRIPE_LIVE_SECRET_KEY;
+  const livePublishable = process.env.STRIPE_LIVE_PUBLISHABLE_KEY || "";
+  if (liveSecret) {
+    console.log("[Stripe] Using STRIPE_LIVE_SECRET_KEY (live mode)");
+    connectionSettings = { publishableKey: livePublishable, secretKey: liveSecret };
+    return { publishableKey: livePublishable, secretKey: liveSecret };
+  }
+
+  // Fall back: check STRIPE_SECRET_KEY but skip Replit-managed mk_ proxy keys —
+  // those cannot be used directly against the Stripe API.
   const envSecret = process.env.STRIPE_SECRET_KEY;
   const envPublishable = process.env.STRIPE_PUBLISHABLE_KEY || "";
-  console.log(`[Stripe] STRIPE_SECRET_KEY prefix: "${envSecret ? envSecret.slice(0, 12) : "(not set)"}"`);
   if (envSecret && !envSecret.startsWith("mk_")) {
     const mode = envSecret.startsWith("sk_live_") || envSecret.startsWith("rk_live_") ? "live" : "test";
     console.log(`[Stripe] Using STRIPE_SECRET_KEY (${mode} mode)`);
@@ -45,7 +47,7 @@ async function getCredentials() {
     return { publishableKey: envPublishable, secretKey: envSecret };
   }
 
-  // Fall back to the Replit connector (managed/mk_ keys or connector-linked account)
+  // Fall back to the Replit connector (managed/mk_ keys).
   const hostname = process.env.REPLIT_CONNECTORS_HOSTNAME;
   const xReplitToken = process.env.REPL_IDENTITY
     ? "repl " + process.env.REPL_IDENTITY
@@ -63,6 +65,7 @@ async function getCredentials() {
           if (isProduction && env === "development") {
             console.log("[Stripe] Using development connector key in production (no production key configured)");
           }
+          console.log("[Stripe] Using Replit connector (managed mode)");
           connectionSettings = creds;
           return creds;
         }
@@ -73,7 +76,7 @@ async function getCredentials() {
     }
   }
 
-  throw new Error("Stripe not configured: set STRIPE_SECRET_KEY or connect via Replit Stripe integration");
+  throw new Error("Stripe not configured: set STRIPE_LIVE_SECRET_KEY or connect via Replit Stripe integration");
 }
 
 // WARNING: Never cache this client — tokens expire.
@@ -99,15 +102,15 @@ let stripeSyncInstance: StripeSync | null = null;
 export async function getStripeSync(): Promise<StripeSync> {
   if (!stripeSyncInstance) {
     const secretKey = await getStripeSecretKey();
+    // Prefer STRIPE_LIVE_WEBHOOK_SECRET for live mode, fall back to STRIPE_WEBHOOK_SECRET.
+    const webhookSecret = process.env.STRIPE_LIVE_WEBHOOK_SECRET || process.env.STRIPE_WEBHOOK_SECRET;
     stripeSyncInstance = new StripeSync({
       poolConfig: {
         connectionString: process.env.DATABASE_URL!,
         max: 2,
       },
       stripeSecretKey: secretKey,
-      ...(process.env.STRIPE_WEBHOOK_SECRET
-        ? { stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET }
-        : {}),
+      ...(webhookSecret ? { stripeWebhookSecret: webhookSecret } : {}),
     });
   }
   return stripeSyncInstance;

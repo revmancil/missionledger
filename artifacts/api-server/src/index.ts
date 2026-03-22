@@ -187,19 +187,15 @@ async function initStripe() {
     const stripeSync = await getStripeSync();
 
     const domain = process.env.REPLIT_DOMAINS?.split(",")[0];
-    // Any STRIPE_SECRET_KEY that is set and is NOT a Replit-managed mk_ key means the
-    // user is providing their own Stripe credentials. In that case the managed webhook
-    // system (which requires the mk_ connector proxy) must be skipped.
-    const stripeKeyEnv = process.env.STRIPE_SECRET_KEY ?? "";
-    const usingOwnKey = stripeKeyEnv.length > 0 && !stripeKeyEnv.startsWith("mk_");
-    console.log(`[Stripe] Key mode: ${usingOwnKey ? "own key" : "managed connector"}`);
+    // STRIPE_LIVE_SECRET_KEY means user-supplied live keys — skip the managed webhook proxy.
+    const usingOwnKey = !!process.env.STRIPE_LIVE_SECRET_KEY;
+    console.log(`[Stripe] Key mode: ${usingOwnKey ? "live (own keys)" : "managed connector"}`);
     if (domain) {
       const webhookUrl = `https://${domain}/api/stripe/webhook`;
       if (usingOwnKey) {
-        // Using own keys — managed webhook (mk_) not compatible.
-        // Webhooks are verified via STRIPE_WEBHOOK_SECRET set in the environment.
-        const isLive = stripeKeyEnv.startsWith("sk_live_") || stripeKeyEnv.startsWith("rk_live_");
-        console.log(`[Stripe] Own key mode (${isLive ? "live" : "test"}) — using STRIPE_WEBHOOK_SECRET`);
+        // Live keys — managed webhook (mk_) proxy is incompatible.
+        // Incoming webhooks are verified via STRIPE_LIVE_WEBHOOK_SECRET.
+        console.log("[Stripe] Live mode — using STRIPE_LIVE_WEBHOOK_SECRET for webhook verification");
       } else {
         try {
           console.log("Setting up managed webhook at", webhookUrl);
@@ -207,7 +203,6 @@ async function initStripe() {
           console.log("Stripe webhook configured");
         } catch (webhookErr: any) {
           // Non-fatal: webhook registration may fail in dev/misconfigured connector environments.
-          // The server will still run; webhooks just won't be auto-registered.
           console.warn("[Stripe] Managed webhook registration skipped:", webhookErr.message);
         }
       }
