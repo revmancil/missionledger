@@ -137,21 +137,18 @@ export default function ReportsPage() {
   const [applied, setApplied]     = useState({ startDate: `${currentYear}-01-01`, endDate: `${currentYear}-12-31` });
   const [fundFilter, setFundFilter] = useState("");
 
-  const currentMonth = new Date().getMonth() + 1;
-  const defaultBsMonth = `${currentYear}-${String(currentMonth).padStart(2, "0")}`;
-  const [bsMonth, setBsMonth] = useState(defaultBsMonth);
-
-  function lastDayOfMonth(ym: string): string {
-    if (!ym || !ym.includes("-")) return `${currentYear}-12-31`;
-    const [y, m] = ym.split("-").map(Number);
-    if (isNaN(y) || isNaN(m) || m < 1 || m > 12) return `${currentYear}-12-31`;
+  function endOfMonth(dateStr: string): string {
+    if (!dateStr || dateStr.length < 7) return "";
+    const [y, m] = dateStr.split("-").map(Number);
+    if (isNaN(y) || isNaN(m) || m < 1 || m > 12) return "";
     const d = new Date(Date.UTC(y, m, 0));
-    const yy = d.getUTCFullYear();
-    const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
-    const dd = String(d.getUTCDate()).padStart(2, "0");
-    return `${yy}-${mm}-${dd}`;
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
   }
-  const bsQueryDate = lastDayOfMonth(bsMonth);
+  const now = new Date();
+  const [bsAsOfDate, setBsAsOfDate] = useState(
+    endOfMonth(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`)
+  );
+  const bsQueryDate = bsAsOfDate;
 
   // Transaction register extra filters
   const [search, setSearch]       = useState("");
@@ -872,9 +869,12 @@ export default function ReportsPage() {
                       </div>
                       <div className="flex items-center gap-2">
                         <Input
-                          type="month"
-                          value={bsMonth}
-                          onChange={e => { if (e.target.value) setBsMonth(e.target.value); }}
+                          type="date"
+                          value={bsAsOfDate}
+                          onChange={e => {
+                            const snapped = endOfMonth(e.target.value);
+                            if (snapped) setBsAsOfDate(snapped);
+                          }}
                           className="w-36 h-7 text-xs"
                         />
                       </div>
