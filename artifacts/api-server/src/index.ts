@@ -100,69 +100,34 @@ const STRIPE_PLANS = [
 
 async function seedStripeProductsIfNeeded() {
   try {
-    const { rows } = await pool.query(`SELECT COUNT(*) as cnt FROM stripe.products WHERE active = true`);
-    if (parseInt(rows[0].cnt, 10) > 0) return; // already seeded
-
-    console.log("stripe.products is empty — seeding plans into Stripe and local DB...");
+    // Check if all 3 expected plans already exist in Stripe directly
     const stripe = await getUncachableStripeClient();
-    const now = Math.floor(Date.now() / 1000);
+    const existingProducts = await stripe.products.list({ active: true, limit: 100 });
+    const existingNames = new Set(existingProducts.data.map(p => p.name));
 
-    for (const plan of STRIPE_PLANS) {
-      // Find or create in Stripe
-      const existing = await stripe.products.search({ query: `name:'${plan.name}' AND active:'true'` });
-      let productId: string;
+    const missing = STRIPE_PLANS.filter(plan => !existingNames.has(plan.name));
+    if (missing.length === 0) {
+      console.log("Stripe plans already exist — skipping seed");
+      return;
+    }
 
-      if (existing.data.length > 0) {
-        productId = existing.data[0].id;
-        console.log(`  ✓ ${plan.name} already in Stripe (${productId})`);
-      } else {
-        const product = await stripe.products.create({ name: plan.name, description: plan.description, metadata: plan.metadata });
-        productId = product.id;
-        console.log(`  Created Stripe product: ${plan.name} (${productId})`);
-      }
+    console.log(`Seeding ${missing.length} missing Stripe plan(s)...`);
 
-      // Upsert product into local stripe.products table via _raw_data (all other columns are generated)
-      const productRaw = JSON.stringify({
-        id: productId, object: "product", active: true,
-        name: plan.name, description: plan.description, metadata: plan.metadata,
-        created: now, updated: now, livemode: false,
-        images: [], marketing_features: [],
+    for (const plan of missing) {
+      // Create product in Stripe
+      const product = await stripe.products.create({
+        name: plan.name,
+        description: plan.description,
+        metadata: plan.metadata,
       });
-      await pool.query(
-        `INSERT INTO stripe.products (_raw_data) VALUES ($1::jsonb)
-         ON CONFLICT (id) DO UPDATE SET _raw_data = EXCLUDED._raw_data`,
-        [productRaw]
-      );
+      console.log(`  Created Stripe product: ${plan.name} (${product.id})`);
 
-      // Find or create monthly/yearly prices in Stripe
-      const existingPrices = await stripe.prices.list({ product: productId, active: true });
-      let monthlyPrice = existingPrices.data.find(p => p.recurring?.interval === "month");
-      let yearlyPrice = existingPrices.data.find(p => p.recurring?.interval === "year");
-
-      if (!monthlyPrice) {
-        monthlyPrice = await stripe.prices.create({ product: productId, unit_amount: plan.monthlyAmount, currency: "usd", recurring: { interval: "month" } });
-      }
-      if (!yearlyPrice) {
-        yearlyPrice = await stripe.prices.create({ product: productId, unit_amount: plan.yearlyAmount, currency: "usd", recurring: { interval: "year" } });
-      }
-
-      // Upsert prices into local stripe.prices table via _raw_data
-      for (const price of [monthlyPrice, yearlyPrice]) {
-        const priceRaw = JSON.stringify({
-          id: price.id, object: "price", active: true,
-          product: productId, unit_amount: price.unit_amount,
-          currency: price.currency, recurring: price.recurring,
-          type: "recurring", created: price.created, livemode: false,
-          billing_scheme: "per_unit",
-        });
-        await pool.query(
-          `INSERT INTO stripe.prices (_raw_data) VALUES ($1::jsonb)
-           ON CONFLICT (id) DO UPDATE SET _raw_data = EXCLUDED._raw_data`,
-          [priceRaw]
-        );
-      }
-
-      console.log(`  Seeded ${plan.name}: monthly=${monthlyPrice.id}, yearly=${yearlyPrice.id}`);
+      // Create monthly and yearly prices
+      const [monthly, yearly] = await Promise.all([
+        stripe.prices.create({ product: product.id, unit_amount: plan.monthlyAmount, currency: "usd", recurring: { interval: "month" } }),
+        stripe.prices.create({ product: product.id, unit_amount: plan.yearlyAmount, currency: "usd", recurring: { interval: "year" } }),
+      ]);
+      console.log(`  Prices: monthly=${monthly.id}, yearly=${yearly.id}`);
     }
     console.log("Stripe plan seed complete");
   } catch (err: any) {
