@@ -79,8 +79,8 @@ const STRIPE_PLANS = [
     name: "Starter",
     description: "Perfect for small nonprofits and churches just getting started.",
     metadata: { features: "1 bank account|Up to 500 transactions/month|Standard financial reports|Email support|Plaid bank sync", order: "1" },
-    monthlyAmount: 1900,
-    yearlyAmount: 19000,
+    monthlyAmount: 1999,
+    yearlyAmount: 19900,
   },
   {
     name: "Professional",
@@ -100,36 +100,55 @@ const STRIPE_PLANS = [
 
 async function seedStripeProductsIfNeeded() {
   try {
-    // Check if all 3 expected plans already exist in Stripe directly
     const stripe = await getUncachableStripeClient();
     const existingProducts = await stripe.products.list({ active: true, limit: 100 });
-    const existingNames = new Set(existingProducts.data.map(p => p.name));
+    const existingByName = new Map(existingProducts.data.map(p => [p.name, p]));
 
-    const missing = STRIPE_PLANS.filter(plan => !existingNames.has(plan.name));
-    if (missing.length === 0) {
-      console.log("Stripe plans already exist — skipping seed");
-      return;
+    for (const plan of STRIPE_PLANS) {
+      let product = existingByName.get(plan.name);
+
+      // Create missing product
+      if (!product) {
+        product = await stripe.products.create({
+          name: plan.name,
+          description: plan.description,
+          metadata: plan.metadata,
+        });
+        console.log(`[Stripe seed] Created product: ${plan.name} (${product.id})`);
+      }
+
+      // Fetch active prices for this product
+      const activePrices = await stripe.prices.list({ product: product.id, active: true });
+      const monthlyPrice = activePrices.data.find(p => p.recurring?.interval === "month");
+      const yearlyPrice  = activePrices.data.find(p => p.recurring?.interval === "year");
+
+      // Fix monthly price if missing or wrong amount
+      if (!monthlyPrice || monthlyPrice.unit_amount !== plan.monthlyAmount) {
+        if (monthlyPrice) {
+          await stripe.prices.update(monthlyPrice.id, { active: false });
+          console.log(`[Stripe seed] Archived old monthly price for ${plan.name} ($${monthlyPrice.unit_amount! / 100})`);
+        }
+        const newMonthly = await stripe.prices.create({
+          product: product.id, unit_amount: plan.monthlyAmount,
+          currency: "usd", recurring: { interval: "month" },
+        });
+        console.log(`[Stripe seed] Created monthly price for ${plan.name}: $${plan.monthlyAmount / 100} (${newMonthly.id})`);
+      }
+
+      // Fix yearly price if missing or wrong amount
+      if (!yearlyPrice || yearlyPrice.unit_amount !== plan.yearlyAmount) {
+        if (yearlyPrice) {
+          await stripe.prices.update(yearlyPrice.id, { active: false });
+          console.log(`[Stripe seed] Archived old yearly price for ${plan.name}`);
+        }
+        const newYearly = await stripe.prices.create({
+          product: product.id, unit_amount: plan.yearlyAmount,
+          currency: "usd", recurring: { interval: "year" },
+        });
+        console.log(`[Stripe seed] Created yearly price for ${plan.name}: $${plan.yearlyAmount / 100} (${newYearly.id})`);
+      }
     }
-
-    console.log(`Seeding ${missing.length} missing Stripe plan(s)...`);
-
-    for (const plan of missing) {
-      // Create product in Stripe
-      const product = await stripe.products.create({
-        name: plan.name,
-        description: plan.description,
-        metadata: plan.metadata,
-      });
-      console.log(`  Created Stripe product: ${plan.name} (${product.id})`);
-
-      // Create monthly and yearly prices
-      const [monthly, yearly] = await Promise.all([
-        stripe.prices.create({ product: product.id, unit_amount: plan.monthlyAmount, currency: "usd", recurring: { interval: "month" } }),
-        stripe.prices.create({ product: product.id, unit_amount: plan.yearlyAmount, currency: "usd", recurring: { interval: "year" } }),
-      ]);
-      console.log(`  Prices: monthly=${monthly.id}, yearly=${yearly.id}`);
-    }
-    console.log("Stripe plan seed complete");
+    console.log("[Stripe seed] Plans verified/updated");
   } catch (err: any) {
     console.error("Stripe plan seed error:", err.message);
   }
