@@ -19,7 +19,32 @@ async function fetchConnectorKey(hostname: string, token: string, environment: s
   return null;
 }
 
+// Returns true when the app is using its own API keys (sk_/rk_ prefixes)
+// rather than Replit-managed mk_ keys through the connector proxy.
+export function isUsingOwnStripeKey(): boolean {
+  const key = process.env.STRIPE_SECRET_KEY ?? "";
+  return (
+    !key.startsWith("mk_") &&
+    (key.startsWith("sk_test_") || key.startsWith("sk_live_") ||
+     key.startsWith("rk_test_") || key.startsWith("rk_live_"))
+  );
+}
+
 async function getCredentials() {
+  // If explicit API keys are provided, always use them — they take priority over
+  // the Replit connector (which defaults to test/managed keys).
+  // NOTE: Skip mk_ keys — those are Replit-managed proxy keys that cannot be used
+  // directly against the Stripe API; they must go through the connector path below.
+  const envSecret = process.env.STRIPE_SECRET_KEY;
+  const envPublishable = process.env.STRIPE_PUBLISHABLE_KEY || "";
+  if (envSecret && !envSecret.startsWith("mk_")) {
+    const mode = envSecret.startsWith("sk_live_") || envSecret.startsWith("rk_live_") ? "live" : "test";
+    console.log(`[Stripe] Using STRIPE_SECRET_KEY (${mode} mode)`);
+    connectionSettings = { publishableKey: envPublishable, secretKey: envSecret };
+    return { publishableKey: envPublishable, secretKey: envSecret };
+  }
+
+  // Fall back to the Replit connector (managed/mk_ keys or connector-linked account)
   const hostname = process.env.REPLIT_CONNECTORS_HOSTNAME;
   const xReplitToken = process.env.REPL_IDENTITY
     ? "repl " + process.env.REPL_IDENTITY
@@ -27,13 +52,9 @@ async function getCredentials() {
     ? "depl " + process.env.WEB_REPL_RENEWAL
     : null;
 
-  // Try the Replit connector (preferred path — works with mk_ managed keys)
   if (hostname && xReplitToken) {
     try {
       const isProduction = process.env.REPLIT_DEPLOYMENT === "1";
-
-      // Try the target environment first, then fall back to "development" if needed.
-      // Replit managed keys (mk_...) only work through the connector proxy, not directly.
       const environments = isProduction ? ["production", "development"] : ["development"];
       for (const env of environments) {
         const creds = await fetchConnectorKey(hostname, xReplitToken, env);
@@ -45,19 +66,13 @@ async function getCredentials() {
           return creds;
         }
       }
-      console.warn("[Stripe] Connector returned no key for any environment — falling back to STRIPE_SECRET_KEY");
+      console.warn("[Stripe] Connector returned no key for any environment");
     } catch (err) {
-      console.warn("[Stripe] Connector lookup failed — falling back to STRIPE_SECRET_KEY:", err);
+      console.warn("[Stripe] Connector lookup failed:", err);
     }
   }
 
-  // Final fallback: raw secret key (must be a real sk_test_ or sk_live_ key, not mk_)
-  const secret = process.env.STRIPE_SECRET_KEY;
-  const publishable = process.env.STRIPE_PUBLISHABLE_KEY || "";
-  if (!secret) {
-    throw new Error("Stripe not configured: no Replit connector key or STRIPE_SECRET_KEY env var");
-  }
-  return { publishableKey: publishable, secretKey: secret };
+  throw new Error("Stripe not configured: set STRIPE_SECRET_KEY or connect via Replit Stripe integration");
 }
 
 // WARNING: Never cache this client — tokens expire.
