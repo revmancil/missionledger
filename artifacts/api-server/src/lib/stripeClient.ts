@@ -37,6 +37,7 @@ async function getCredentials() {
   // directly against the Stripe API; they must go through the connector path below.
   const envSecret = process.env.STRIPE_SECRET_KEY;
   const envPublishable = process.env.STRIPE_PUBLISHABLE_KEY || "";
+  console.log(`[Stripe] STRIPE_SECRET_KEY prefix: "${envSecret ? envSecret.slice(0, 12) : "(not set)"}"`);
   if (envSecret && !envSecret.startsWith("mk_")) {
     const mode = envSecret.startsWith("sk_live_") || envSecret.startsWith("rk_live_") ? "live" : "test";
     console.log(`[Stripe] Using STRIPE_SECRET_KEY (${mode} mode)`);
