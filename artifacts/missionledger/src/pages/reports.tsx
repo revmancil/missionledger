@@ -196,6 +196,25 @@ export default function ReportsPage() {
     setAppliedSearch({ search, minAmount: minAmt, maxAmount: maxAmt });
   };
 
+  const handlePreset = (start: string, end: string) => {
+    setStartDate(start);
+    setEndDate(end);
+    setApplied({ startDate: start, endDate: end });
+  };
+
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  const y = today.getFullYear();
+  const PRESETS = [
+    { label: "This Year",  start: `${y}-01-01`,       end: `${y}-12-31` },
+    { label: "Last Year",  start: `${y - 1}-01-01`,   end: `${y - 1}-12-31` },
+    { label: "YTD",        start: `${y}-01-01`,       end: todayStr },
+    { label: "Q1",         start: `${y}-01-01`,       end: `${y}-03-31` },
+    { label: "Q2",         start: `${y}-04-01`,       end: `${y}-06-30` },
+    { label: "Q3",         start: `${y}-07-01`,       end: `${y}-09-30` },
+    { label: "Q4",         start: `${y}-10-01`,       end: `${y}-12-31` },
+  ];
+
   const handleExportCpa = useCallback(() => {
     const url = `${BASE}api/reports/990-export?year=${applied.startDate.slice(0, 4)}`;
     const a = document.createElement("a");
@@ -712,7 +731,29 @@ export default function ReportsPage() {
       </div>
 
       {/* ── Shared Filter Bar ────────────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-end gap-3 mb-6 bg-card border border-border rounded-xl p-4">
+      <div className="flex flex-col gap-3 mb-6 bg-card border border-border rounded-xl p-4">
+        {tab === "financial" && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide mr-1">Period:</span>
+            {PRESETS.map(p => {
+              const active = applied.startDate === p.start && applied.endDate === p.end;
+              return (
+                <button
+                  key={p.label}
+                  onClick={() => handlePreset(p.start, p.end)}
+                  className={`px-2.5 py-1 rounded-md text-xs font-medium border transition-colors ${
+                    active
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "bg-background text-muted-foreground border-border hover:border-primary hover:text-primary"
+                  }`}
+                >
+                  {p.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
+        <div className="flex flex-wrap items-end gap-3">
         <div className="space-y-1">
           <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Start Date</label>
           <Input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-40 h-9" />
@@ -768,6 +809,7 @@ export default function ReportsPage() {
             <Download className="w-4 h-4" />Export for CPA
           </Button>
         )}
+        </div>
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════════ */}
@@ -876,8 +918,7 @@ export default function ReportsPage() {
                           type="date"
                           value={bsAsOfDate}
                           onChange={e => {
-                            const snapped = endOfMonth(e.target.value);
-                            if (snapped) setBsAsOfDate(snapped);
+                            if (e.target.value) setBsAsOfDate(e.target.value);
                           }}
                           className="w-36 h-7 text-xs"
                         />
