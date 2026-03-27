@@ -79,8 +79,8 @@ const STRIPE_PLANS = [
     name: "Starter",
     description: "Perfect for small nonprofits and churches just getting started.",
     metadata: { features: "1 bank account|Up to 500 transactions/month|Standard financial reports|Email support|Plaid bank sync", order: "1" },
-    monthlyAmount: 1999,
-    yearlyAmount: 19900,
+    monthlyAmount: 2500,
+    yearlyAmount: 19000,
   },
   {
     name: "Professional",

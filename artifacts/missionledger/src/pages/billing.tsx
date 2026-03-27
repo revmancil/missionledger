@@ -45,11 +45,11 @@ const STATUS_COLORS: Record<string, string> = {
   COMPED: "bg-purple-100 text-purple-700 border-purple-200",
 };
 
-function formatAmount(amount: number, currency: string): string {
+function formatAmount(amount: number, currency: string, minimumFractionDigits = 0): string {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: currency.toUpperCase(),
-    minimumFractionDigits: 0,
+    minimumFractionDigits,
   }).format(amount / 100);
 }
 
@@ -62,6 +62,7 @@ export default function BillingPage() {
   const [checkingOut, setCheckingOut] = useState<string | null>(null);
   const [openingPortal, setOpeningPortal] = useState(false);
   const [stripeConfigured, setStripeConfigured] = useState(true);
+  const [billingInterval, setBillingInterval] = useState<"month" | "year">("month");
 
   useEffect(() => {
     fetch("/api/stripe/plans", { credentials: "include" })
@@ -138,6 +139,16 @@ export default function BillingPage() {
   const currentStatus = isComped ? "COMPED" : (subscriptionInfo?.subscriptionStatus || "TRIAL");
   const hasActiveSubscription = currentStatus === "ACTIVE";
 
+  const maxSavingsPct = plans.reduce((max, plan) => {
+    const monthly = plan.prices.find(p => p.recurring?.interval === "month");
+    const yearly  = plan.prices.find(p => p.recurring?.interval === "year");
+    if (monthly && yearly) {
+      const pct = Math.round((1 - yearly.unit_amount / (monthly.unit_amount * 12)) * 100);
+      return Math.max(max, pct);
+    }
+    return max;
+  }, 0);
+
   return (
     <AppLayout title="Billing & Subscription">
       {!stripeConfigured && (
@@ -152,6 +163,7 @@ export default function BillingPage() {
         </div>
       )}
 
+      {/* Current subscription card */}
       <div className="mb-8">
         <Card>
           <CardHeader>
@@ -220,126 +232,178 @@ export default function BillingPage() {
         </Card>
       </div>
 
-      {isComped ? null : <div>
-        <h2 className="text-lg font-semibold mb-4">Subscription Plans</h2>
-        {loadingPlans ? (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {[1, 2, 3].map((i) => (
-              <Card key={i} className="animate-pulse">
-                <CardHeader><div className="h-5 bg-muted rounded w-24 mb-2" /><div className="h-4 bg-muted rounded w-32" /></CardHeader>
-                <CardContent><div className="h-8 bg-muted rounded w-20 mb-4" /><div className="space-y-2">{[1,2,3].map(j => <div key={j} className="h-3 bg-muted rounded" />)}</div></CardContent>
-              </Card>
-            ))}
+      {/* Plans */}
+      {!isComped && (
+        <div>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
+            <h2 className="text-lg font-semibold">Subscription Plans</h2>
+
+            {/* Monthly / Annual toggle */}
+            <div className="flex items-center gap-1 bg-muted rounded-lg p-1 self-start sm:self-auto">
+              <button
+                onClick={() => setBillingInterval("month")}
+                className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                  billingInterval === "month"
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Monthly
+              </button>
+              <button
+                onClick={() => setBillingInterval("year")}
+                className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-1.5 ${
+                  billingInterval === "year"
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Annual
+                {maxSavingsPct > 0 && (
+                  <span className="bg-emerald-100 text-emerald-700 text-xs font-semibold px-1.5 py-0.5 rounded-full">
+                    Save up to {maxSavingsPct}%
+                  </span>
+                )}
+              </button>
+            </div>
           </div>
-        ) : plans.length === 0 ? (
-          <Card>
-            <CardContent className="py-12 text-center">
-              <CreditCard className="w-12 h-12 mx-auto text-muted-foreground/30 mb-3" />
-              <p className="text-muted-foreground">No subscription plans available yet.</p>
-              {!stripeConfigured && (
-                <p className="text-sm text-muted-foreground mt-1">Connect Stripe to set up billing plans.</p>
-              )}
-            </CardContent>
-          </Card>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {plans.map((plan) => {
-              const monthlyPrice = plan.prices.find(
-                (p) => p.recurring?.interval === "month"
-              );
-              const yearlyPrice = plan.prices.find(
-                (p) => p.recurring?.interval === "year"
-              );
-              const displayPrice = monthlyPrice || plan.prices[0];
-              const isPopular = plan.metadata?.featured === "true" || plan.name === "Professional";
 
-              const features: string[] = plan.metadata?.features
-                ? plan.metadata.features.split("|")
-                : [];
+          {loadingPlans ? (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {[1, 2, 3].map((i) => (
+                <Card key={i} className="animate-pulse">
+                  <CardHeader><div className="h-5 bg-muted rounded w-24 mb-2" /><div className="h-4 bg-muted rounded w-32" /></CardHeader>
+                  <CardContent><div className="h-8 bg-muted rounded w-20 mb-4" /><div className="space-y-2">{[1,2,3].map(j => <div key={j} className="h-3 bg-muted rounded" />)}</div></CardContent>
+                </Card>
+              ))}
+            </div>
+          ) : plans.length === 0 ? (
+            <Card>
+              <CardContent className="py-12 text-center">
+                <CreditCard className="w-12 h-12 mx-auto text-muted-foreground/30 mb-3" />
+                <p className="text-muted-foreground">No subscription plans available yet.</p>
+                {!stripeConfigured && (
+                  <p className="text-sm text-muted-foreground mt-1">Connect Stripe to set up billing plans.</p>
+                )}
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {plans.map((plan) => {
+                const monthlyPrice = plan.prices.find(p => p.recurring?.interval === "month");
+                const yearlyPrice  = plan.prices.find(p => p.recurring?.interval === "year");
+                const activePrice  = billingInterval === "year" ? (yearlyPrice || monthlyPrice) : (monthlyPrice || yearlyPrice);
+                const isPopular    = plan.metadata?.featured === "true" || plan.name === "Professional";
 
-              return (
-                <Card
-                  key={plan.id}
-                  className={`relative shadow-sm transition-all hover:shadow-md ${
-                    isPopular ? "border-primary ring-1 ring-primary/20" : ""
-                  }`}
-                >
-                  {isPopular && (
-                    <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                      <span className="bg-primary text-primary-foreground text-xs font-semibold px-3 py-1 rounded-full">
-                        Most Popular
-                      </span>
-                    </div>
-                  )}
-                  <CardHeader>
-                    <div className="flex items-center gap-2 mb-1">
-                      <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
-                        {PLAN_ICONS[plan.name] || <CreditCard className="w-4 h-4" />}
+                const features: string[] = plan.metadata?.features
+                  ? plan.metadata.features.split("|")
+                  : [];
+
+                const annualSavingsPct = (monthlyPrice && yearlyPrice)
+                  ? Math.round((1 - yearlyPrice.unit_amount / (monthlyPrice.unit_amount * 12)) * 100)
+                  : 0;
+
+                const perMonthEquivalent = (yearlyPrice && billingInterval === "year")
+                  ? yearlyPrice.unit_amount / 12
+                  : null;
+
+                return (
+                  <Card
+                    key={plan.id}
+                    className={`relative shadow-sm transition-all hover:shadow-md flex flex-col ${
+                      isPopular ? "border-primary ring-1 ring-primary/20" : ""
+                    }`}
+                  >
+                    {isPopular && (
+                      <div className="absolute -top-3 left-1/2 -translate-x-1/2">
+                        <span className="bg-primary text-primary-foreground text-xs font-semibold px-3 py-1 rounded-full">
+                          Most Popular
+                        </span>
                       </div>
-                      <CardTitle className="text-base">{plan.name}</CardTitle>
-                    </div>
-                    {plan.description && (
-                      <CardDescription className="text-xs">{plan.description}</CardDescription>
                     )}
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    {displayPrice && (
-                      <div>
-                        <span className="text-3xl font-bold">
-                          {formatAmount(displayPrice.unit_amount, displayPrice.currency)}
-                        </span>
-                        <span className="text-muted-foreground text-sm">
-                          /{displayPrice.recurring?.interval || "one-time"}
-                        </span>
-                        {yearlyPrice && monthlyPrice && (
-                          <p className="text-xs text-emerald-600 mt-1">
-                            Save {Math.round((1 - yearlyPrice.unit_amount / (monthlyPrice.unit_amount * 12)) * 100)}% with annual billing
-                          </p>
+                    <CardHeader>
+                      <div className="flex items-center gap-2 mb-1">
+                        <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
+                          {PLAN_ICONS[plan.name] || <CreditCard className="w-4 h-4" />}
+                        </div>
+                        <CardTitle className="text-base">{plan.name}</CardTitle>
+                      </div>
+                      {plan.description && (
+                        <CardDescription className="text-xs">{plan.description}</CardDescription>
+                      )}
+                    </CardHeader>
+
+                    <CardContent className="space-y-4 flex flex-col flex-1">
+                      {/* Pricing display */}
+                      {activePrice && (
+                        <div>
+                          {billingInterval === "year" && perMonthEquivalent ? (
+                            <>
+                              <div className="flex items-baseline gap-1">
+                                <span className="text-3xl font-bold">
+                                  {formatAmount(Math.round(perMonthEquivalent), activePrice.currency)}
+                                </span>
+                                <span className="text-muted-foreground text-sm">/mo</span>
+                              </div>
+                              <p className="text-xs text-muted-foreground mt-0.5">
+                                Billed {formatAmount(activePrice.unit_amount, activePrice.currency)} annually
+                              </p>
+                              {annualSavingsPct > 0 && (
+                                <span className="inline-flex mt-1.5 items-center gap-1 bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-medium px-2 py-0.5 rounded-full">
+                                  Save {annualSavingsPct}% vs monthly
+                                </span>
+                              )}
+                            </>
+                          ) : (
+                            <div className="flex items-baseline gap-1">
+                              <span className="text-3xl font-bold">
+                                {formatAmount(activePrice.unit_amount, activePrice.currency)}
+                              </span>
+                              <span className="text-muted-foreground text-sm">/mo</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Features */}
+                      {features.length > 0 && (
+                        <ul className="space-y-2 flex-1">
+                          {features.map((feat, idx) => (
+                            <li key={idx} className="flex items-start gap-2 text-sm">
+                              <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                              <span>{feat.trim()}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+
+                      {/* CTA */}
+                      <div className="pt-2">
+                        {activePrice && (
+                          <Button
+                            className="w-full"
+                            variant={isPopular ? "default" : "outline"}
+                            disabled={!!checkingOut || hasActiveSubscription}
+                            onClick={() => handleCheckout(activePrice.id)}
+                          >
+                            {checkingOut === activePrice.id
+                              ? "Redirecting…"
+                              : hasActiveSubscription
+                              ? "Current Plan"
+                              : billingInterval === "year"
+                              ? "Subscribe Annually"
+                              : "Subscribe Monthly"}
+                          </Button>
                         )}
                       </div>
-                    )}
-
-                    {features.length > 0 && (
-                      <ul className="space-y-2">
-                        {features.map((feat, idx) => (
-                          <li key={idx} className="flex items-start gap-2 text-sm">
-                            <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
-                            <span>{feat.trim()}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-
-                    <div className="space-y-2 pt-2">
-                      {monthlyPrice && (
-                        <Button
-                          className="w-full"
-                          variant={isPopular ? "default" : "outline"}
-                          disabled={!!checkingOut || hasActiveSubscription}
-                          onClick={() => handleCheckout(monthlyPrice.id)}
-                        >
-                          {checkingOut === monthlyPrice.id ? "Redirecting..." : hasActiveSubscription ? "Current Plan" : "Subscribe Monthly"}
-                        </Button>
-                      )}
-                      {yearlyPrice && !hasActiveSubscription && (
-                        <Button
-                          className="w-full"
-                          variant="ghost"
-                          size="sm"
-                          disabled={!!checkingOut}
-                          onClick={() => handleCheckout(yearlyPrice.id)}
-                        >
-                          {checkingOut === yearlyPrice.id ? "Redirecting..." : `Subscribe Annually (${formatAmount(yearlyPrice.unit_amount, yearlyPrice.currency)}/yr)`}
-                        </Button>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
-        )}
-      </div>}
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
     </AppLayout>
   );
 }
