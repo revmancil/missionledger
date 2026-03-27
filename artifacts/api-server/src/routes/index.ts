@@ -29,6 +29,7 @@ import stripeRouter from "./stripe";
 import plaidRouter from "./plaid";
 import financialSummaryRouter from "./financial-summary";
 import passwordResetRouter from "./password-reset";
+import customReportsRouter from "./custom-reports";
 
 const router: IRouter = Router();
 
@@ -62,5 +63,6 @@ router.use("/stripe", stripeRouter);
 router.use("/plaid", plaidRouter);
 router.use("/financial-summary", financialSummaryRouter);
 router.use("/auth", passwordResetRouter);
+router.use("/custom-reports", customReportsRouter);
 
 export default router;

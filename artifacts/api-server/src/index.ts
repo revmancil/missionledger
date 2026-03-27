@@ -476,6 +476,24 @@ async function ensureSchema() {
   } catch (err: any) {
     console.error("Schema migration error (GL balance repair):", err.message);
   }
+
+  // custom_report_templates
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS custom_report_templates (
+        id          TEXT PRIMARY KEY DEFAULT gen_random_uuid(),
+        company_id  TEXT NOT NULL,
+        name        TEXT NOT NULL,
+        description TEXT,
+        config      TEXT NOT NULL DEFAULT '{}',
+        created_at  TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at  TIMESTAMP NOT NULL DEFAULT NOW()
+      )
+    `);
+    console.log("Schema check: custom_report_templates OK");
+  } catch (err: any) {
+    console.error("Schema migration error (custom_report_templates):", err.message);
+  }
 }
 
 app.listen(port, async () => {
