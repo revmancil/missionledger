@@ -195,9 +195,12 @@ importers:
       resend:
         specifier: ^6.9.4
         version: 6.9.4
+      stripe:
+        specifier: ^17.0.0
+        version: 17.7.0
       stripe-replit-sync:
         specifier: ^1.0.0
-        version: 1.0.0
+        version: 1.0.0(stripe@17.7.0)
     devDependencies:
       '@types/cookie-parser':
         specifier: ^1.4.10
@@ -3061,6 +3064,10 @@ packages:
     peerDependencies:
       stripe: '> 11'
 
+  stripe@17.7.0:
+    resolution: {integrity: sha512-aT2BU9KkizY9SATf14WhhYVv2uOapBWX0OFWF4xvcj1mPaNotlSc2CsxpS4DS46ZueSppmCF5BX1sNYBtwBvfw==}
+    engines: {node: '>=12.*'}
+
   svg-pathdata@6.0.3:
     resolution: {integrity: sha512-qsjeeq5YjBZ5eMdFuUa4ZosMLxgr5RZ+F+Y1OrDhuOCEInRMA3x74XdBtggJcj9kOeInz0WE+LgCPDkZFlBYJw==}
     engines: {node: '>=12.0.0'}
@@ -5793,16 +5800,22 @@ snapshots:
 
   strip-final-newline@4.0.0: {}
 
-  stripe-replit-sync@1.0.0:
+  stripe-replit-sync@1.0.0(stripe@17.7.0):
     dependencies:
       pg: 8.20.0
       pg-node-migrations: 0.0.8
+      stripe: 17.7.0
       ws: 8.19.0
       yesql: 7.0.0
     transitivePeerDependencies:
       - bufferutil
       - pg-native
       - utf-8-validate
+
+  stripe@17.7.0:
+    dependencies:
+      '@types/node': 25.3.5
+      qs: 6.15.0
 
   svg-pathdata@6.0.3:
     optional: true
