@@ -1,0 +1,7 @@
+{
+  "buildCommand": "pnpm --filter @workspace/missionledger build",
+  "outputDirectory": "artifacts/missionledger/dist",
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}
