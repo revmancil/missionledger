@@ -1,5 +1,6 @@
 {
   "installCommand": "pnpm install --no-frozen-lockfile",
   "buildCommand": "pnpm --filter @workspace/missionledger build",
-  "outputDirectory": "artifacts/missionledger/dist/public"
+  "outputDirectory": "artifacts/missionledger/dist/public",
+  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
 }
