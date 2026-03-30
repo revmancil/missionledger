@@ -172,7 +172,8 @@ export default function MasterAdminPage() {
   const handleImpersonate = async (org: OrgRow) => {
     setImpersonating(org.id);
     try {
-      await apiFetch(`/api/master-admin/impersonate/${org.id}`, { method: "POST" });
+      const data = await apiFetch(`/api/master-admin/impersonate/${org.id}`, { method: "POST" });
+      if (data?.token) localStorage.setItem("ml_token", data.token);
       toast.success(`Now viewing as ${org.name}`);
       // Refresh auth context and navigate to dashboard
       window.location.href = `${BASE}/dashboard`;

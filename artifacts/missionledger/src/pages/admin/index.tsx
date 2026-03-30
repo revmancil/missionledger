@@ -254,7 +254,8 @@ function OrgDetailDrawer({ org, onClose, onRefresh }: { org: OrgRow; onClose: ()
   async function handleImpersonate() {
     setImpersonating(true);
     try {
-      await apiFetch(`/api/master-admin/impersonate/${org.id}`, { method: "POST" });
+      const data = await apiFetch(`/api/master-admin/impersonate/${org.id}`, { method: "POST" });
+      if (data?.token) localStorage.setItem("ml_token", data.token);
       window.location.href = `${BASE}/dashboard`;
     } catch (e: any) {
       alert(e.message || "Impersonation failed");
@@ -606,7 +607,8 @@ export default function AdminCommandCenter() {
   async function handleImpersonate(org: OrgRow) {
     setImpersonating(org.id);
     try {
-      await apiFetch(`/api/master-admin/impersonate/${org.id}`, { method: "POST" });
+      const data = await apiFetch(`/api/master-admin/impersonate/${org.id}`, { method: "POST" });
+      if (data?.token) localStorage.setItem("ml_token", data.token);
       window.location.href = `${BASE}/dashboard`;
     } catch (e: any) {
       alert(e.message || "Impersonation failed");

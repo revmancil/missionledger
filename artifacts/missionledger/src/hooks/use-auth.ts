@@ -101,6 +101,7 @@ export function useAuth() {
 
   async function exitImpersonation() {
     const data = await apiFetch("/api/master-admin/exit-impersonation", { method: "POST" });
+    if ((data as any)?.token) localStorage.setItem("ml_token", (data as any).token);
     qc.setQueryData(getGetMeQueryKey(), data);
     qc.clear();
     qc.invalidateQueries();

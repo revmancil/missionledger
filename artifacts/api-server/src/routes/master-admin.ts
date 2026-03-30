@@ -328,6 +328,7 @@ router.post("/impersonate/:companyId", async (req, res) => {
 
     const impersonatedUser: AuthUser = {
       id: adminUser.id,
+      userId: adminUser.userId,
       email: adminUser.email,
       name: adminUser.name,
       role: "MASTER_ADMIN",
@@ -342,12 +343,12 @@ router.post("/impersonate/:companyId", async (req, res) => {
     const token = signToken(impersonatedUser);
     res.cookie(COOKIE_NAME, token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
+      secure: true,
+      sameSite: "none",
       maxAge: 2 * 60 * 60 * 1000,
     });
 
-    res.json({ success: true, session: impersonatedUser });
+    res.json({ success: true, session: impersonatedUser, token });
   } catch (error) {
     console.error("Impersonate error:", error);
     res.status(500).json({ error: "Internal server error" });
@@ -368,6 +369,7 @@ router.post("/exit-impersonation", async (req, res) => {
 
     const authUser: AuthUser = {
       id: user.id,
+      userId: user.userId,
       email: user.email,
       name: user.name,
       role: user.role,
@@ -381,12 +383,12 @@ router.post("/exit-impersonation", async (req, res) => {
     const token = signToken(authUser);
     res.cookie(COOKIE_NAME, token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
+      secure: true,
+      sameSite: "none",
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
-    res.json({ success: true, session: authUser });
+    res.json({ success: true, session: authUser, token });
   } catch (error) {
     console.error("Exit impersonation error:", error);
     res.status(500).json({ error: "Internal server error" });
