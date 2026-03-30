@@ -40,6 +40,34 @@ router.get("/me", requireAuth, (req, res) => {
   res.json((req as any).user);
 });
 
+// POST /auth/find-user-id
+router.post("/find-user-id", async (req, res) => {
+  try {
+    const { companyCode, email } = req.body ?? {};
+    if (!companyCode || !email) {
+      return res.status(400).json({ error: "companyCode and email are required" });
+    }
+
+    const [company] = await db.select().from(companies)
+      .where(eq(companies.companyCode, String(companyCode).toUpperCase()))
+      .limit(1);
+    if (!company) return res.json({ ok: true, userIds: [] });
+
+    const rows = await db.select({ userId: users.userId })
+      .from(users)
+      .where(and(
+        eq(users.companyId, company.id),
+        eq(users.email, String(email).trim().toLowerCase()),
+        eq(users.isActive, true)
+      ));
+
+    return res.json({ ok: true, userIds: rows.map((r) => r.userId).filter(Boolean) });
+  } catch (error) {
+    console.error("Find user id error:", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // POST /auth/login
 router.post("/login", async (req, res) => {
   try {
@@ -59,21 +87,33 @@ router.post("/login", async (req, res) => {
       return res.status(403).json({ error: "ACCOUNT_SUSPENDED", message: "This organization account has been suspended." });
     }
 
-    const [user] = userId
-      ? await db.select().from(users).where(
+    const normalizedUserId = userId ? String(userId).trim().toLowerCase() : "";
+    const normalizedEmail = email ? String(email).trim().toLowerCase() : "";
+    const treatUserIdAsEmail = normalizedUserId.includes("@");
+
+    let user: any | undefined;
+    if (normalizedUserId && !treatUserIdAsEmail) {
+      [user] = await db.select().from(users).where(
         and(
           eq(users.companyId, company.id),
-          eq(users.userId, String(userId).trim().toLowerCase()),
-          eq(users.isActive, true)
-        )
-      ).limit(1)
-      : await db.select().from(users).where(
-        and(
-          eq(users.companyId, company.id),
-          eq(users.email, String(email).toLowerCase()),
+          eq(users.userId, normalizedUserId),
           eq(users.isActive, true)
         )
       ).limit(1);
+    }
+
+    if (!user) {
+      const effectiveEmail = normalizedEmail || (treatUserIdAsEmail ? normalizedUserId : "");
+      if (effectiveEmail) {
+        [user] = await db.select().from(users).where(
+          and(
+            eq(users.companyId, company.id),
+            eq(users.email, effectiveEmail),
+            eq(users.isActive, true)
+          )
+        ).limit(1);
+      }
+    }
 
     if (!user) {
       return res.status(401).json({ error: "Invalid credentials" });

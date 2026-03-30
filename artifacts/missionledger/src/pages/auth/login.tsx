@@ -5,19 +5,58 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
-import { Building2, Lock, UserCircle2, Terminal } from "lucide-react";
+import { Building2, Lock, UserCircle2, Terminal, Search } from "lucide-react";
+import { authJsonFetch, readJsonSafe } from "@/lib/auth-fetch";
 
 export default function LoginPage() {
   const { login, isLoggingIn } = useAuth();
-  const [formData, setFormData] = useState({ companyCode: "", userId: "", password: "" });
+  const [formData, setFormData] = useState({ companyCode: "", identifier: "", password: "" });
+  const [showFindUserId, setShowFindUserId] = useState(false);
+  const [finder, setFinder] = useState({ companyCode: "", email: "" });
+  const [finding, setFinding] = useState(false);
+  const [foundUserIds, setFoundUserIds] = useState<string[]>([]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await login({ data: { ...formData, email: formData.userId } as any });
+      const identifier = formData.identifier.trim();
+      const isEmail = identifier.includes("@");
+      await login({
+        data: {
+          companyCode: formData.companyCode,
+          password: formData.password,
+          ...(isEmail ? { email: identifier } : { userId: identifier }),
+        } as any
+      });
       toast.success("Logged in successfully");
     } catch (err: any) {
       toast.error(err.message || "Invalid credentials");
+    }
+  };
+
+  const handleFindUserId = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!finder.companyCode.trim() || !finder.email.trim()) return;
+    setFinding(true);
+    setFoundUserIds([]);
+    try {
+      const res = await authJsonFetch("api/auth/find-user-id", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          companyCode: finder.companyCode.trim(),
+          email: finder.email.trim(),
+        }),
+      });
+      const body = await readJsonSafe<{ userIds?: string[]; error?: string }>(res);
+      if (!res.ok) throw new Error(body?.error || "Failed to find user ID");
+      const ids = Array.isArray(body?.userIds) ? body!.userIds! : [];
+      setFoundUserIds(ids);
+      if (ids.length === 0) toast.error("No active user IDs found for that Company Code and Email.");
+    } catch (err: any) {
+      toast.error(err.message || "Could not find user ID");
+    } finally {
+      setFinding(false);
     }
   };
 
@@ -55,15 +94,15 @@ export default function LoginPage() {
               </div>
             </div>
             <div className="space-y-1">
-              <label className="text-sm font-medium text-foreground">User ID</label>
+              <label className="text-sm font-medium text-foreground">User ID or Email</label>
               <div className="relative">
                 <UserCircle2 className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                 <Input 
-                  placeholder="e.g. john.admin" 
+                  placeholder="e.g. john.admin or admin@example.org" 
                   className="pl-9 h-11"
                   required
-                  value={formData.userId}
-                  onChange={(e) => setFormData(p => ({...p, userId: e.target.value}))}
+                  value={formData.identifier}
+                  onChange={(e) => setFormData(p => ({...p, identifier: e.target.value}))}
                 />
               </div>
             </div>
@@ -82,10 +121,63 @@ export default function LoginPage() {
               </div>
             </div>
             <div className="flex justify-end -mt-1">
-              <Link href="/forgot-password" className="text-xs text-muted-foreground hover:text-primary hover:underline">
-                Forgot password?
-              </Link>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowFindUserId((v) => !v)}
+                  className="text-xs text-muted-foreground hover:text-primary hover:underline"
+                >
+                  Find my User ID
+                </button>
+                <Link href="/forgot-password" className="text-xs text-muted-foreground hover:text-primary hover:underline">
+                  Forgot password?
+                </Link>
+              </div>
             </div>
+            {showFindUserId && (
+              <div className="rounded-lg border border-border p-3 space-y-2 bg-muted/30">
+                <p className="text-xs text-muted-foreground">Enter company code and email to recover your User ID.</p>
+                <form onSubmit={handleFindUserId} className="space-y-2">
+                  <Input
+                    placeholder="Company Code"
+                    value={finder.companyCode}
+                    onChange={(e) => setFinder((p) => ({ ...p, companyCode: e.target.value }))}
+                    className="h-9"
+                    required
+                  />
+                  <Input
+                    type="email"
+                    placeholder="Email"
+                    value={finder.email}
+                    onChange={(e) => setFinder((p) => ({ ...p, email: e.target.value }))}
+                    className="h-9"
+                    required
+                  />
+                  <Button type="submit" variant="outline" className="h-9 w-full" disabled={finding}>
+                    <Search className="h-4 w-4 mr-2" />
+                    {finding ? "Finding..." : "Find User ID"}
+                  </Button>
+                </form>
+                {foundUserIds.length > 0 && (
+                  <div className="text-xs rounded border border-emerald-200 bg-emerald-50 p-2">
+                    <p className="font-medium text-emerald-800 mb-1">User ID found:</p>
+                    {foundUserIds.map((id) => (
+                      <button
+                        key={id}
+                        type="button"
+                        className="block text-emerald-800 underline"
+                        onClick={() => {
+                          setFormData((p) => ({ ...p, companyCode: finder.companyCode.trim(), identifier: id }));
+                          setShowFindUserId(false);
+                        }}
+                      >
+                        {id}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
             <Button type="submit" className="w-full h-11 text-base shadow-md" disabled={isLoggingIn}>
               {isLoggingIn ? "Signing in..." : "Sign In"}
             </Button>
