@@ -111,7 +111,8 @@ router.post("/login", async (req, res) => {
     setCookieAndRespond(res, authUser);
   } catch (error) {
     console.error("Login error:", error);
-    res.status(500).json({ error: "Internal server error" });
+    const message = error instanceof Error ? error.message : String(error);
+    res.status(500).json({ error: "Internal server error", message });
   }
 });
 
@@ -205,7 +206,8 @@ router.post("/register", async (req, res) => {
     setCookieAndRespond(res, authUser, 201);
   } catch (error) {
     console.error("Register error:", error);
-    res.status(500).json({ error: "Internal server error" });
+    const message = error instanceof Error ? error.message : String(error);
+    res.status(500).json({ error: "Internal server error", message });
   }
 });
 
