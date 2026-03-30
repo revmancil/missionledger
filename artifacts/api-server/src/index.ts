@@ -258,6 +258,29 @@ async function ensureSchema() {
   } catch (err: any) {
     console.error("Schema migration error (system_settings):", err.message);
   }
+
+  // organization_users is required for org membership lookups during login
+  // and for the org switcher endpoints.
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS organization_users (
+        id TEXT PRIMARY KEY NOT NULL,
+        user_id TEXT NOT NULL,
+        company_id TEXT NOT NULL,
+        role "role" NOT NULL DEFAULT 'VIEWER',
+        is_primary BOOLEAN NOT NULL DEFAULT FALSE,
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        invited_by TEXT,
+        joined_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS org_users_user_company_unique
+        ON organization_users (user_id, company_id);
+    `);
+    console.log("Schema check: organization_users OK");
+  } catch (err: any) {
+    console.error("Schema migration error (organization_users):", err.message);
+  }
   try {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS coa_templates (
