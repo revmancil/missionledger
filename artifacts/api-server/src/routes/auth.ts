@@ -2,7 +2,7 @@ import { Router } from "express";
 import { db, users, companies, organizationUsers } from "@workspace/db";
 import { eq, and, inArray } from "drizzle-orm";
 import { logAudit } from "../lib/audit";
-import { sendWelcomeEmail } from "../lib/email";
+import { sendWelcomeEmail, sendUserIdRecoveryEmail } from "../lib/email";
 import {
   requireAuth,
   hashPassword,
@@ -61,8 +61,13 @@ router.post("/find-user-id", async (req, res) => {
         eq(users.email, String(email).trim().toLowerCase()),
         eq(users.isActive, true)
       ));
-
-    return res.json({ ok: true, userIds: rows.map((r) => r.userId).filter(Boolean) });
+    const userIds = rows.map((r) => r.userId).filter(Boolean);
+    if (userIds.length > 0) {
+      await sendUserIdRecoveryEmail(String(email).trim().toLowerCase(), normalizedCompanyCode, userIds)
+        .catch((err: any) => console.error("User ID recovery email failed:", err.message));
+    }
+    // Always return a generic success response for security.
+    return res.json({ ok: true });
   } catch (error) {
     console.error("Find user id error:", error);
     return res.status(500).json({ error: "Internal server error" });

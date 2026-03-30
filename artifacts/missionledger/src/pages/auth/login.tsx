@@ -14,7 +14,7 @@ export default function LoginPage() {
   const [showFindUserId, setShowFindUserId] = useState(false);
   const [finder, setFinder] = useState({ companyCode: "", email: "" });
   const [finding, setFinding] = useState(false);
-  const [foundUserIds, setFoundUserIds] = useState<string[]>([]);
+  const [recoveryRequested, setRecoveryRequested] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -34,11 +34,10 @@ export default function LoginPage() {
     }
   };
 
-  const handleFindUserId = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleFindUserId = async () => {
     if (!finder.companyCode.trim() || !finder.email.trim()) return;
     setFinding(true);
-    setFoundUserIds([]);
+    setRecoveryRequested(false);
     try {
       const res = await authJsonFetch("api/auth/find-user-id", {
         method: "POST",
@@ -48,11 +47,10 @@ export default function LoginPage() {
           email: finder.email.trim(),
         }),
       });
-      const body = await readJsonSafe<{ userIds?: string[]; error?: string }>(res);
+      const body = await readJsonSafe<{ error?: string }>(res);
       if (!res.ok) throw new Error(body?.error || "Failed to find user ID");
-      const ids = Array.isArray(body?.userIds) ? body!.userIds! : [];
-      setFoundUserIds(ids);
-      if (ids.length === 0) toast.error("No active user IDs found for that Company Code and Email.");
+      setRecoveryRequested(true);
+      toast.success("If the account exists, your User ID has been sent to your email.");
     } catch (err: any) {
       toast.error(err.message || "Could not find user ID");
     } finally {
@@ -136,8 +134,8 @@ export default function LoginPage() {
             </div>
             {showFindUserId && (
               <div className="rounded-lg border border-border p-3 space-y-2 bg-muted/30">
-                <p className="text-xs text-muted-foreground">Enter company code and email to recover your User ID.</p>
-                <form onSubmit={handleFindUserId} className="space-y-2">
+                <p className="text-xs text-muted-foreground">Enter company code and email. If matched, we will email your User ID.</p>
+                <div className="space-y-2">
                   <Input
                     placeholder="Company Code"
                     value={finder.companyCode}
@@ -153,27 +151,14 @@ export default function LoginPage() {
                     className="h-9"
                     required
                   />
-                  <Button type="submit" variant="outline" className="h-9 w-full" disabled={finding}>
+                  <Button type="button" onClick={handleFindUserId} variant="outline" className="h-9 w-full" disabled={finding}>
                     <Search className="h-4 w-4 mr-2" />
-                    {finding ? "Finding..." : "Find User ID"}
+                    {finding ? "Sending..." : "Email My User ID"}
                   </Button>
-                </form>
-                {foundUserIds.length > 0 && (
-                  <div className="text-xs rounded border border-emerald-200 bg-emerald-50 p-2">
-                    <p className="font-medium text-emerald-800 mb-1">User ID found:</p>
-                    {foundUserIds.map((id) => (
-                      <button
-                        key={id}
-                        type="button"
-                        className="block text-emerald-800 underline"
-                        onClick={() => {
-                          setFormData((p) => ({ ...p, companyCode: finder.companyCode.trim(), identifier: id }));
-                          setShowFindUserId(false);
-                        }}
-                      >
-                        {id}
-                      </button>
-                    ))}
+                </div>
+                {recoveryRequested && (
+                  <div className="text-xs rounded border border-emerald-200 bg-emerald-50 p-2 text-emerald-800">
+                    If your account exists, we sent your User ID to your email.
                   </div>
                 )}
               </div>

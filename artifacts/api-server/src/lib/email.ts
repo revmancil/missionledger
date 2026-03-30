@@ -101,3 +101,31 @@ export async function sendPasswordResetEmail(toEmail: string, resetUrl: string):
     `,
   });
 }
+
+export async function sendUserIdRecoveryEmail(toEmail: string, companyCode: string, userIds: string[]): Promise<void> {
+  if (!userIds.length) return;
+  await send({
+    to: toEmail,
+    subject: "Your MissionLedger User ID(s)",
+    html: `
+      <div style="font-family: sans-serif; max-width: 520px; margin: 0 auto; padding: 32px 24px; color: #1a1a2e;">
+        <div style="margin-bottom: 28px;">
+          <span style="font-size: 20px; font-weight: 700; color: #1b3a6b;">MissionLedger</span>
+        </div>
+        <h2 style="font-size: 22px; font-weight: 600; margin: 0 0 12px;">User ID Recovery</h2>
+        <p style="color: #555; line-height: 1.6; margin: 0 0 16px;">
+          We received a request to recover User ID(s) for company code <strong>${companyCode}</strong>.
+        </p>
+        <p style="color: #555; line-height: 1.6; margin: 0 0 8px;">
+          Your User ID(s):
+        </p>
+        <ul style="color: #1b3a6b; line-height: 1.8; margin: 0 0 20px 18px;">
+          ${userIds.map((id) => `<li><strong>${id}</strong></li>`).join("")}
+        </ul>
+        <p style="color: #999; font-size: 13px; margin: 0; line-height: 1.5;">
+          If you did not request this, you can ignore this email.
+        </p>
+      </div>
+    `,
+  });
+}
