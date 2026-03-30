@@ -69,6 +69,7 @@ function TrialBanner() {
 
 export function AppLayout({ children, title }: { children: ReactNode, title?: string }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const { isImpersonating, exitImpersonation } = useAuth();
 
   return (
     <div className="min-h-screen flex bg-background">
@@ -85,6 +86,15 @@ export function AppLayout({ children, title }: { children: ReactNode, title?: st
             <Menu className="w-5 h-5" />
           </Button>
           {title && <h1 className="text-lg sm:text-xl font-display font-semibold text-foreground truncate">{title}</h1>}
+          {isImpersonating && (
+            <Button
+              variant="outline"
+              className="ml-auto text-xs sm:text-sm border-amber-300 text-amber-800 hover:bg-amber-50"
+              onClick={() => exitImpersonation()}
+            >
+              Return to Platform Admin
+            </Button>
+          )}
         </header>
         <div className="p-4 md:p-8 flex-1 overflow-auto animate-fade-in">
           <div className="max-w-6xl mx-auto space-y-6">
