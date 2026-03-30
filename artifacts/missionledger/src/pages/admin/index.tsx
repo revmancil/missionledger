@@ -11,11 +11,12 @@ import {
   MessageSquare, Send, Bell, Gift,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { apiUrl } from "@/lib/api-base";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
 async function apiFetch(path: string, options?: RequestInit) {
-  const res = await fetch(`${BASE}${path}`, { credentials: "include", ...options });
+  const res = await fetch(apiUrl(path), { credentials: "include", ...options });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.message || err.error || "Request failed");
@@ -558,7 +559,7 @@ export default function AdminCommandCenter() {
   // Auth guard
   useEffect(() => {
     const storedToken = localStorage.getItem("ml_token");
-    fetch(`${BASE}/api/auth/me`, {
+    fetch(apiUrl("/api/auth/me"), {
       credentials: "include",
       headers: storedToken ? { Authorization: `Bearer ${storedToken}` } : undefined,
     })

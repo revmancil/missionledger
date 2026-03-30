@@ -1,8 +1,7 @@
 import React, { useState } from "react";
 import { useLocation } from "wouter";
 import { Shield, Lock, AlertTriangle, Eye, EyeOff, Terminal } from "lucide-react";
-
-const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+import { apiUrl } from "@/lib/api-base";
 
 export default function AdminLoginPage() {
   const [, setLocation] = useLocation();
@@ -17,21 +16,25 @@ export default function AdminLoginPage() {
     setError("");
     setLoading(true);
     try {
-      const res = await fetch(`${BASE}/api/auth/admin-login`, {
+      const ctrl = new AbortController();
+      const timeout = setTimeout(() => ctrl.abort(), 15000);
+      const res = await fetch(apiUrl("/api/auth/admin-login"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({ email: email.trim(), password }),
+        signal: ctrl.signal,
       });
-     const data = await res.json();
-if (!res.ok) {
-  setError(data.message ?? data.error ?? "Authentication failed.");
-  return;
-}
-if (data.token) localStorage.setItem("ml_token", data.token);
-setLocation("/admin");
-    } catch {
-      setError("Network error — please try again.");
+      clearTimeout(timeout);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.message ?? data.error ?? "Authentication failed.");
+        return;
+      }
+      if (data.token) localStorage.setItem("ml_token", data.token);
+      setLocation("/admin");
+    } catch (err: any) {
+      setError(err?.name === "AbortError" ? "Request timed out. Please try again." : "Network error — please try again.");
     } finally {
       setLoading(false);
     }
