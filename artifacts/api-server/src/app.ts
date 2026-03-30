@@ -6,8 +6,19 @@ import { WebhookHandlers } from "./lib/webhookHandlers";
 
 const app: Express = express();
 
+const allowedOrigins = [
+  process.env.CORS_ORIGIN,
+  "https://missionledger-api-server.vercel.app",
+].filter(Boolean);
+
 app.use(cors({
-  origin: true,
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error("Not allowed by CORS"));
+    }
+  },
   credentials: true,
 }));
 
@@ -33,7 +44,6 @@ app.post(
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
-
 app.use("/api", router);
 
 export default app;
