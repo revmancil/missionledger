@@ -122,7 +122,7 @@ export function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
             onClick={handleExitImpersonation}
             className="underline hover:no-underline whitespace-nowrap"
           >
-            Exit
+            Return to Platform Admin
           </button>
         </div>
       )}

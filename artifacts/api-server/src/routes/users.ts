@@ -5,6 +5,16 @@ import { requireAuth, requireAdmin, hashPassword } from "../lib/auth";
 
 const router = Router();
 
+function assertExpectedCompany(req: any, actualCompanyId: string): string | null {
+  const expectedRaw = req.headers["x-company-id-expected"];
+  const expected = Array.isArray(expectedRaw) ? expectedRaw[0] : expectedRaw;
+  if (!expected) return null;
+  if (String(expected) !== String(actualCompanyId)) {
+    return "Company context mismatch. Refresh and retry in the correct organization.";
+  }
+  return null;
+}
+
 function mapLegacyRoleToUi(role: string | null | undefined): "PRIMARY_ADMIN" | "ADMIN" | "USER" | "BOARD" {
   if (role === "MASTER_ADMIN") return "PRIMARY_ADMIN";
   if (role === "ADMIN") return "ADMIN";
@@ -122,6 +132,8 @@ router.get("/", requireAuth, requireAdmin, async (req, res) => {
 router.post("/", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId, id: currentUserId } = (req as any).user;
+    const mismatch = assertExpectedCompany(req, companyId);
+    if (mismatch) return res.status(409).json({ error: mismatch });
     const { name, userId, email, password, role } = req.body ?? {};
     if (!userId || !password || !role) return res.status(400).json({ error: "Missing required fields" });
     const requesterIsPrimary = await isPrimaryAdmin(currentUserId, companyId);
@@ -169,6 +181,8 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
 router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId, id: currentUserId } = (req as any).user;
+    const mismatch = assertExpectedCompany(req, companyId);
+    if (mismatch) return res.status(409).json({ error: mismatch });
     const { name, userId, email, password, role, isActive } = req.body ?? {};
     const requesterIsPrimary = await isPrimaryAdmin(currentUserId, companyId);
     const targetIsPrimary = await isPrimaryAdmin(req.params.id, companyId);
@@ -218,6 +232,8 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
 router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId, id: currentUserId } = (req as any).user;
+    const mismatch = assertExpectedCompany(req, companyId);
+    if (mismatch) return res.status(409).json({ error: mismatch });
     if (req.params.id === currentUserId) return res.status(400).json({ error: "Cannot delete yourself" });
     const requesterIsPrimary = await isPrimaryAdmin(currentUserId, companyId);
     const targetIsPrimary = await isPrimaryAdmin(req.params.id, companyId);
@@ -241,6 +257,8 @@ router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
 router.post("/:id/make-primary", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId, id: currentUserId } = (req as any).user;
+    const mismatch = assertExpectedCompany(req, companyId);
+    if (mismatch) return res.status(409).json({ error: mismatch });
     const requesterIsPrimary = await isPrimaryAdmin(currentUserId, companyId);
     if (!requesterIsPrimary) {
       return res.status(403).json({ error: "Only the current Primary Admin can designate a new Primary Admin." });

@@ -63,7 +63,10 @@ export default function AdminUsersPage() {
     try {
       const res = await authJsonFetch("api/users", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(companyInfo?.companyId ? { "x-company-id-expected": companyInfo.companyId } : {}),
+        },
         body: JSON.stringify(form),
       });
       const data = await readJsonSafe<any>(res);
@@ -81,7 +84,10 @@ export default function AdminUsersPage() {
   async function updateUserRole(id: string, role: UiRole) {
     const res = await authJsonFetch(`api/users/${id}`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(companyInfo?.companyId ? { "x-company-id-expected": companyInfo.companyId } : {}),
+      },
       body: JSON.stringify({ role }),
     });
     const data = await readJsonSafe<any>(res);
@@ -89,13 +95,23 @@ export default function AdminUsersPage() {
   }
 
   async function deleteUser(id: string) {
-    const res = await authJsonFetch(`api/users/${id}`, { method: "DELETE" });
+    const res = await authJsonFetch(`api/users/${id}`, {
+      method: "DELETE",
+      headers: {
+        ...(companyInfo?.companyId ? { "x-company-id-expected": companyInfo.companyId } : {}),
+      },
+    });
     const data = await readJsonSafe<any>(res);
     if (!res.ok) throw new Error(data?.error ?? "Failed to delete user");
   }
 
   async function makePrimary(id: string) {
-    const res = await authJsonFetch(`api/users/${id}/make-primary`, { method: "POST" });
+    const res = await authJsonFetch(`api/users/${id}/make-primary`, {
+      method: "POST",
+      headers: {
+        ...(companyInfo?.companyId ? { "x-company-id-expected": companyInfo.companyId } : {}),
+      },
+    });
     const data = await readJsonSafe<any>(res);
     if (!res.ok) throw new Error(data?.error ?? "Failed to set new Primary Admin");
   }
