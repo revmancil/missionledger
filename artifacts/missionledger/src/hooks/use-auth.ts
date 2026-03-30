@@ -7,6 +7,7 @@ import {
   getGetMeQueryKey
 } from "@workspace/api-client-react";
 import { useLocation } from "wouter";
+import { toast } from "sonner";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -58,6 +59,16 @@ export function useAuth() {
       onSuccess: (data) => {
         // Keep auth state stable after registration by persisting token.
         if ((data as any)?.token) localStorage.setItem("ml_token", (data as any).token);
+        if (typeof window !== "undefined") {
+          sessionStorage.setItem("ml_registration_info", JSON.stringify({
+            companyId: (data as any)?.companyId ?? "",
+            companyCode: (data as any)?.companyCode ?? "",
+            companyName: (data as any)?.companyName ?? "",
+          }));
+        }
+        toast.success(
+          `Registration complete. Company ID: ${(data as any)?.companyId ?? "N/A"} | Code: ${(data as any)?.companyCode ?? "N/A"}`
+        );
         qc.setQueryData(getGetMeQueryKey(), data);
         setLocation("/dashboard");
       }

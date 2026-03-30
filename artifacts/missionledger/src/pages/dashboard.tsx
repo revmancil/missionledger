@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
 import { authJsonFetch, readJsonSafe, logApiFailure } from "@/lib/auth-fetch";
 import { useLocation } from "wouter";
 import { useFinancialSync } from "@/lib/financial-sync";
+import { Link } from "wouter";
 
 const BASE = import.meta.env.BASE_URL;
 
@@ -186,6 +187,7 @@ export default function Dashboard() {
   const [syncMsg, setSyncMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
   const [readiness, setReadiness] = useState<Readiness990 | null>(null);
   const [showFixNow, setShowFixNow] = useState(false);
+  const [registrationInfo, setRegistrationInfo] = useState<{ companyId: string; companyCode: string; companyName: string } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -225,6 +227,17 @@ export default function Dashboard() {
   // Re-fetch whenever any component triggers a global refetch (e.g. after a transaction save)
   useEffect(() => { load(); }, [load, version]);
 
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem("ml_registration_info");
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (parsed?.companyId) setRegistrationInfo(parsed);
+    } catch {
+      // no-op
+    }
+  }, []);
+
   if (loading) {
     return (
       <AppLayout title="Executive Dashboard">
@@ -252,6 +265,26 @@ export default function Dashboard() {
 
   return (
     <AppLayout title="Executive Dashboard">
+      {registrationInfo && (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm">
+          <div className="font-medium text-emerald-800">Registration Complete</div>
+          <div className="text-emerald-700 mt-1">
+            {registrationInfo.companyName} | Company Code: <strong>{registrationInfo.companyCode}</strong> | Company ID: <code>{registrationInfo.companyId}</code>
+          </div>
+          <div className="mt-2 flex items-center gap-3">
+            <Link href="/admin-users" className="text-emerald-800 underline">Open Admin Users</Link>
+            <button
+              className="text-emerald-800 underline"
+              onClick={() => {
+                sessionStorage.removeItem("ml_registration_info");
+                setRegistrationInfo(null);
+              }}
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 -mt-2 mb-1">
         <div>

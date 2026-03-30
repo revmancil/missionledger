@@ -74,6 +74,7 @@ export function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
   const [location] = useLocation();
   const { user, logout, myOrgs, switchOrg, isPlatformAdmin, isImpersonating, exitImpersonation } = useAuth();
   const [switching, setSwitching] = useState(false);
+  const canManageUsers = isPlatformAdmin || user?.role === "MASTER_ADMIN" || user?.role === "ADMIN";
 
   const handleSwitchOrg = async (companyId: string) => {
     if (companyId === user?.companyId) return;
@@ -191,6 +192,28 @@ export function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
 
       {/* Nav */}
       <div className="flex-1 overflow-y-auto py-4 px-3 space-y-6">
+        {canManageUsers && (
+          <div>
+            <h3 className="px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+              Administration
+            </h3>
+            <div className="space-y-1">
+              <Link
+                href="/admin-users"
+                onClick={handleNavClick}
+                className={cn(
+                  "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200",
+                  location === "/admin-users"
+                    ? "bg-primary/10 text-primary"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                )}
+              >
+                <Shield className={cn("w-5 h-5 shrink-0", location === "/admin-users" ? "text-primary" : "text-muted-foreground")} />
+                Admin Users
+              </Link>
+            </div>
+          </div>
+        )}
         {navGroups.map((group) => (
           <div key={group.label}>
             <h3 className="px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
