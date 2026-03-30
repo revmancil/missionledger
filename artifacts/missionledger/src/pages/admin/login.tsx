@@ -23,12 +23,13 @@ export default function AdminLoginPage() {
         credentials: "include",
         body: JSON.stringify({ email: email.trim(), password }),
       });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.message ?? data.error ?? "Authentication failed.");
-        return;
-      }
-      setLocation("/admin");
+     const data = await res.json();
+if (!res.ok) {
+  setError(data.message ?? data.error ?? "Authentication failed.");
+  return;
+}
+if (data.token) localStorage.setItem("ml_token", data.token);
+setLocation("/admin");
     } catch {
       setError("Network error — please try again.");
     } finally {

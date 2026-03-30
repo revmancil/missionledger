@@ -11,7 +11,15 @@ import { useLocation } from "wouter";
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
 async function apiFetch(path: string, options?: RequestInit) {
-  const res = await fetch(`${BASE}${path}`, { credentials: "include", ...options });
+  const storedToken = localStorage.getItem("ml_token");
+  const res = await fetch(`${BASE}${path}`, {
+    credentials: "include",
+    ...options,
+    headers: {
+      ...options?.headers,
+      ...(storedToken ? { Authorization: `Bearer ${storedToken}` } : {}),
+    },
+  });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.message || err.error || "Request failed");
@@ -35,14 +43,15 @@ export function useAuth() {
   });
 
   const loginMutation = useGenLogin({
-    mutation: {
-      onSuccess: (data) => {
-        qc.setQueryData(getGetMeQueryKey(), data);
-        qc.invalidateQueries({ queryKey: ["my-orgs"] });
-        setLocation("/dashboard");
-      }
+  mutation: {
+    onSuccess: (data: any) => {
+      if (data.token) localStorage.setItem("ml_token", data.token);
+      qc.setQueryData(getGetMeQueryKey(), data);
+      qc.invalidateQueries({ queryKey: ["my-orgs"] });
+      setLocation("/dashboard");
     }
-  });
+  }
+});
 
   const registerMutation = useGenRegister({
     mutation: {

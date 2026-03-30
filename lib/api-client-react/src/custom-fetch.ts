@@ -276,13 +276,24 @@ async function parseSuccessBody(
     : "";
 
   export async function customFetch<T = unknown>(
-    input: RequestInfo | URL,
-    options: CustomFetchOptions = {},
-  ): Promise<T> {
-    if (typeof input === "string" && input.startsWith("/api")) {
-      const apiBase = (typeof window !== "undefined" && (window as any).VITE_API_BASE_URL) || "";
-      input = `${apiBase}${input}`;
-    }
+  input: RequestInfo | URL,
+  options: CustomFetchOptions = {},
+): Promise<T> {
+  if (typeof input === "string" && input.startsWith("/api")) {
+    const apiBase = (typeof window !== "undefined" && (window as any).VITE_API_BASE_URL) || "";
+    input = `${apiBase}${input}`;
+  }
+
+  // Attach stored JWT token if available
+  const storedToken = typeof localStorage !== "undefined" ? localStorage.getItem("ml_token") : null;
+  if (storedToken && options.headers) {
+    options.headers = {
+      ...options.headers,
+      Authorization: `Bearer ${storedToken}`,
+    };
+  } else if (storedToken) {
+    options.headers = { Authorization: `Bearer ${storedToken}` };
+  }
   const { responseType = "auto", headers: headersInit, ...init } = options;
 
   const method = resolveMethod(input, init.method);

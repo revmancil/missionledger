@@ -27,12 +27,12 @@ function generateCompanyCode(orgName?: string): string {
 function setCookieAndRespond(res: any, authUser: AuthUser, status = 200) {
   const token = signToken(authUser);
   res.cookie(COOKIE_NAME, token, {
-  httpOnly: true,
-  secure: true,
-  sameSite: "none",
-  maxAge: 7 * 24 * 60 * 60 * 1000,
-});
-  res.status(status).json(authUser);
+    httpOnly: true,
+    secure: true,
+    sameSite: "none",
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+  });
+  res.status(status).json({ ...authUser, token });
 }
 
 // GET /auth/me
