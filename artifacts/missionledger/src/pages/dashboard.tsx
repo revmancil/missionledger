@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { cn } from "@/lib/utils";
+import { authJsonFetch, readJsonSafe, logApiFailure } from "@/lib/auth-fetch";
 import { useLocation } from "wouter";
 import { useFinancialSync } from "@/lib/financial-sync";
 
@@ -189,14 +190,14 @@ export default function Dashboard() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const token = typeof window !== "undefined" ? localStorage.getItem("ml_token") : null;
-      const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
       const [dashRes, readRes] = await Promise.all([
-        fetch(`${BASE}api/dashboard`, { credentials: "include", headers }),
-        fetch(`${BASE}api/reports/990-readiness`, { credentials: "include", headers }),
+        authJsonFetch("api/dashboard"),
+        authJsonFetch("api/reports/990-readiness"),
       ]);
       if (dashRes.ok) setData(await dashRes.json());
+      else logApiFailure("/api/dashboard", dashRes, await readJsonSafe(dashRes));
       if (readRes.ok) setReadiness(await readRes.json());
+      else logApiFailure("/api/reports/990-readiness", readRes, await readJsonSafe(readRes));
     } finally { setLoading(false); }
   }, []);
 
@@ -204,12 +205,8 @@ export default function Dashboard() {
     setSyncing(true);
     setSyncMsg(null);
     try {
-      const token = typeof window !== "undefined" ? localStorage.getItem("ml_token") : null;
-      const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
-      const res = await fetch(`${BASE}api/opening-balance/recalculate`, {
+      const res = await authJsonFetch("api/opening-balance/recalculate", {
         method: "POST",
-        credentials: "include",
-        headers,
       });
       const body = await res.json();
       if (!res.ok) {

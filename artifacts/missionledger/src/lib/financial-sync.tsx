@@ -1,6 +1,5 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef } from "react";
-
-const BASE = import.meta.env.BASE_URL as string;
+import { authJsonFetch } from "@/lib/auth-fetch";
 
 export interface FundBalance {
   id: string;
@@ -52,11 +51,7 @@ export function FinancialSyncProvider({ children }: { children: React.ReactNode 
     abortRef.current = ctrl;
     setIsLoading(true);
     try {
-      const token = typeof window !== "undefined" ? localStorage.getItem("ml_token") : null;
-      const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
-      const res = await fetch(`${BASE}api/financial-summary`, {
-        credentials: "include",
-        headers,
+      const res = await authJsonFetch("api/financial-summary", {
         signal: ctrl.signal,
       });
       if (!res.ok) return;

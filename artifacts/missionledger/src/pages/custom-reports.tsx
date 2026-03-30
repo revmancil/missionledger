@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { authJsonFetch, readJsonSafe, logApiFailure } from "@/lib/auth-fetch";
 import { toast } from "sonner";
 import {
   Play, Save, Trash2, FileDown, Download, ChevronDown, ChevronRight,
@@ -13,12 +14,6 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
 const BASE = import.meta.env.BASE_URL as string;
-
-function authHeaders(): Record<string, string> | undefined {
-  if (typeof window === "undefined") return undefined;
-  const token = localStorage.getItem("ml_token");
-  return token ? { Authorization: `Bearer ${token}` } : undefined;
-}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -98,8 +93,7 @@ export default function CustomReportsPage() {
 
   // Load chart of accounts, funds, and templates
   useEffect(() => {
-    const headers = authHeaders();
-    fetch(`${BASE}api/chart-of-accounts`, { credentials: "include", headers })
+    authJsonFetch("api/chart-of-accounts")
       .then(async (r) => {
         const d = await r.json().catch(() => null);
         const list = d?.data ?? d;
@@ -108,7 +102,7 @@ export default function CustomReportsPage() {
       .then((list: any[]) => setAccounts(list.filter((a: any) => a.isActive !== false)))
       .catch(() => {});
 
-    fetch(`${BASE}api/funds`, { credentials: "include", headers })
+    authJsonFetch("api/funds")
       .then(async (r) => {
         const d = await r.json().catch(() => null);
         const list = d?.data ?? d;
@@ -120,10 +114,13 @@ export default function CustomReportsPage() {
   }, []);
 
   function loadTemplates() {
-    const headers = authHeaders();
-    fetch(`${BASE}api/custom-reports/templates`, { credentials: "include", headers })
+    authJsonFetch("api/custom-reports/templates")
       .then(async (r) => {
         const d = await r.json().catch(() => null);
+        if (!r.ok) {
+          logApiFailure("/api/custom-reports/templates", r, d);
+          return [];
+        }
         const list = d?.data ?? d;
         return Array.isArray(list) ? list : [];
       })
@@ -157,15 +154,16 @@ export default function CustomReportsPage() {
     setLoading(true);
     setResult(null);
     try {
-      const headers = authHeaders();
-      const res = await fetch(`${BASE}api/custom-reports/run`, {
+      const res = await authJsonFetch("api/custom-reports/run", {
         method: "POST",
-        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(config),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to run report");
+      const data = await readJsonSafe<any>(res);
+      if (!res.ok) {
+        logApiFailure("/api/custom-reports/run", res, data);
+        throw new Error((data as any)?.error || "Failed to run report");
+      }
       setResult(data);
     } catch (err: any) {
       toast.error(err.message || "Report failed");
@@ -178,11 +176,9 @@ export default function CustomReportsPage() {
     if (!templateName.trim()) { toast.error("Enter a template name"); return; }
     setSavingTemplate(true);
     try {
-      const headers = authHeaders();
-      const res = await fetch(`${BASE}api/custom-reports/templates`, {
+      const res = await authJsonFetch("api/custom-reports/templates", {
         method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json", ...headers },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: templateName.trim(), config }),
       });
       if (!res.ok) throw new Error("Failed to save");
@@ -198,8 +194,7 @@ export default function CustomReportsPage() {
 
   const handleDeleteTemplate = async (id: string) => {
     if (!confirm("Delete this template?")) return;
-    const headers = authHeaders();
-    await fetch(`${BASE}api/custom-reports/templates/${id}`, { method: "DELETE", credentials: "include", headers });
+    await authJsonFetch(`api/custom-reports/templates/${id}`, { method: "DELETE" });
     loadTemplates();
   };
 

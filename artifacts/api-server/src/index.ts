@@ -17,6 +17,41 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
+const REQUIRED_SCHEMA: Record<string, string[]> = {
+  companies: ["id", "company_code", "name", "subscription_status", "is_active"],
+  users: ["id", "company_id", "email", "password", "role", "is_active", "is_platform_admin"],
+  organization_users: ["id", "user_id", "company_id", "role", "is_primary", "is_active"],
+  funds: ["id", "company_id", "name", "fund_type", "is_active"],
+  bank_accounts: ["id", "company_id", "name", "current_balance", "plaid_access_token", "is_plaid_linked"],
+  transactions: ["id", "company_id", "date", "payee", "amount", "transaction_type", "transaction_status", "is_void", "vendor_id"],
+  chart_of_accounts: ["id", "company_id", "code", "name", "coa_type", "is_active"],
+  gl_entries: ["id", "company_id", "account_id", "amount", "entry_type", "date", "is_void"],
+  custom_report_templates: ["id", "company_id", "name", "config"],
+};
+
+async function validateRequiredSchema(): Promise<void> {
+  const missing: string[] = [];
+  for (const [tableName, requiredColumns] of Object.entries(REQUIRED_SCHEMA)) {
+    try {
+      const { rows } = await pool.query(
+        `SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1`,
+        [tableName]
+      );
+      const existing = new Set(rows.map((r: any) => String(r.column_name)));
+      for (const col of requiredColumns) {
+        if (!existing.has(col)) missing.push(`${tableName}.${col}`);
+      }
+    } catch (err: any) {
+      missing.push(`${tableName} (table check failed: ${err.message})`);
+    }
+  }
+  if (missing.length > 0) {
+    console.warn("[Schema validator] Missing required schema items:", missing.join(", "));
+  } else {
+    console.log("[Schema validator] Required schema columns present");
+  }
+}
+
 async function patchStripeEnums() {
   // pg-node-migrations sends the full SQL file as one query(), so PostgreSQL
   // parses ALL statements at once. Any CREATE TABLE that references a user-defined
@@ -579,6 +614,7 @@ async function ensureSchema() {
 app.listen(port, async () => {
   console.log(`Server listening on port ${port}`);
   await ensureSchema();
+  await validateRequiredSchema();
   await seedPlatformAdmin();
   await initStripe();
 });
