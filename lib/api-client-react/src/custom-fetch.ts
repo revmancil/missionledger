@@ -280,7 +280,8 @@ async function parseSuccessBody(
     options: CustomFetchOptions = {},
   ): Promise<T> {
     if (typeof input === "string" && input.startsWith("/api")) {
-      input = `${import.meta.env.VITE_API_BASE_URL || ""}${input}`;
+      const apiBase = (typeof window !== "undefined" && (window as any).VITE_API_BASE_URL) || "";
+      input = `${apiBase}${input}`;
     }
   const { responseType = "auto", headers: headersInit, ...init } = options;
 
