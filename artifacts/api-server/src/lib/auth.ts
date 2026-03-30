@@ -35,9 +35,20 @@ export function verifyToken(token: string): AuthUser | null {
 
 export async function requireAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
   const cookieToken = req.cookies?.[COOKIE_NAME];
-  const headerToken = req.headers.authorization?.replace("Bearer ", "");
+  const headerAuth = req.headers.authorization;
+  const headerToken = headerAuth
+    ? headerAuth.startsWith("Bearer ")
+      ? headerAuth.slice("Bearer ".length).trim()
+      : headerAuth.trim()
+    : undefined;
   const token = cookieToken || headerToken;
   if (!token) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  const user = verifyToken(token);
+  if (!user) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }
