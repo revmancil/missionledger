@@ -28,20 +28,47 @@ router.get("/", requireAuth, async (req, res) => {
 
     // ── Parallel data fetch ─────────────────────────────────────────────────
     const [
-      allBankAccounts, allCoa, allTx, allSplits,
-      allDonations, allExpenses,
-      activeBudgets, allBudgetLines,
+      allBankAccounts,
+      allCoa,
+      allTx,
+      allSplits,
+      allDonations,
+      allExpenses,
+      activeBudgets,
+      allBudgetLines,
     ] = await Promise.all([
-      db.select().from(bankAccounts).where(eq(bankAccounts.companyId, companyId)),
-      db.select().from(chartOfAccounts).where(eq(chartOfAccounts.companyId, companyId)),
-      db.select().from(transactions)
+      db.select({ id: bankAccounts.id, name: bankAccounts.name }).from(bankAccounts)
+        .where(eq(bankAccounts.companyId, companyId)),
+      db.select({ id: chartOfAccounts.id, code: chartOfAccounts.code, name: chartOfAccounts.name, isActive: chartOfAccounts.isActive, type: chartOfAccounts.type })
+        .from(chartOfAccounts)
+        .where(eq(chartOfAccounts.companyId, companyId)),
+      db.select({
+        id: transactions.id,
+        date: transactions.date,
+        payee: transactions.payee,
+        amount: transactions.amount,
+        type: transactions.type,
+        status: transactions.status,
+        isSplit: transactions.isSplit,
+        memo: transactions.memo,
+        chartAccountId: transactions.chartAccountId,
+        isVoid: transactions.isVoid,
+        bankAccountId: transactions.bankAccountId,
+        fundId: transactions.fundId,
+        createdAt: transactions.createdAt,
+      }).from(transactions)
         .where(eq(transactions.companyId, companyId))
         .orderBy(desc(transactions.date), desc(transactions.createdAt)),
-      db.select().from(transactionSplits),
-      db.select().from(donations).where(eq(donations.companyId, companyId)),
-      db.select().from(expenses).where(eq(expenses.companyId, companyId)),
-      db.select().from(budgets).where(and(eq(budgets.companyId, companyId), eq(budgets.isActive, true))),
-      db.select().from(budgetLines).where(eq(budgetLines.companyId, companyId)),
+      db.select({ transactionId: transactionSplits.transactionId, chartAccountId: transactionSplits.chartAccountId, amount: transactionSplits.amount })
+        .from(transactionSplits),
+      db.select({ amount: donations.amount }).from(donations)
+        .where(eq(donations.companyId, companyId)),
+      db.select({ amount: expenses.amount }).from(expenses)
+        .where(eq(expenses.companyId, companyId)),
+      db.select({ id: budgets.id, startDate: budgets.startDate }).from(budgets)
+        .where(and(eq(budgets.companyId, companyId), eq(budgets.isActive, true))),
+      db.select({ budgetId: budgetLines.budgetId, amount: budgetLines.amount }).from(budgetLines)
+        .where(eq(budgetLines.companyId, companyId)),
     ]);
 
     const coaMap: Record<string, { id: string; code: string; name: string; type: string }> =
@@ -210,8 +237,8 @@ router.get("/", requireAuth, async (req, res) => {
     });
 
     // ── Legacy fields (backward compat) ──────────────────────────────────────
-    const totalDonations = allDonations.reduce((s, d) => s + (d.amount || 0), 0);
-    const totalExpenses  = allExpenses.reduce((s, e) => s + (e.amount || 0), 0);
+    const totalDonations = allDonations.reduce((s: number, d: any) => s + (d.amount || 0), 0);
+    const totalExpenses  = allExpenses.reduce((s: number, e: any) => s + (e.amount || 0), 0);
 
     res.json({
       // Executive KPIs

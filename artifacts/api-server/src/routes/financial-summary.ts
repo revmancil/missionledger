@@ -18,9 +18,18 @@ router.get("/", requireAuth, async (req, res) => {
     const ytdStart = new Date(now.getFullYear(), 0, 1);
 
     const [allBankAccounts, allTx, allFunds] = await Promise.all([
-      db.select().from(bankAccounts).where(eq(bankAccounts.companyId, companyId)),
-      db.select().from(transactions).where(eq(transactions.companyId, companyId)),
-      db.select().from(funds).where(eq(funds.companyId, companyId)),
+      db.select({ id: bankAccounts.id, name: bankAccounts.name }).from(bankAccounts)
+        .where(eq(bankAccounts.companyId, companyId)),
+      db.select({
+        isVoid: transactions.isVoid,
+        bankAccountId: transactions.bankAccountId,
+        date: transactions.date,
+        type: transactions.type,
+        amount: transactions.amount,
+        fundId: transactions.fundId,
+      }).from(transactions).where(eq(transactions.companyId, companyId)),
+      db.select({ id: funds.id, name: funds.name, fundType: funds.fundType }).from(funds)
+        .where(eq(funds.companyId, companyId)),
     ]);
 
     const activeTx = allTx.filter((t) => !t.isVoid);
