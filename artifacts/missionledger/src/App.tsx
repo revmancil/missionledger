@@ -25,7 +25,6 @@ import TrialBalancePage from "@/pages/trial-balance";
 import PeriodClosePage from "@/pages/period-close";
 import ReportsPage from "@/pages/reports";
 import CustomReportsPage from "@/pages/custom-reports";
-import MasterAdminPage from "@/pages/master-admin";
 import DonorGivingPage from "@/pages/donor-giving";
 import BillingPage from "@/pages/billing";
 import ForgotPasswordPage from "@/pages/auth/forgot-password";
@@ -124,7 +123,7 @@ function Router() {
       <Route path="/custom-reports"><SubscriptionGatedRoute component={CustomReportsPage} /></Route>
       <Route path="/budget"><SubscriptionGatedRoute component={BudgetPage} /></Route>
       <Route path="/donor-giving"><SubscriptionGatedRoute component={DonorGivingPage} /></Route>
-      <Route path="/master-admin"><SubscriptionGatedRoute component={MasterAdminPage} /></Route>
+      <Route path="/master-admin"><Redirect to="/admin" /></Route>
       <Route path="/billing"><ProtectedRoute component={BillingPage} /></Route>
       <Route path="/admin-users"><SubscriptionGatedRoute component={AdminUsersPage} /></Route>
 

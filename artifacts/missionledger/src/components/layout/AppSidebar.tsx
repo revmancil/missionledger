@@ -271,7 +271,7 @@ export function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
             </p>
           </div>
           {isPlatformAdmin && (
-            <Link href="/master-admin" onClick={handleNavClick} title="Platform Admin Console">
+            <Link href="/admin" onClick={handleNavClick} title="Platform Admin Command Center">
               <Shield className="w-4 h-4 text-primary shrink-0 hover:text-primary/70 transition-colors" />
             </Link>
           )}
