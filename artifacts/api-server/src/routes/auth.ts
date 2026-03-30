@@ -48,8 +48,9 @@ router.post("/find-user-id", async (req, res) => {
       return res.status(400).json({ error: "companyCode and email are required" });
     }
 
+    const normalizedCompanyCode = String(companyCode).trim().toUpperCase();
     const [company] = await db.select().from(companies)
-      .where(eq(companies.companyCode, String(companyCode).toUpperCase()))
+      .where(eq(companies.companyCode, normalizedCompanyCode))
       .limit(1);
     if (!company) return res.json({ ok: true, userIds: [] });
 

@@ -95,7 +95,7 @@ function statusBadge(org: OrgRow) {
 }
 
 export default function MasterAdminPage() {
-  const { isPlatformAdmin, isImpersonating } = useAuth();
+  const { isPlatformAdmin, isImpersonating, exitImpersonation } = useAuth();
   const [, setLocation] = useLocation();
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
@@ -233,6 +233,14 @@ export default function MasterAdminPage() {
             <p className="text-muted-foreground text-sm">
               Manage all organizations, users, and subscriptions across MissionLedger.
             </p>
+            {isImpersonating && (
+              <button
+                onClick={() => exitImpersonation()}
+                className="mt-2 text-sm text-primary underline hover:no-underline"
+              >
+                Return to Platform Admin
+              </button>
+            )}
           </div>
           <Button
             variant="outline"

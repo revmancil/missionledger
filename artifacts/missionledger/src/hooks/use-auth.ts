@@ -104,7 +104,7 @@ export function useAuth() {
     qc.setQueryData(getGetMeQueryKey(), data);
     qc.clear();
     qc.invalidateQueries();
-    window.location.href = `${BASE}/admin`;
+    window.location.href = `${BASE}/master-admin`;
   }
 
   return {

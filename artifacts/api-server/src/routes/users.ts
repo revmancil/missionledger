@@ -39,17 +39,37 @@ async function countPrimaryAdmins(companyId: string): Promise<number> {
 // ── GET /users/me ─────────────────────────────────────────────────────────────
 router.get("/me", requireAuth, async (req, res) => {
   try {
-    const { id: userId, companyId, email, role } = (req as any).user;
+    const authUser = (req as any).user;
+    const { id: userId, companyId, email, role } = authUser;
     const [u] = await db.select({
       id: users.id, userId: users.userId, name: users.name, email: users.email,
       role: users.role, isActive: users.isActive,
     }).from(users).where(and(eq(users.id, userId), eq(users.companyId, companyId)));
-    if (!u) return res.status(404).json({ error: "User not found" });
     const [company] = await db.select({
       id: companies.id,
       companyCode: companies.companyCode,
       name: companies.name,
     }).from(companies).where(eq(companies.id, companyId)).limit(1);
+
+    if (!u) {
+      // Impersonation/legacy sessions can carry a valid company context while the
+      // user row is not tied to that tenant. Return token-backed profile instead
+      // of hard failing so admin views can still load.
+      return res.json({
+        id: userId,
+        userId: authUser.userId ?? "",
+        name: authUser.name ?? null,
+        email: email ?? "",
+        role: role ?? "VIEWER",
+        uiRole: mapLegacyRoleToUi(role),
+        isPrimaryAdmin: false,
+        isActive: true,
+        companyId,
+        companyCode: company?.companyCode ?? "",
+        companyName: company?.name ?? authUser.companyName ?? "",
+      });
+    }
+
     const primary = await isPrimaryAdmin(userId, companyId);
     res.json({
       ...u,
