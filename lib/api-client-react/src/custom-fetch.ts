@@ -287,6 +287,7 @@ async function parseSuccessBody(
   // Attach stored JWT token if available
 try {
   const storedToken = localStorage.getItem("ml_token");
+  console.log("customFetch token:", storedToken ? "found" : "not found", "url:", typeof input === "string" ? input : "non-string");
   if (storedToken) {
     options = {
       ...options,
@@ -297,7 +298,8 @@ try {
     };
   }
 } catch (e) {
-  // localStorage not available
+  console.log("localStorage error:", e);
+}
 }
   const { responseType = "auto", headers: headersInit, ...init } = options;
 
