@@ -41,7 +41,7 @@ router.get("/me", requireAuth, async (req, res) => {
   try {
     const { id: userId, companyId, email, role } = (req as any).user;
     const [u] = await db.select({
-      id: users.id, name: users.name, email: users.email,
+      id: users.id, userId: users.userId, name: users.name, email: users.email,
       role: users.role, isActive: users.isActive,
     }).from(users).where(and(eq(users.id, userId), eq(users.companyId, companyId)));
     if (!u) return res.status(404).json({ error: "User not found" });
@@ -70,7 +70,7 @@ router.get("/", requireAuth, requireAdmin, async (req, res) => {
     const { companyId } = (req as any).user;
     const { rows } = await pool.query(
       `SELECT
-         u.id, u.name, u.email, u.role, u.is_active, u.created_at, u.updated_at,
+         u.id, u.user_id, u.name, u.email, u.role, u.is_active, u.created_at, u.updated_at,
          COALESCE(ou.is_primary, false) AS is_primary
        FROM users u
        LEFT JOIN organization_users ou
@@ -83,6 +83,7 @@ router.get("/", requireAuth, requireAdmin, async (req, res) => {
     res.json(
       rows.map((u: any) => ({
         id: u.id,
+        userId: u.user_id,
         name: u.name,
         email: u.email,
         role: u.role,
@@ -101,8 +102,8 @@ router.get("/", requireAuth, requireAdmin, async (req, res) => {
 router.post("/", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId, id: currentUserId } = (req as any).user;
-    const { name, email, password, role } = req.body ?? {};
-    if (!email || !password || !role) return res.status(400).json({ error: "Missing required fields" });
+    const { name, userId, email, password, role } = req.body ?? {};
+    if (!userId || !password || !role) return res.status(400).json({ error: "Missing required fields" });
     const requesterIsPrimary = await isPrimaryAdmin(currentUserId, companyId);
     const legacyRole = mapUiRoleToLegacy(role);
     if (legacyRole === "MASTER_ADMIN" && !requesterIsPrimary) {
@@ -112,8 +113,9 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
     const hashed = await hashPassword(password);
     const [created] = await db.insert(users).values({
       companyId,
+      userId: String(userId).trim().toLowerCase(),
       name: name || null,
-      email: email.toLowerCase(),
+      email: email ? String(email).toLowerCase() : `${String(userId).trim().toLowerCase()}@local.missionledger`,
       password: hashed,
       role: legacyRole as any,
       isActive: true,
@@ -129,6 +131,7 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
 
     res.status(201).json({
       id: created.id,
+      userId: created.userId,
       name: created.name,
       email: created.email,
       role: created.role,
@@ -146,7 +149,7 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
 router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId, id: currentUserId } = (req as any).user;
-    const { name, email, password, role, isActive } = req.body ?? {};
+    const { name, userId, email, password, role, isActive } = req.body ?? {};
     const requesterIsPrimary = await isPrimaryAdmin(currentUserId, companyId);
     const targetIsPrimary = await isPrimaryAdmin(req.params.id, companyId);
     const legacyRole = role ? mapUiRoleToLegacy(role) : undefined;
@@ -160,6 +163,7 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
 
     const updateData: any = { updatedAt: new Date() };
     if (name !== undefined) updateData.name = name || null;
+    if (userId !== undefined) updateData.userId = String(userId).trim().toLowerCase();
     if (legacyRole) updateData.role = legacyRole;
     if (typeof isActive === "boolean") updateData.isActive = isActive;
     if (email) updateData.email = email.toLowerCase();
@@ -176,6 +180,7 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
 
     res.json({
       id: updated.id,
+      userId: updated.userId,
       name: updated.name,
       email: updated.email,
       role: updated.role,

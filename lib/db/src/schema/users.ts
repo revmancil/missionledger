@@ -6,6 +6,7 @@ import { roleEnum } from "./companies";
 export const users = pgTable("users", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   companyId: text("company_id").notNull(),
+  userId: text("user_id").notNull(),
   name: text("name"),
   email: text("email").notNull(),
   password: text("password").notNull(),

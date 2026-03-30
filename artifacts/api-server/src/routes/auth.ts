@@ -43,9 +43,9 @@ router.get("/me", requireAuth, (req, res) => {
 // POST /auth/login
 router.post("/login", async (req, res) => {
   try {
-    const { companyCode, email, password } = req.body ?? {};
-    if (!companyCode || !email || !password) {
-      return res.status(400).json({ error: "Missing required fields" });
+    const { companyCode, email, userId, password } = req.body ?? {};
+    if (!companyCode || !password || (!email && !userId)) {
+      return res.status(400).json({ error: "companyCode, password, and email or userId are required" });
     }
 
     const [company] = await db.select().from(companies)
@@ -59,9 +59,21 @@ router.post("/login", async (req, res) => {
       return res.status(403).json({ error: "ACCOUNT_SUSPENDED", message: "This organization account has been suspended." });
     }
 
-    const [user] = await db.select().from(users).where(
-      and(eq(users.email, email.toLowerCase()), eq(users.isActive, true))
-    ).limit(1);
+    const [user] = userId
+      ? await db.select().from(users).where(
+        and(
+          eq(users.companyId, company.id),
+          eq(users.userId, String(userId).trim().toLowerCase()),
+          eq(users.isActive, true)
+        )
+      ).limit(1)
+      : await db.select().from(users).where(
+        and(
+          eq(users.companyId, company.id),
+          eq(users.email, String(email).toLowerCase()),
+          eq(users.isActive, true)
+        )
+      ).limit(1);
 
     if (!user) {
       return res.status(401).json({ error: "Invalid credentials" });
@@ -86,6 +98,7 @@ router.post("/login", async (req, res) => {
 
     const authUser: AuthUser = {
       id: user.id,
+      userId: user.userId,
       email: user.email,
       name: user.name,
       role: effectiveRole,
@@ -125,12 +138,17 @@ router.post("/logout", (req, res) => {
 // POST /auth/register
 router.post("/register", async (req, res) => {
   try {
-    const { organizationName, ein, organizationType, adminName, adminEmail, password } = req.body ?? {};
-    if (!organizationName || !ein || !organizationType || !adminEmail || !password) {
+    const { organizationName, ein, organizationType, adminName, adminEmail, adminUserId, password } = req.body ?? {};
+    if (!organizationName || !ein || !organizationType || !adminEmail || !adminUserId || !password) {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
-    const existingUser = await db.select().from(users).where(eq(users.email, adminEmail.toLowerCase())).limit(1);
+    const existingUser = await db.select().from(users).where(
+      and(
+        eq(users.email, adminEmail.toLowerCase()),
+        eq(users.userId, String(adminUserId).trim().toLowerCase())
+      )
+    ).limit(1);
     if (existingUser.length) {
       // Registration can be retried after previous failures (e.g. schema drift during deploy).
       // If the email already exists and the provided password matches, treat it as a successful login.
@@ -157,6 +175,7 @@ router.post("/register", async (req, res) => {
 
       const authUser: AuthUser = {
         id: existing.id,
+        userId: existing.userId,
         email: existing.email,
         name: existing.name,
         role: existing.role,
@@ -193,6 +212,7 @@ router.post("/register", async (req, res) => {
 
     const [user] = await db.insert(users).values({
       companyId: company.id,
+      userId: String(adminUserId).trim().toLowerCase(),
       name: adminName || null,
       email: adminEmail.toLowerCase(),
       password: hashedPw,
@@ -225,6 +245,7 @@ router.post("/register", async (req, res) => {
 
     const authUser: AuthUser = {
       id: user.id,
+      userId: user.userId,
       email: user.email,
       name: user.name,
       role: user.role,
@@ -349,6 +370,7 @@ router.post("/switch-org", requireAuth, async (req, res) => {
 
     const authUser: AuthUser = {
       id: user.id,
+      userId: user.userId,
       email: user.email,
       name: user.name,
       role: membership?.role ?? user.role,
@@ -402,6 +424,7 @@ router.post("/admin-login", async (req, res) => {
 
     const authUser: AuthUser = {
       id: user.id,
+      userId: user.userId,
       email: user.email,
       name: user.name,
       role: user.role,

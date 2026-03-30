@@ -10,6 +10,7 @@ const COOKIE_NAME = "ml_session";
 
 export interface AuthUser {
   id: string;
+  userId?: string;
   email: string;
   name: string | null;
   role: string;
@@ -106,6 +107,26 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
           return;
         }
       }
+    }
+  }
+
+  // Board users are read-only at API level, except report/custom-report creation flows.
+  const method = (req.method || "GET").toUpperCase();
+  if (["POST", "PUT", "PATCH", "DELETE"].includes(method) && user?.role === "OFFICER") {
+    const url = (req as any).originalUrl ?? "";
+    const boardWriteAllowlist = [
+      "/api/custom-reports/run",
+      "/api/custom-reports/templates",
+      "/api/auth/logout",
+      "/api/auth/switch-org",
+    ];
+    if (!boardWriteAllowlist.some((p) => url.startsWith(p))) {
+      res.status(403).json({ error: "READ_ONLY_ROLE", message: "Board role is read-only." });
+      return;
+    }
+    if (url.startsWith("/api/custom-reports/templates") && method !== "POST") {
+      res.status(403).json({ error: "READ_ONLY_ROLE", message: "Board role is read-only." });
+      return;
     }
   }
 

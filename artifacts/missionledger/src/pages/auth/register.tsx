@@ -15,6 +15,7 @@ export default function RegisterPage() {
     organizationType: "NONPROFIT",
     adminName: "",
     adminEmail: "",
+    adminUserId: "",
     password: ""
   });
 
@@ -76,6 +77,10 @@ export default function RegisterPage() {
               <div className="space-y-1">
                 <label className="text-sm font-medium">Admin Email</label>
                 <Input required type="email" value={formData.adminEmail} onChange={e => setFormData(p => ({...p, adminEmail: e.target.value}))} />
+              </div>
+              <div className="space-y-1">
+                <label className="text-sm font-medium">Admin User ID</label>
+                <Input required value={formData.adminUserId} onChange={e => setFormData(p => ({...p, adminUserId: e.target.value}))} />
               </div>
             </div>
             

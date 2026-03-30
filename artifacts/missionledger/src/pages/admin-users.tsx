@@ -9,6 +9,7 @@ type UiRole = "PRIMARY_ADMIN" | "ADMIN" | "USER" | "BOARD";
 
 type ManagedUser = {
   id: string;
+  userId: string;
   name: string | null;
   email: string;
   role: string;
@@ -24,7 +25,7 @@ export default function AdminUsersPage() {
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ name: "", email: "", password: "", role: "USER" as UiRole });
+  const [form, setForm] = useState({ name: "", userId: "", email: "", password: "", role: "USER" as UiRole });
 
   async function load() {
     setLoading(true);
@@ -54,8 +55,8 @@ export default function AdminUsersPage() {
   useEffect(() => { load(); }, []);
 
   async function createUser() {
-    if (!form.email || !form.password) {
-      toast.error("Email and password are required.");
+    if (!form.userId || !form.password) {
+      toast.error("User ID and password are required.");
       return;
     }
     setSaving(true);
@@ -68,7 +69,7 @@ export default function AdminUsersPage() {
       const data = await readJsonSafe<any>(res);
       if (!res.ok) throw new Error(data?.error ?? "Failed to create user");
       toast.success("User created.");
-      setForm({ name: "", email: "", password: "", role: "USER" });
+      setForm({ name: "", userId: "", email: "", password: "", role: "USER" });
       await load();
     } catch (err: any) {
       toast.error(err.message || "Failed to create user");
@@ -115,8 +116,9 @@ export default function AdminUsersPage() {
 
         <div className="rounded-xl border border-border bg-card p-4 space-y-3">
           <h3 className="font-semibold">Add User</h3>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
             <Input placeholder="Name" value={form.name} onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))} />
+            <Input placeholder="User ID (login)" value={form.userId} onChange={(e) => setForm((p) => ({ ...p, userId: e.target.value }))} />
             <Input placeholder="Email" type="email" value={form.email} onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))} />
             <Input placeholder="Temporary Password" type="password" value={form.password} onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))} />
             <select className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={form.role} onChange={(e) => setForm((p) => ({ ...p, role: e.target.value as UiRole }))}>
@@ -136,6 +138,7 @@ export default function AdminUsersPage() {
                 <div key={u.id} className="border border-border rounded-lg p-3 flex flex-col md:flex-row md:items-center gap-2 md:gap-4">
                   <div className="flex-1">
                     <div className="font-medium">{u.name || u.email}</div>
+                    <div className="text-xs text-muted-foreground">User ID: {u.userId}</div>
                     <div className="text-xs text-muted-foreground">{u.email}</div>
                   </div>
                   <div className="text-xs md:w-36">{u.isPrimaryAdmin ? "PRIMARY ADMIN" : u.uiRole}</div>

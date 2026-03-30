@@ -75,6 +75,16 @@ export function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
   const { user, logout, myOrgs, switchOrg, isPlatformAdmin, isImpersonating, exitImpersonation } = useAuth();
   const [switching, setSwitching] = useState(false);
   const canManageUsers = isPlatformAdmin || user?.role === "MASTER_ADMIN" || user?.role === "ADMIN";
+  const isBoardRole = user?.role === "OFFICER";
+  const boardAllowed = new Set([
+    "/dashboard",
+    "/reports",
+    "/custom-reports",
+    "/budget",
+    "/pledges",
+    "/donor-giving",
+    "/vendors",
+  ]);
 
   const handleSwitchOrg = async (companyId: string) => {
     if (companyId === user?.companyId) return;
@@ -220,7 +230,9 @@ export function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
               {group.label}
             </h3>
             <div className="space-y-1">
-              {group.items.map((item) => {
+              {group.items
+                .filter((item) => !isBoardRole || boardAllowed.has(item.href))
+                .map((item) => {
                 const isActive = location === item.href;
                 return (
                   <Link

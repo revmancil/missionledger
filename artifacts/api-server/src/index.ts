@@ -19,7 +19,7 @@ if (Number.isNaN(port) || port <= 0) {
 
 const REQUIRED_SCHEMA: Record<string, string[]> = {
   companies: ["id", "company_code", "name", "subscription_status", "is_active"],
-  users: ["id", "company_id", "email", "password", "role", "is_active", "is_platform_admin"],
+  users: ["id", "company_id", "user_id", "email", "password", "role", "is_active", "is_platform_admin"],
   organization_users: ["id", "user_id", "company_id", "role", "is_primary", "is_active"],
   funds: ["id", "company_id", "name", "fund_type", "is_active"],
   bank_accounts: ["id", "company_id", "name", "current_balance", "plaid_access_token", "is_plaid_linked"],
@@ -372,6 +372,38 @@ async function ensureSchema() {
     console.log("Schema check: organization_users OK");
   } catch (err: any) {
     console.error("Schema migration error (organization_users):", err.message);
+  }
+
+  // users.user_id supports login with user ID, allowing duplicate emails in the same org.
+  try {
+    await pool.query(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS user_id TEXT;
+      WITH seeds AS (
+        SELECT
+          id,
+          LOWER(REGEXP_REPLACE(SPLIT_PART(email, '@', 1), '[^a-zA-Z0-9_\\-]', '', 'g')) AS base_user_id,
+          company_id,
+          ROW_NUMBER() OVER (
+            PARTITION BY company_id, LOWER(REGEXP_REPLACE(SPLIT_PART(email, '@', 1), '[^a-zA-Z0-9_\\-]', '', 'g'))
+            ORDER BY created_at, id
+          ) AS rn
+        FROM users
+        WHERE user_id IS NULL OR LENGTH(TRIM(user_id)) = 0
+      )
+      UPDATE users u
+      SET user_id = CASE
+        WHEN s.rn = 1 THEN COALESCE(NULLIF(s.base_user_id, ''), 'user_' || SUBSTRING(u.id, 1, 8))
+        ELSE COALESCE(NULLIF(s.base_user_id, ''), 'user') || '_' || s.rn::text
+      END
+      FROM seeds s
+      WHERE u.id = s.id;
+      ALTER TABLE users ALTER COLUMN user_id SET NOT NULL;
+      CREATE UNIQUE INDEX IF NOT EXISTS users_company_user_id_unique
+        ON users (company_id, user_id);
+    `);
+    console.log("Schema check: users.user_id + unique(company_id, user_id) OK");
+  } catch (err: any) {
+    console.error("Schema migration error (users.user_id):", err.message);
   }
   try {
     await pool.query(`

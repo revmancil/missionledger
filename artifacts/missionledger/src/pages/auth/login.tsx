@@ -5,16 +5,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
-import { Building2, Lock, Mail, Terminal } from "lucide-react";
+import { Building2, Lock, UserCircle2, Terminal } from "lucide-react";
 
 export default function LoginPage() {
   const { login, isLoggingIn } = useAuth();
-  const [formData, setFormData] = useState({ companyCode: "", email: "", password: "" });
+  const [formData, setFormData] = useState({ companyCode: "", userId: "", password: "" });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await login({ data: formData });
+      await login({ data: { ...formData, email: formData.userId } as any });
       toast.success("Logged in successfully");
     } catch (err: any) {
       toast.error(err.message || "Invalid credentials");
@@ -55,16 +55,15 @@ export default function LoginPage() {
               </div>
             </div>
             <div className="space-y-1">
-              <label className="text-sm font-medium text-foreground">Email</label>
+              <label className="text-sm font-medium text-foreground">User ID</label>
               <div className="relative">
-                <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                <UserCircle2 className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                 <Input 
-                  type="email" 
-                  placeholder="admin@example.org" 
+                  placeholder="e.g. john.admin" 
                   className="pl-9 h-11"
                   required
-                  value={formData.email}
-                  onChange={(e) => setFormData(p => ({...p, email: e.target.value}))}
+                  value={formData.userId}
+                  onChange={(e) => setFormData(p => ({...p, userId: e.target.value}))}
                 />
               </div>
             </div>
