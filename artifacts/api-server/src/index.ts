@@ -213,6 +213,20 @@ async function ensureSchema() {
   } catch (err: any) {
     console.error("Schema migration error (plaid cols):", err.message);
   }
+
+  // Plaid fields added after initial DB snapshot
+  try {
+    await pool.query(`
+      ALTER TABLE bank_accounts ADD COLUMN IF NOT EXISTS plaid_access_token TEXT;
+      ALTER TABLE bank_accounts ADD COLUMN IF NOT EXISTS plaid_item_id TEXT;
+      ALTER TABLE bank_accounts ADD COLUMN IF NOT EXISTS plaid_institution_name TEXT;
+      ALTER TABLE bank_accounts ADD COLUMN IF NOT EXISTS is_plaid_linked BOOLEAN NOT NULL DEFAULT FALSE;
+      ALTER TABLE bank_accounts ADD COLUMN IF NOT EXISTS plaid_last_synced_at TIMESTAMP;
+    `);
+    console.log("Schema check: bank_accounts plaid columns OK");
+  } catch (err: any) {
+    console.error("Schema migration error (bank_accounts plaid cols):", err.message);
+  }
   try {
     await pool.query(`ALTER TYPE gl_source_type ADD VALUE IF NOT EXISTS 'MANUAL_JE'`);
     console.log("Schema check: gl_source_type MANUAL_JE OK");
@@ -243,6 +257,33 @@ async function ensureSchema() {
     console.log("Schema check: transactions.donor_name OK");
   } catch (err: any) {
     console.error("Schema migration error (donor_name):", err.message);
+  }
+
+  // funds.fund_type was added after initial DB snapshot
+  try {
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_type t
+          JOIN pg_namespace n ON t.typnamespace = n.oid
+          WHERE t.typname = 'fund_type' AND n.nspname = 'public'
+        ) THEN
+          CREATE TYPE public.fund_type AS ENUM (
+            'UNRESTRICTED',
+            'RESTRICTED_TEMP',
+            'RESTRICTED_PERM',
+            'BOARD_DESIGNATED'
+          );
+        END IF;
+      END $$;
+
+      ALTER TABLE funds
+        ADD COLUMN IF NOT EXISTS fund_type public.fund_type NOT NULL DEFAULT 'UNRESTRICTED';
+    `);
+    console.log("Schema check: funds.fund_type OK");
+  } catch (err: any) {
+    console.error("Schema migration error (funds.fund_type):", err.message);
   }
   try {
     await pool.query(`
