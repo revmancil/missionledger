@@ -259,6 +259,22 @@ async function ensureSchema() {
     console.error("Schema migration error (donor_name):", err.message);
   }
 
+  // Transactions metadata columns added after initial snapshot
+  try {
+    await pool.query(`
+      ALTER TABLE transactions ADD COLUMN IF NOT EXISTS vendor_id TEXT;
+      ALTER TABLE transactions ADD COLUMN IF NOT EXISTS is_split BOOLEAN NOT NULL DEFAULT FALSE;
+      ALTER TABLE transactions ADD COLUMN IF NOT EXISTS memo TEXT;
+      ALTER TABLE transactions ADD COLUMN IF NOT EXISTS check_number TEXT;
+      ALTER TABLE transactions ADD COLUMN IF NOT EXISTS reference_number TEXT;
+      ALTER TABLE transactions ADD COLUMN IF NOT EXISTS functional_type TEXT;
+      ALTER TABLE transactions ADD COLUMN IF NOT EXISTS transaction_fingerprint TEXT;
+    `);
+    console.log("Schema check: transactions metadata columns OK");
+  } catch (err: any) {
+    console.error("Schema migration error (transactions metadata):", err.message);
+  }
+
   // funds.fund_type was added after initial DB snapshot
   try {
     await pool.query(`
