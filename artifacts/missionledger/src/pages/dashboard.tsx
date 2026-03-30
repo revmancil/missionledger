@@ -189,9 +189,11 @@ export default function Dashboard() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
+      const token = typeof window !== "undefined" ? localStorage.getItem("ml_token") : null;
+      const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
       const [dashRes, readRes] = await Promise.all([
-        fetch(`${BASE}api/dashboard`, { credentials: "include" }),
-        fetch(`${BASE}api/reports/990-readiness`, { credentials: "include" }),
+        fetch(`${BASE}api/dashboard`, { credentials: "include", headers }),
+        fetch(`${BASE}api/reports/990-readiness`, { credentials: "include", headers }),
       ]);
       if (dashRes.ok) setData(await dashRes.json());
       if (readRes.ok) setReadiness(await readRes.json());
@@ -202,9 +204,12 @@ export default function Dashboard() {
     setSyncing(true);
     setSyncMsg(null);
     try {
+      const token = typeof window !== "undefined" ? localStorage.getItem("ml_token") : null;
+      const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
       const res = await fetch(`${BASE}api/opening-balance/recalculate`, {
         method: "POST",
         credentials: "include",
+        headers,
       });
       const body = await res.json();
       if (!res.ok) {

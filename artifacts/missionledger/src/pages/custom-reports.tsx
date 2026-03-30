@@ -14,6 +14,12 @@ import autoTable from "jspdf-autotable";
 
 const BASE = import.meta.env.BASE_URL as string;
 
+function authHeaders(): Record<string, string> | undefined {
+  if (typeof window === "undefined") return undefined;
+  const token = localStorage.getItem("ml_token");
+  return token ? { Authorization: `Bearer ${token}` } : undefined;
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type ReportType = "account_activity" | "income_expense" | "fund_breakdown" | "balance_summary";
@@ -92,22 +98,37 @@ export default function CustomReportsPage() {
 
   // Load chart of accounts, funds, and templates
   useEffect(() => {
-    fetch(`${BASE}api/chart-of-accounts`, { credentials: "include" })
-      .then(r => r.json())
-      .then(d => setAccounts((d.data || d || []).filter((a: any) => a.isActive !== false)))
+    const headers = authHeaders();
+    fetch(`${BASE}api/chart-of-accounts`, { credentials: "include", headers })
+      .then(async (r) => {
+        const d = await r.json().catch(() => null);
+        const list = d?.data ?? d;
+        return Array.isArray(list) ? list : [];
+      })
+      .then((list: any[]) => setAccounts(list.filter((a: any) => a.isActive !== false)))
       .catch(() => {});
-    fetch(`${BASE}api/funds`, { credentials: "include" })
-      .then(r => r.json())
-      .then(d => setFunds(d.data || d || []))
+
+    fetch(`${BASE}api/funds`, { credentials: "include", headers })
+      .then(async (r) => {
+        const d = await r.json().catch(() => null);
+        const list = d?.data ?? d;
+        return Array.isArray(list) ? list : [];
+      })
+      .then((list: any[]) => setFunds(list))
       .catch(() => {});
     loadTemplates();
   }, []);
 
   function loadTemplates() {
-    fetch(`${BASE}api/custom-reports/templates`, { credentials: "include" })
-      .then(r => r.json())
-      .then(d => setTemplates(Array.isArray(d) ? d : []))
-      .catch(() => {});
+    const headers = authHeaders();
+    fetch(`${BASE}api/custom-reports/templates`, { credentials: "include", headers })
+      .then(async (r) => {
+        const d = await r.json().catch(() => null);
+        const list = d?.data ?? d;
+        return Array.isArray(list) ? list : [];
+      })
+      .then((list: any[]) => setTemplates(list))
+      .catch(() => setTemplates([]));
   }
 
   function setField<K extends keyof ReportConfig>(key: K, value: ReportConfig[K]) {
@@ -136,6 +157,7 @@ export default function CustomReportsPage() {
     setLoading(true);
     setResult(null);
     try {
+      const headers = authHeaders();
       const res = await fetch(`${BASE}api/custom-reports/run`, {
         method: "POST",
         credentials: "include",
@@ -156,10 +178,11 @@ export default function CustomReportsPage() {
     if (!templateName.trim()) { toast.error("Enter a template name"); return; }
     setSavingTemplate(true);
     try {
+      const headers = authHeaders();
       const res = await fetch(`${BASE}api/custom-reports/templates`, {
         method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...headers },
         body: JSON.stringify({ name: templateName.trim(), config }),
       });
       if (!res.ok) throw new Error("Failed to save");
@@ -175,7 +198,8 @@ export default function CustomReportsPage() {
 
   const handleDeleteTemplate = async (id: string) => {
     if (!confirm("Delete this template?")) return;
-    await fetch(`${BASE}api/custom-reports/templates/${id}`, { method: "DELETE", credentials: "include" });
+    const headers = authHeaders();
+    await fetch(`${BASE}api/custom-reports/templates/${id}`, { method: "DELETE", credentials: "include", headers });
     loadTemplates();
   };
 

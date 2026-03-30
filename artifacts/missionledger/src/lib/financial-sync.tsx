@@ -52,8 +52,11 @@ export function FinancialSyncProvider({ children }: { children: React.ReactNode 
     abortRef.current = ctrl;
     setIsLoading(true);
     try {
+      const token = typeof window !== "undefined" ? localStorage.getItem("ml_token") : null;
+      const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
       const res = await fetch(`${BASE}api/financial-summary`, {
         credentials: "include",
+        headers,
         signal: ctrl.signal,
       });
       if (!res.ok) return;
