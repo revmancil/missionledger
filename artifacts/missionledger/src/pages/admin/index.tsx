@@ -557,7 +557,11 @@ export default function AdminCommandCenter() {
 
   // Auth guard
   useEffect(() => {
-    fetch(`${BASE}/api/auth/me`, { credentials: "include" })
+    const storedToken = localStorage.getItem("ml_token");
+    fetch(`${BASE}/api/auth/me`, {
+      credentials: "include",
+      headers: storedToken ? { Authorization: `Bearer ${storedToken}` } : undefined,
+    })
       .then(r => r.ok ? r.json() : null)
       .then(user => {
         if (!user?.isPlatformAdmin) { setLocation("/admin/login"); return; }
