@@ -132,7 +132,43 @@ router.post("/register", async (req, res) => {
 
     const existingUser = await db.select().from(users).where(eq(users.email, adminEmail.toLowerCase())).limit(1);
     if (existingUser.length) {
-      return res.status(400).json({ error: "Email already registered" });
+      // Registration can be retried after previous failures (e.g. schema drift during deploy).
+      // If the email already exists and the provided password matches, treat it as a successful login.
+      const existing = existingUser[0];
+      const valid = await comparePassword(password, existing.password);
+      if (!valid) {
+        return res.status(400).json({ error: "Email already registered" });
+      }
+
+      const [company] = await db.select().from(companies).where(eq(companies.id, existing.companyId)).limit(1);
+      if (!company) return res.status(404).json({ error: "Account company not found" });
+      if (!company.isActive) {
+        return res.status(403).json({ error: "ACCOUNT_SUSPENDED", message: "This organization account has been suspended." });
+      }
+
+      // Ensure the org membership row exists for org switching.
+      await db.insert(organizationUsers).values({
+        userId: existing.id,
+        companyId: company.id,
+        role: existing.role as any,
+        isPrimary: true,
+        isActive: true,
+      }).onConflictDoNothing();
+
+      const authUser: AuthUser = {
+        id: existing.id,
+        email: existing.email,
+        name: existing.name,
+        role: existing.role,
+        companyId: company.id,
+        companyName: company.name,
+        companyCode: company.companyCode,
+        organizationType: company.organizationType,
+        isPlatformAdmin: existing.isPlatformAdmin,
+      };
+
+      setCookieAndRespond(res, authUser);
+      return;
     }
 
     let companyCode = generateCompanyCode(organizationName);
