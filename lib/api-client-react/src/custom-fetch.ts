@@ -285,15 +285,20 @@ async function parseSuccessBody(
   }
 
   // Attach stored JWT token if available
-  const storedToken = typeof localStorage !== "undefined" ? localStorage.getItem("ml_token") : null;
-  if (storedToken && options.headers) {
-    options.headers = {
-      ...options.headers,
-      Authorization: `Bearer ${storedToken}`,
+try {
+  const storedToken = localStorage.getItem("ml_token");
+  if (storedToken) {
+    options = {
+      ...options,
+      headers: {
+        Authorization: `Bearer ${storedToken}`,
+        ...(options.headers || {}),
+      },
     };
-  } else if (storedToken) {
-    options.headers = { Authorization: `Bearer ${storedToken}` };
   }
+} catch (e) {
+  // localStorage not available
+}
   const { responseType = "auto", headers: headersInit, ...init } = options;
 
   const method = resolveMethod(input, init.method);
