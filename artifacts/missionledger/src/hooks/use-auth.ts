@@ -56,6 +56,8 @@ export function useAuth() {
   const registerMutation = useGenRegister({
     mutation: {
       onSuccess: (data) => {
+        // Keep auth state stable after registration by persisting token.
+        if ((data as any)?.token) localStorage.setItem("ml_token", (data as any).token);
         qc.setQueryData(getGetMeQueryKey(), data);
         setLocation("/dashboard");
       }
@@ -65,6 +67,8 @@ export function useAuth() {
   const logoutMutation = useGenLogout({
     mutation: {
       onSuccess: () => {
+        // Fully clear localStorage token too, not just react-query state.
+        localStorage.removeItem("ml_token");
         qc.setQueryData(getGetMeQueryKey(), null);
         qc.clear();
         setLocation("/");
