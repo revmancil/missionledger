@@ -300,7 +300,6 @@ try {
 } catch (e) {
   console.log("localStorage error:", e);
 }
-}
   const { responseType = "auto", headers: headersInit, ...init } = options;
 
   const method = resolveMethod(input, init.method);
