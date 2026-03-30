@@ -3,6 +3,22 @@ import { useLocation } from "wouter";
 import { Shield, Lock, AlertTriangle, Eye, EyeOff, Terminal } from "lucide-react";
 import { apiUrl } from "@/lib/api-base";
 
+function adminLoginCandidates(): string[] {
+  const path = "/api/auth/admin-login";
+  const fromEnv = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "");
+  const fromWindow = (window as any).VITE_API_BASE_URL
+    ? String((window as any).VITE_API_BASE_URL).replace(/\/$/, "")
+    : "";
+  const sameOrigin = `${window.location.origin}${path}`;
+  const derived = apiUrl(path);
+  return Array.from(new Set([
+    fromEnv ? `${fromEnv}${path}` : "",
+    fromWindow ? `${fromWindow}${path}` : "",
+    derived,
+    sameOrigin,
+  ].filter(Boolean)));
+}
+
 export default function AdminLoginPage() {
   const [, setLocation] = useLocation();
   const [email, setEmail]       = useState("");
@@ -16,25 +32,39 @@ export default function AdminLoginPage() {
     setError("");
     setLoading(true);
     try {
-      const ctrl = new AbortController();
-      const timeout = setTimeout(() => ctrl.abort(), 15000);
-      const res = await fetch(apiUrl("/api/auth/admin-login"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ email: email.trim(), password }),
-        signal: ctrl.signal,
-      });
-      clearTimeout(timeout);
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError(data.message ?? data.error ?? "Authentication failed.");
-        return;
+      let lastError = "Authentication failed.";
+      let success = false;
+      for (const endpoint of adminLoginCandidates()) {
+        const ctrl = new AbortController();
+        const timeout = setTimeout(() => ctrl.abort(), 8000);
+        try {
+          const res = await fetch(endpoint, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({ email: email.trim(), password }),
+            signal: ctrl.signal,
+          });
+          clearTimeout(timeout);
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            lastError = data.message ?? data.error ?? "Authentication failed.";
+            continue;
+          }
+          if (data.token) localStorage.setItem("ml_token", data.token);
+          setLocation("/admin");
+          success = true;
+          break;
+        } catch (err: any) {
+          clearTimeout(timeout);
+          lastError = err?.name === "AbortError"
+            ? "Request timed out. Please try again."
+            : "Network error — please try again.";
+        }
       }
-      if (data.token) localStorage.setItem("ml_token", data.token);
-      setLocation("/admin");
-    } catch (err: any) {
-      setError(err?.name === "AbortError" ? "Request timed out. Please try again." : "Network error — please try again.");
+      if (!success) setError(lastError);
+    } catch {
+      setError("Network error — please try again.");
     } finally {
       setLoading(false);
     }
