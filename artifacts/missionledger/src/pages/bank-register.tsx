@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 import { useFinancialSync } from "@/lib/financial-sync";
-import { authJsonFetch } from "@/lib/auth-fetch";
+import { authJsonFetch, logApiFailure, readJsonSafe } from "@/lib/auth-fetch";
 import { apiUrl } from "@/lib/api-base";
 
 /** Path must start with `/api/…` (or full http URL). Uses VITE_API_BASE_URL when the API is on another host. */
@@ -69,6 +69,10 @@ interface SplitLine {
   memo: string;
   functionalType: string;
 }
+function txBankId(t: { bankAccount?: BankAccount | null; bankAccountId?: string | null }): string | undefined {
+  return t.bankAccount?.id ?? t.bankAccountId ?? undefined;
+}
+
 interface Transaction {
   id: string; date: string; payee: string; amount: number;
   type: "DEBIT" | "CREDIT";
@@ -77,6 +81,7 @@ interface Transaction {
   isVoid: boolean; isSplit: boolean; isClosed?: boolean;
   journalEntryId: string | null;
   plaidTransactionId?: string | null;
+  bankAccountId?: string | null;
   chartAccount: ChartAccount | null;
   fund: Fund | null; bankAccount: BankAccount | null; vendor: Vendor | null;
   splits: Array<{ id: string; chartAccountId: string | null; vendorId: string | null; amount: number; memo: string | null; chartAccount: ChartAccount | null; vendor: Vendor | null; }>;
@@ -544,6 +549,9 @@ export default function BankRegisterPage() {
           setTxList(txData.transactions ?? []);
           setClosedUntil(txData.closedUntil ?? null);
         }
+      } else {
+        logApiFailure("/api/transactions", txR, await readJsonSafe(txR));
+        toast.error("Could not load bank register transactions. Check your connection or try Refresh.");
       }
     } finally { setLoading(false); }
   }, []);
@@ -552,7 +560,7 @@ export default function BankRegisterPage() {
 
   // ── Derived state ───────────────────────────────────────────────────────────
   const filtered = txList.filter((t) => {
-    if (selectedBank !== "ALL" && t.bankAccount?.id !== selectedBank) return false;
+    if (selectedBank !== "ALL" && txBankId(t) !== selectedBank) return false;
     if (statusFilter !== "ALL" && t.status !== statusFilter) return false;
     return true;
   });
@@ -665,7 +673,7 @@ export default function BankRegisterPage() {
       status: tx.status === "CLEARED" ? "CLEARED" : "UNCLEARED",
       chartAccountId: tx.chartAccount?.id ?? "",
       fundId: tx.fund?.id ?? "",
-      bankAccountId: tx.bankAccount?.id ?? "",
+      bankAccountId: txBankId(tx) ?? "",
       memo: tx.memo ?? "",
       checkNumber: tx.checkNumber ?? "",
       referenceNumber: tx.referenceNumber ?? "",
@@ -940,7 +948,7 @@ export default function BankRegisterPage() {
             <div className="mt-3 flex gap-6 text-sm">
               <span className="text-muted-foreground">Balance:&nbsp;<span className="font-semibold">{fmtAmt(
                 txList
-                  .filter(t => !t.isVoid && t.bankAccount?.id === selectedBankObj.id)
+                  .filter(t => !t.isVoid && txBankId(t) === selectedBankObj.id)
                   .reduce((s, t) => s + (t.type === "CREDIT" ? t.amount : -t.amount), 0)
               )}</span></span>
               <span className="text-muted-foreground">Payments:&nbsp;<span className="font-semibold text-red-600">{fmtAmt(totals.debits)}</span></span>
@@ -968,7 +976,11 @@ export default function BankRegisterPage() {
               {withBalance.length === 0 && (
                 <tr>
                   <td colSpan={8} className="text-center py-16 text-muted-foreground">
-                    {loading ? "Loading\u2026" : "No transactions yet. Click \u201cAdd Transaction\u201d to get started."}
+                    {loading
+                      ? "Loading\u2026"
+                      : txList.length > 0 && selectedBank !== "ALL"
+                        ? "No transactions for this bank account. Choose \u201cAll Bank Accounts\u201d or pick the account you imported into."
+                        : "No transactions yet. Click \u201cAdd Transaction\u201d to get started."}
                   </td>
                 </tr>
               )}
