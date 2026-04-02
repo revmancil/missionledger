@@ -138,6 +138,12 @@ async function upsertSplits(
 router.get("/", requireAuth, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
+    if (!companyId) {
+      return res.status(400).json({
+        error: "MISSING_ORG",
+        message: "Your session has no organization. Try signing out and back in, or switch organization.",
+      });
+    }
     const { bankAccountId, status } = req.query;
 
     let all = await db

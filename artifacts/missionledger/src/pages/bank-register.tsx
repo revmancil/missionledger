@@ -550,10 +550,33 @@ export default function BankRegisterPage() {
           setClosedUntil(txData.closedUntil ?? null);
         }
       } else {
-        logApiFailure("/api/transactions", txR, await readJsonSafe(txR));
-        toast.error("Could not load bank register transactions. Check your connection or try Refresh.");
+        const errBody = await readJsonSafe(txR);
+        logApiFailure("/api/transactions", txR, errBody);
+        const o = errBody as Record<string, unknown> | null;
+        const fromApi =
+          (typeof o?.message === "string" && o.message.trim()) ||
+          (typeof o?.error === "string" && o.error.trim()) ||
+          "";
+        if (txR.status === 402 || o?.error === "SUBSCRIPTION_REQUIRED") {
+          toast.error(fromApi || "Subscription required", {
+            description: "Open Billing to renew or start a subscription.",
+          });
+        } else if (txR.status === 401) {
+          toast.error(fromApi || "Session expired. Sign in again.");
+        } else if (txR.status === 403) {
+          toast.error(fromApi || "You don’t have access to load transactions.");
+        } else {
+          toast.error(
+            fromApi || `Could not load bank register (${txR.status}). Try Refresh or check your connection.`,
+          );
+        }
       }
-    } finally { setLoading(false); }
+    } catch (e) {
+      console.error("Bank register loadAll:", e);
+      toast.error("Network error loading the bank register. Check VPN, CORS, and that the API URL is set.");
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => { loadAll(); }, [loadAll]);
