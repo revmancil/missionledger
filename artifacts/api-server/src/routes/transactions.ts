@@ -7,6 +7,11 @@ import { eq, and, desc, inArray, sql, ne } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
 import { generateGlEntries, voidGlEntries } from "../lib/gl";
 import { logAudit, snap } from "../lib/audit";
+import {
+  parseCsvToObjects,
+  detectColumnMapping,
+  rowsToStatementImports,
+} from "../lib/statementCsv";
 
 /** Recompute a bank account's currentBalance from all its non-void transactions. */
 async function recomputeBankBalance(bankAccountId: string | null | undefined, companyId: string): Promise<void> {
@@ -298,6 +303,157 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
   } catch (err) {
     console.error("Create transaction error:", err);
     res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ── POST /transactions/import-statement — CSV bank export (admin) ─────────────
+router.post("/import-statement", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { companyId } = (req as any).user;
+    const { bankAccountId, csvText } = req.body ?? {};
+    if (!bankAccountId || typeof csvText !== "string") {
+      return res.status(400).json({ error: "bankAccountId and csvText are required" });
+    }
+    if (csvText.length > 2_500_000) {
+      return res.status(400).json({ error: "CSV text too large (max ~2.5MB)" });
+    }
+
+    const [bank] = await db
+      .select()
+      .from(bankAccounts)
+      .where(and(eq(bankAccounts.id, bankAccountId), eq(bankAccounts.companyId, companyId)));
+    if (!bank) return res.status(404).json({ error: "Bank account not found" });
+
+    const objects = parseCsvToObjects(csvText);
+    if (objects.length === 0) {
+      return res.status(400).json({ error: "No data rows found in CSV" });
+    }
+
+    const headers = Object.keys(objects[0]);
+    const mapping = detectColumnMapping(headers);
+    if (!mapping) {
+      return res.status(400).json({
+        error:
+          "Could not detect columns. Export a CSV with a Date column and an Amount column (or separate Debit and Credit columns), plus a description column.",
+      });
+    }
+
+    const { ok, errors: parseErrors } = rowsToStatementImports(objects, mapping);
+    if (ok.length > 5000) {
+      return res.status(400).json({ error: "Too many rows (max 5000 per import)" });
+    }
+
+    const closedUntil = await getClosedUntil(companyId);
+    let skippedDuplicates = 0;
+    let skippedLockedPeriod = 0;
+    const batchSeen = new Set<string>();
+    const candidates: Array<{
+      date: Date;
+      payee: string;
+      amount: number;
+      type: "DEBIT" | "CREDIT";
+      fingerprint: string;
+    }> = [];
+
+    for (const r of ok) {
+      if (isInClosedPeriod(r.date, closedUntil)) {
+        skippedLockedPeriod++;
+        continue;
+      }
+      const fingerprint = buildFingerprint(r.amount, r.date, r.payee);
+      if (batchSeen.has(fingerprint)) {
+        skippedDuplicates++;
+        continue;
+      }
+      batchSeen.add(fingerprint);
+      candidates.push({ ...r, fingerprint });
+    }
+
+    let finalRows = candidates;
+    if (candidates.length > 0) {
+      const fps = candidates.map((c) => c.fingerprint);
+      const existingFp = new Set<string>();
+      const chunkSize = 400;
+      for (let i = 0; i < fps.length; i += chunkSize) {
+        const part = fps.slice(i, i + chunkSize);
+        const hits = await db
+          .select({ f: transactions.transactionFingerprint })
+          .from(transactions)
+          .where(
+            and(
+              eq(transactions.companyId, companyId),
+              eq(transactions.isVoid, false),
+              inArray(transactions.transactionFingerprint, part),
+            ),
+          );
+        for (const h of hits) {
+          if (h.f) existingFp.add(h.f);
+        }
+      }
+      finalRows = candidates.filter((c) => !existingFp.has(c.fingerprint));
+      skippedDuplicates += candidates.length - finalRows.length;
+    }
+
+    if (finalRows.length === 0) {
+      return res.json({
+        imported: 0,
+        skippedDuplicates,
+        skippedLockedPeriod,
+        parseErrors: parseErrors.slice(0, 40),
+        parseErrorsTruncated: parseErrors.length > 40,
+        message: "No new transactions to import (duplicates, locked period, or empty).",
+      });
+    }
+
+    const inserted = await db
+      .insert(transactions)
+      .values(
+        finalRows.map((r) => ({
+          companyId,
+          bankAccountId,
+          date: r.date,
+          payee: r.payee,
+          amount: r.amount,
+          type: r.type,
+          status: "UNCLEARED" as const,
+          isSplit: false,
+          transactionFingerprint: r.fingerprint,
+          isVoid: false,
+        })),
+      )
+      .returning({ id: transactions.id });
+
+    for (const row of inserted) {
+      generateGlEntries(row.id, companyId).catch((e) =>
+        console.error("[GL] statement import error:", e),
+      );
+    }
+    await recomputeBankBalance(bankAccountId, companyId);
+
+    const { id: userId, email: userEmail, name: userName } = (req as any).user;
+    logAudit({
+      req,
+      companyId,
+      userId,
+      userEmail,
+      userName,
+      action: "CREATE",
+      entityType: "TRANSACTION",
+      entityId: inserted[0]?.id ?? "",
+      description: `Imported ${inserted.length} transaction(s) from bank statement CSV into ${bank.name}`,
+      newValue: { count: inserted.length, bankAccountId },
+    });
+
+    res.json({
+      imported: inserted.length,
+      skippedDuplicates,
+      skippedLockedPeriod,
+      parseErrors: parseErrors.slice(0, 40),
+      parseErrorsTruncated: parseErrors.length > 40,
+    });
+  } catch (err) {
+    console.error("Statement import error:", err);
+    res.status(500).json({ error: "Failed to import statement" });
   }
 });
 

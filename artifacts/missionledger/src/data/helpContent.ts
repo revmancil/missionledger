@@ -207,6 +207,13 @@ export const faqItems: FaqItem[] = [
     tags: ["duplicate", "transaction", "void", "plaid", "import", "bank register"],
   },
   {
+    id: "import-bank-csv",
+    question: "How do I import transactions from a bank statement?",
+    answer:
+      "On the Bank Register, click Import CSV. Download a transaction export as CSV from your bank’s website (not PDF). Choose which MissionLedger bank account the file belongs to, then upload. We match common column names for date, amount (or debit/credit), and description. Rows that match an existing transaction (same date, amount, and payee) are skipped. You need admin permission to import.",
+    tags: ["import", "csv", "bank statement", "upload", "bank register", "transactions"],
+  },
+  {
     id: "chart-of-accounts",
     question: "How do I add a new Chart of Accounts category?",
     answer:

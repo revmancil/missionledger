@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import {
   Plus, ChevronDown, ChevronUp, CheckCircle, Circle,
   RefreshCw, Edit, Wallet, Scissors, Trash2, Search,
-  AlertCircle, CheckCheck, Lock, FileText,
+  AlertCircle, CheckCheck, Lock, FileText, Upload,
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
@@ -511,6 +511,10 @@ export default function BankRegisterPage() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [importCsvOpen, setImportCsvOpen] = useState(false);
+  const [importBankId, setImportBankId] = useState("");
+  const [importingCsv, setImportingCsv] = useState(false);
+  const csvFileRef = useRef<HTMLInputElement>(null);
   const [showAddVendor, setShowAddVendor] = useState(false);
   const [showAddAccount, setShowAddAccount] = useState(false);
   const [formError, setFormError] = useState("");
@@ -788,6 +792,60 @@ export default function BankRegisterPage() {
     }
   }
 
+  async function handleImportCsv() {
+    const file = csvFileRef.current?.files?.[0];
+    if (!file) {
+      toast.error("Choose a CSV file exported from your bank.");
+      return;
+    }
+    if (!importBankId) {
+      toast.error("Select the bank account these transactions belong to.");
+      return;
+    }
+    setImportingCsv(true);
+    try {
+      const csvText = await file.text();
+      const token = localStorage.getItem("ml_token");
+      const res = await fetch(apiUrl("/api/transactions/import-statement"), {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ bankAccountId: importBankId, csvText }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || "Import failed");
+      const parts = [`Imported ${json.imported} transaction(s).`];
+      if (json.skippedDuplicates) parts.push(`Skipped ${json.skippedDuplicates} duplicate(s).`);
+      if (json.skippedLockedPeriod) parts.push(`${json.skippedLockedPeriod} in locked period.`);
+      toast.success(parts.join(" "));
+      if (json.parseErrors?.length) {
+        toast.message("Row warnings", {
+          description: json.parseErrors.slice(0, 6).join(" · "),
+        });
+      }
+      setImportCsvOpen(false);
+      if (csvFileRef.current) csvFileRef.current.value = "";
+      await loadAll();
+      globalRefetch();
+    } catch (err: any) {
+      toast.error(err.message || "Import failed");
+    } finally {
+      setImportingCsv(false);
+    }
+  }
+
+  function openImportCsv() {
+    if (bankAccounts.length === 0) {
+      toast.error("Add a bank account first.");
+      return;
+    }
+    setImportBankId(selectedBank !== "ALL" ? selectedBank : bankAccounts[0]!.id);
+    setImportCsvOpen(true);
+  }
+
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <AppLayout>
@@ -848,6 +906,17 @@ export default function BankRegisterPage() {
               ))}
             </div>
             <div className="ml-auto flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs border-slate-200 hover:bg-slate-50"
+                onClick={openImportCsv}
+                disabled={loading}
+                title="Upload a bank CSV export"
+              >
+                <Upload className="h-3 w-3 mr-1" />
+                Import CSV
+              </Button>
               {selectedBank !== "ALL" && selectedBankObj?.isPlaidLinked && (
                 <Button
                   size="sm"
@@ -1672,6 +1741,50 @@ export default function BankRegisterPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setJeModal({ open: false, data: null, loading: false })}>
               Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={importCsvOpen} onOpenChange={setImportCsvOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Import bank CSV</DialogTitle>
+          </DialogHeader>
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            Export transactions as CSV from your bank’s website. We look for <strong>Date</strong>,{" "}
+            <strong>Amount</strong> (or separate Debit/Credit columns), and a description column.{" "}
+            Negative amounts are treated as payments; positive as deposits. PDF statements are not supported—use CSV.
+          </p>
+          <div className="space-y-2">
+            <Label className="text-xs">Bank account</Label>
+            <Select value={importBankId} onValueChange={setImportBankId}>
+              <SelectTrigger className="h-9 text-sm">
+                <SelectValue placeholder="Select account" />
+              </SelectTrigger>
+              <SelectContent>
+                {bankAccounts.map((b) => (
+                  <SelectItem key={b.id} value={b.id}>
+                    {b.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label className="text-xs">CSV file</Label>
+            <Input ref={csvFileRef} type="file" accept=".csv,text/csv" className="h-9 text-sm cursor-pointer" />
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setImportCsvOpen(false)} disabled={importingCsv}>
+              Cancel
+            </Button>
+            <Button
+              className="bg-[hsl(210,60%,25%)] hover:bg-[hsl(210,60%,20%)] text-white"
+              onClick={handleImportCsv}
+              disabled={importingCsv}
+            >
+              {importingCsv ? "Importing…" : "Import"}
             </Button>
           </DialogFooter>
         </DialogContent>
