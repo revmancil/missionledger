@@ -5,14 +5,9 @@ import { requireAuth, requireAdmin } from "../lib/auth";
 import { sendSubscriptionConfirmedEmail } from "../lib/email";
 import { getUncachableStripeClient } from "../lib/stripeClient";
 import { stripeStorage } from "../lib/stripeStorage";
+import { getPublicFrontendBase } from "../lib/frontendUrl";
 
 const router = Router();
-
-function getBaseUrl(req: any): string {
-  const domain = process.env.REPLIT_DOMAINS?.split(",")[0];
-  if (domain) return `https://${domain}`;
-  return `${req.protocol}://${req.get("host")}`;
-}
 
 function getLowestMonthlyAmount(plan: { prices: Array<{ unit_amount: number | null; recurring?: { interval: string } | null }> }): number {
   const monthlyPrices = plan.prices.filter((p) => p.recurring?.interval === "month");
@@ -147,7 +142,7 @@ router.post("/checkout", requireAuth, requireAdmin, async (req, res) => {
       await db.update(companies).set({ stripeCustomerId: customerId }).where(eq(companies.id, companyId));
     }
 
-    const base = getBaseUrl(req);
+    const base = getPublicFrontendBase(req);
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
       payment_method_types: ["card"],
@@ -172,7 +167,7 @@ router.post("/portal", requireAuth, requireAdmin, async (req, res) => {
     if (!company.stripeCustomerId) return res.status(400).json({ error: "No Stripe customer. Subscribe first." });
 
     const stripe = await getUncachableStripeClient();
-    const base = getBaseUrl(req);
+    const base = getPublicFrontendBase(req);
     const session = await stripe.billingPortal.sessions.create({
       customer: company.stripeCustomerId,
       return_url: `${base}/billing`,

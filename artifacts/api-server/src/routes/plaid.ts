@@ -12,13 +12,21 @@ import { requireAuth, requireAdmin } from "../lib/auth";
 
 const router = Router();
 
+/** Plaid API host: explicit PLAID_ENV wins; else production Node builds use Plaid production; otherwise sandbox (local dev). */
+function resolvePlaidEnv(): "production" | "development" | "sandbox" {
+  const raw = process.env.PLAID_ENV?.trim().toLowerCase();
+  if (raw === "production" || raw === "development" || raw === "sandbox") return raw;
+  if (process.env.NODE_ENV === "production") return "production";
+  return "sandbox";
+}
+
 function getPlaidClient(): PlaidApi {
   const clientId = process.env.PLAID_CLIENT_ID;
   const secret = process.env.PLAID_SECRET;
   if (!clientId || !secret) {
     throw new Error("PLAID_CLIENT_ID and PLAID_SECRET environment variables are required.");
   }
-  const env = process.env.PLAID_ENV || "sandbox";
+  const env = resolvePlaidEnv();
   const baseUrl = env === "production"
     ? PlaidEnvironments.production
     : env === "development"
@@ -57,7 +65,8 @@ router.post("/create-link-token", requireAuth, async (req, res) => {
       plaidErrorType: plaidError?.error_type,
       plaidErrorMessage: plaidError?.error_message,
       plaidDisplayMessage: plaidError?.display_message,
-      env: process.env.PLAID_ENV,
+      plaidEnv: resolvePlaidEnv(),
+      plaidEnvRaw: process.env.PLAID_ENV,
       hasClientId: !!process.env.PLAID_CLIENT_ID,
       hasSecret: !!process.env.PLAID_SECRET,
     });

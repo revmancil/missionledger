@@ -42,7 +42,9 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
       ? headerAuth.slice("Bearer ".length).trim()
       : headerAuth.trim()
     : undefined;
-  const token = cookieToken || headerToken;
+  // Prefer Bearer so the SPA's ml_token (updated on each login) wins over a stale
+  // ml_session cookie—common when the API is on another site and Set-Cookie is unreliable.
+  const token = headerToken || cookieToken;
   if (!token) {
     res.status(401).json({ error: "Unauthorized" });
     return;

@@ -82,8 +82,9 @@ router.post("/login", async (req, res) => {
       return res.status(400).json({ error: "companyCode, password, and email or userId are required" });
     }
 
+    const normalizedCode = String(companyCode).trim().toUpperCase();
     const [company] = await db.select().from(companies)
-      .where(eq(companies.companyCode, companyCode.toUpperCase()))
+      .where(eq(companies.companyCode, normalizedCode))
       .limit(1);
 
     if (!company) {

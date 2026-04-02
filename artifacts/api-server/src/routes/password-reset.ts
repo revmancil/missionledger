@@ -4,14 +4,9 @@ import { eq, and, gt } from "drizzle-orm";
 import crypto from "crypto";
 import { hashPassword } from "../lib/auth";
 import { sendPasswordResetEmail } from "../lib/email";
+import { getPublicFrontendBase } from "../lib/frontendUrl";
 
 const router = Router();
-
-function getAppBaseUrl(req: any): string {
-  const domain = process.env.REPLIT_DOMAINS?.split(",")[0];
-  if (domain) return `https://${domain}`;
-  return `${req.protocol}://${req.get("host")}`;
-}
 
 router.post("/forgot-password", async (req, res) => {
   const { email } = req.body ?? {};
@@ -38,8 +33,8 @@ router.post("/forgot-password", async (req, res) => {
     expiresAt,
   });
 
-  const base = getAppBaseUrl(req);
-  const resetUrl = `${base}/missionledger/reset-password?token=${token}`;
+  const base = getPublicFrontendBase(req);
+  const resetUrl = `${base}/reset-password?token=${token}`;
 
   try {
     await sendPasswordResetEmail(user.email, resetUrl);
