@@ -25,11 +25,12 @@ import {
 import { cn } from "@/lib/utils";
 import { useFinancialSync } from "@/lib/financial-sync";
 import { authJsonFetch } from "@/lib/auth-fetch";
+import { apiUrl } from "@/lib/api-base";
 
-const BASE = import.meta.env.BASE_URL;
-
-function apiFetch(url: string, init?: RequestInit) {
+/** Path must start with `/api/…` (or full http URL). Uses VITE_API_BASE_URL when the API is on another host. */
+function apiFetch(path: string, init?: RequestInit) {
   const token = typeof window !== "undefined" ? localStorage.getItem("ml_token") : null;
+  const url = path.startsWith("http") ? path : apiUrl(path.startsWith("/") ? path : `/${path}`);
   return fetch(url, {
     credentials: "include",
     ...init,
@@ -365,7 +366,7 @@ function AddVendorModal({
     if (!form.name.trim()) { setErr("Vendor name is required"); return; }
     setSaving(true); setErr("");
     try {
-      const res = await apiFetch(`${BASE}api/vendors`, {
+      const res = await apiFetch("/api/vendors", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
@@ -432,7 +433,7 @@ function AddAccountModal({
     if (!form.code.trim() || !form.name.trim()) { setErr("Code and name are required"); return; }
     setSaving(true); setErr("");
     try {
-      const res = await apiFetch(`${BASE}api/chart-of-accounts`, {
+      const res = await apiFetch("/api/chart-of-accounts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
@@ -521,11 +522,11 @@ export default function BankRegisterPage() {
     setLoading(true);
     try {
       const [banksR, coaR, fundsR, vendorsR, txR] = await Promise.all([
-        apiFetch(`${BASE}api/bank-accounts`),
-        apiFetch(`${BASE}api/chart-of-accounts`),
-        apiFetch(`${BASE}api/funds`),
-        apiFetch(`${BASE}api/vendors`),
-        apiFetch(`${BASE}api/transactions`),
+        apiFetch("/api/bank-accounts"),
+        apiFetch("/api/chart-of-accounts"),
+        apiFetch("/api/funds"),
+        apiFetch("/api/vendors"),
+        apiFetch("/api/transactions"),
       ]);
       if (banksR.ok) setBankAccounts(await banksR.json());
       if (coaR.ok) setCoaList(await coaR.json());
@@ -605,7 +606,7 @@ export default function BankRegisterPage() {
   async function openJeModal(journalEntryId: string) {
     setJeModal({ open: true, data: null, loading: true });
     try {
-      const res = await apiFetch(`${BASE}api/journal-entries/${journalEntryId}`);
+      const res = await apiFetch(`/api/journal-entries/${journalEntryId}`);
       if (!res.ok) throw new Error("Failed to load journal entry");
       const data = await res.json();
       setJeModal({ open: true, data, loading: false });
@@ -618,7 +619,7 @@ export default function BankRegisterPage() {
   async function openSplitsModal(txId: string, txJeId: string | null) {
     setJeModal({ open: true, data: null, loading: true });
     try {
-      const res = await apiFetch(`${BASE}api/transactions/${txId}/splits`);
+      const res = await apiFetch(`/api/transactions/${txId}/splits`);
       if (!res.ok) throw new Error("Failed to load entry");
       const body = await res.json();
       // Shape it to match the JE modal's expectations
@@ -728,7 +729,7 @@ export default function BankRegisterPage() {
           : [],
       };
 
-      const url = editTx ? `${BASE}api/transactions/${editTx.id}` : `${BASE}api/transactions`;
+      const url = editTx ? `/api/transactions/${editTx.id}` : "/api/transactions";
       const res = await apiFetch(url, {
         method: editTx ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
@@ -750,7 +751,7 @@ export default function BankRegisterPage() {
   }
 
   async function handleVoid(tx: Transaction) {
-    await apiFetch(`${BASE}api/transactions/${tx.id}`, { method: "DELETE" });
+    await apiFetch(`/api/transactions/${tx.id}`, { method: "DELETE" });
     setDeleteTarget(null);
     await loadAll();
     globalRefetch();
@@ -758,7 +759,7 @@ export default function BankRegisterPage() {
 
   async function toggleStatus(tx: Transaction) {
     const next = tx.status === "CLEARED" ? "UNCLEARED" : "CLEARED";
-    await apiFetch(`${BASE}api/transactions/${tx.id}/status`, {
+    await apiFetch(`/api/transactions/${tx.id}/status`, {
       method: "PATCH", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: next }),
     });
@@ -772,9 +773,12 @@ export default function BankRegisterPage() {
       const res = await authJsonFetch(`/api/plaid/sync/${bankAccountId}`, { method: "POST" });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Sync failed");
-      const msg = json.imported > 0
-        ? `Imported ${json.imported} new transaction${json.imported !== 1 ? "s" : ""}${json.skipped > 0 ? ` (${json.skipped} already existed)` : ""}`
-        : `All ${json.total} transactions already up to date`;
+      const msg =
+        json.imported > 0
+          ? `Imported ${json.imported} new transaction${json.imported !== 1 ? "s" : ""}${json.skipped > 0 ? ` (${json.skipped} already existed)` : ""}`
+          : (json.total ?? 0) === 0
+            ? "Plaid returned no transactions for this date range yet (sandbox feeds can take a few minutes)."
+            : `All ${json.total} transaction${json.total !== 1 ? "s" : ""} already in the register`;
       toast.success(msg);
       await loadAll();
     } catch (err: any) {
