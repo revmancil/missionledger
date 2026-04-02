@@ -24,11 +24,20 @@ import {
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 import { useFinancialSync } from "@/lib/financial-sync";
+import { authJsonFetch } from "@/lib/auth-fetch";
 
 const BASE = import.meta.env.BASE_URL;
 
 function apiFetch(url: string, init?: RequestInit) {
-  return fetch(url, { credentials: "include", ...init });
+  const token = typeof window !== "undefined" ? localStorage.getItem("ml_token") : null;
+  return fetch(url, {
+    credentials: "include",
+    ...init,
+    headers: {
+      ...(init?.headers as Record<string, string>),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -760,7 +769,7 @@ export default function BankRegisterPage() {
   async function handlePlaidSync(bankAccountId: string) {
     setSyncing(true);
     try {
-      const res = await apiFetch(`${BASE}api/plaid/sync/${bankAccountId}`, { method: "POST" });
+      const res = await authJsonFetch(`/api/plaid/sync/${bankAccountId}`, { method: "POST" });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Sync failed");
       const msg = json.imported > 0

@@ -11,6 +11,7 @@ import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { usePlaidLink } from "react-plaid-link";
 import { useQueryClient } from "@tanstack/react-query";
+import { authJsonFetch } from "@/lib/auth-fetch";
 
 function PlaidLinkButton({ account, onSuccess }: { account: any; onSuccess: () => void }) {
   const [linkToken, setLinkToken] = useState<string | null>(null);
@@ -20,9 +21,8 @@ function PlaidLinkButton({ account, onSuccess }: { account: any; onSuccess: () =
   const fetchLinkToken = async () => {
     setLoadingToken(true);
     try {
-      const res = await fetch("/api/plaid/create-link-token", {
+      const res = await authJsonFetch("/api/plaid/create-link-token", {
         method: "POST",
-        credentials: "include",
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Failed to get link token");
@@ -36,9 +36,8 @@ function PlaidLinkButton({ account, onSuccess }: { account: any; onSuccess: () =
 
   const onPlaidSuccess = useCallback(async (publicToken: string, metadata: any) => {
     try {
-      const res = await fetch("/api/plaid/exchange-token", {
+      const res = await authJsonFetch("/api/plaid/exchange-token", {
         method: "POST",
-        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           publicToken,
@@ -64,9 +63,8 @@ function PlaidLinkButton({ account, onSuccess }: { account: any; onSuccess: () =
   const handleSync = async () => {
     setSyncing(true);
     try {
-      const res = await fetch(`/api/plaid/sync/${account.id}`, {
+      const res = await authJsonFetch(`/api/plaid/sync/${account.id}`, {
         method: "POST",
-        credentials: "include",
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Sync failed");
@@ -81,9 +79,8 @@ function PlaidLinkButton({ account, onSuccess }: { account: any; onSuccess: () =
   const handleUnlink = async () => {
     if (!confirm(`Unlink ${account.name} from Plaid? Existing transactions will remain.`)) return;
     try {
-      const res = await fetch(`/api/plaid/unlink/${account.id}`, {
+      const res = await authJsonFetch(`/api/plaid/unlink/${account.id}`, {
         method: "DELETE",
-        credentials: "include",
       });
       if (!res.ok) throw new Error("Failed to unlink");
       toast.success("Bank account unlinked from Plaid");
@@ -151,7 +148,7 @@ function PlaidLinkButtonWithToken({ account, onSuccess }: { account: any; onSucc
   useEffect(() => {
     let cancelled = false;
     if (account.isPlaidLinked) return;
-    fetch("/api/plaid/create-link-token", { method: "POST", credentials: "include" })
+    authJsonFetch("/api/plaid/create-link-token", { method: "POST" })
       .then((res) => res.json())
       .then((json) => {
         if (cancelled) return;
@@ -166,9 +163,8 @@ function PlaidLinkButtonWithToken({ account, onSuccess }: { account: any; onSucc
 
   const onPlaidSuccess = useCallback(async (publicToken: string, metadata: any) => {
     try {
-      const res = await fetch("/api/plaid/exchange-token", {
+      const res = await authJsonFetch("/api/plaid/exchange-token", {
         method: "POST",
-        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           publicToken,
@@ -206,9 +202,8 @@ function PlaidLinkButtonWithToken({ account, onSuccess }: { account: any; onSucc
   const handleSync = async () => {
     setSyncing(true);
     try {
-      const res = await fetch(`/api/plaid/sync/${account.id}`, {
+      const res = await authJsonFetch(`/api/plaid/sync/${account.id}`, {
         method: "POST",
-        credentials: "include",
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Sync failed");
@@ -226,7 +221,7 @@ function PlaidLinkButtonWithToken({ account, onSuccess }: { account: any; onSucc
   const handleUnlink = async () => {
     if (!confirm(`Unlink ${account.name} from Plaid?`)) return;
     try {
-      await fetch(`/api/plaid/unlink/${account.id}`, { method: "DELETE", credentials: "include" });
+      await authJsonFetch(`/api/plaid/unlink/${account.id}`, { method: "DELETE" });
       toast.success("Unlinked from Plaid");
       onSuccess();
     } catch {
