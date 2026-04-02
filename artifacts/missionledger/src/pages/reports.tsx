@@ -9,8 +9,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { TrendingUp, TrendingDown, DollarSign, BookOpen, FileText, Table2, Download, FileDown, ShieldCheck, AlertTriangle, CheckCircle } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-
-const BASE = import.meta.env.BASE_URL as string;
+import { apiUrl } from "@/lib/api-base";
 
 // ── Fund type helpers ─────────────────────────────────────────────────────────
 const FUND_TYPE_LABELS: Record<string, string> = {
@@ -34,10 +33,22 @@ function useFetch<T>(url: string | null) {
   useEffect(() => {
     if (!url) return;
     setIsLoading(true);
-    fetch(url, { credentials: "include" })
-      .then(r => r.json())
-      .then(d => { setData(d); setIsLoading(false); })
-      .catch(() => setIsLoading(false));
+    const token = typeof window !== "undefined" ? localStorage.getItem("ml_token") : null;
+    const headers: Record<string, string> = {};
+    if (token) headers.Authorization = `Bearer ${token}`;
+    fetch(url, { credentials: "include", headers })
+      .then(async (r) => {
+        if (!r.ok) throw new Error(String(r.status));
+        return r.json() as Promise<T>;
+      })
+      .then((d) => {
+        setData(d);
+        setIsLoading(false);
+      })
+      .catch(() => {
+        setData(null);
+        setIsLoading(false);
+      });
   }, [url]);
 
   return { data, isLoading };
@@ -165,14 +176,14 @@ export default function ReportsPage() {
   const glByAccountParams = new URLSearchParams({ startDate: applied.startDate, endDate: applied.endDate });
   if (fundFilter) glByAccountParams.set("fundId", fundFilter);
   const { data: glByAccount, isLoading: glLoading } = useFetch<{ accounts: GlAccount[] }>(
-    tab === "gl" ? `${BASE}api/reports/gl-by-account?${glByAccountParams}` : null
+    tab === "gl" ? apiUrl(`/api/reports/gl-by-account?${glByAccountParams}`) : null
   );
 
   // General Journal
   const journalParams = new URLSearchParams({ startDate: applied.startDate, endDate: applied.endDate });
   if (fundFilter) journalParams.set("fundId", fundFilter);
   const { data: journalData, isLoading: journalLoading } = useFetch<{ groups: JournalGroup[]; totalGroups: number }>(
-    tab === "journal" ? `${BASE}api/reports/general-journal?${journalParams}` : null
+    tab === "journal" ? apiUrl(`/api/reports/general-journal?${journalParams}`) : null
   );
 
   // Transaction Register
@@ -182,13 +193,13 @@ export default function ReportsPage() {
   if (appliedSearch.minAmount)  regParams.set("minAmount", appliedSearch.minAmount);
   if (appliedSearch.maxAmount)  regParams.set("maxAmount", appliedSearch.maxAmount);
   const { data: registerData, isLoading: regLoading } = useFetch<{ transactions: RegisterTxn[]; total: number }>(
-    tab === "register" ? `${BASE}api/reports/transaction-register?${regParams}` : null
+    tab === "register" ? apiUrl(`/api/reports/transaction-register?${regParams}`) : null
   );
 
   // 990 Preparer
   const prep990Params = new URLSearchParams({ startDate: applied.startDate, endDate: applied.endDate });
   const { data: prep990Data, isLoading: prep990Loading } = useFetch<PreparerData>(
-    tab === "prep990" ? `${BASE}api/reports/990-preparer?${prep990Params}` : null
+    tab === "prep990" ? apiUrl(`/api/reports/990-preparer?${prep990Params}`) : null
   );
 
   const handleApply = () => {
@@ -215,12 +226,22 @@ export default function ReportsPage() {
     { label: "Q4",         start: `${y}-10-01`,       end: `${y}-12-31` },
   ];
 
-  const handleExportCpa = useCallback(() => {
-    const url = `${BASE}api/reports/990-export?year=${applied.startDate.slice(0, 4)}`;
+  const handleExportCpa = useCallback(async () => {
+    const year = applied.startDate.slice(0, 4);
+    const url = apiUrl(`/api/reports/990-export?year=${year}`);
+    const token = localStorage.getItem("ml_token");
+    const res = await fetch(url, {
+      credentials: "include",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) return;
+    const blob = await res.blob();
+    const href = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url;
-    a.download = `990-export-${applied.startDate.slice(0, 4)}.csv`;
+    a.href = href;
+    a.download = `990-export-${year}.csv`;
     a.click();
+    URL.revokeObjectURL(href);
   }, [applied]);
 
   const chartData = [

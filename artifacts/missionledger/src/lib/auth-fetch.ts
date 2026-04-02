@@ -1,4 +1,4 @@
-const BASE = import.meta.env.BASE_URL as string;
+import { apiUrl } from "./api-base";
 
 type JsonObject = Record<string, unknown>;
 
@@ -13,7 +13,8 @@ export async function authJsonFetch(path: string, options: RequestInit = {}): Pr
     ...(options.headers as Record<string, string> | undefined),
     ...(bearerHeaders() ?? {}),
   };
-  const response = await fetch(`${BASE}${path}`, {
+  const url = path.startsWith("http") ? path : apiUrl(path.startsWith("/") ? path : `/${path}`);
+  const response = await fetch(url, {
     credentials: "include",
     ...options,
     headers,
