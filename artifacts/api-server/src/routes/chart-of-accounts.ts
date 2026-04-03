@@ -2,6 +2,7 @@ import { Router } from "express";
 import { db, chartOfAccounts } from "@workspace/db";
 import { eq, and, asc } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
+import { toIsoString } from "../lib/safeIso";
 
 const router = Router();
 
@@ -117,9 +118,9 @@ router.get("/", requireAuth, async (req, res) => {
     res.json(
       all.map((a) => ({
         ...a,
-        createdAt: a.createdAt.toISOString(),
-        updatedAt: a.updatedAt.toISOString(),
-      }))
+        createdAt: toIsoString(a.createdAt),
+        updatedAt: toIsoString(a.updatedAt),
+      })),
     );
   } catch (error) {
     console.error(error);
@@ -159,8 +160,8 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
 
     res.status(201).json({
       ...created,
-      createdAt: created.createdAt.toISOString(),
-      updatedAt: created.updatedAt.toISOString(),
+      createdAt: toIsoString(created.createdAt),
+      updatedAt: toIsoString(created.updatedAt),
     });
   } catch (error) {
     console.error(error);
@@ -195,8 +196,8 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
     if (!updated) return res.status(404).json({ error: "Not found" });
     res.json({
       ...updated,
-      createdAt: updated.createdAt.toISOString(),
-      updatedAt: updated.updatedAt.toISOString(),
+      createdAt: toIsoString(updated.createdAt),
+      updatedAt: toIsoString(updated.updatedAt),
     });
   } catch (error) {
     res.status(500).json({ error: "Internal server error" });

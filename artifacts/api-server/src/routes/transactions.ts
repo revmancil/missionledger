@@ -1,9 +1,9 @@
-import { Router } from "express";
+import { Router, type Request } from "express";
 import {
   db, transactions, transactionSplits, chartOfAccounts,
   bankAccounts, funds, vendors, companies, journalEntryLines,
 } from "@workspace/db";
-import { eq, and, desc, inArray, sql, ne } from "drizzle-orm";
+import { eq, and, desc, asc, inArray, sql, ne } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
 import { generateGlEntries, voidGlEntries } from "../lib/gl";
 import { logAudit, snap } from "../lib/audit";
@@ -11,7 +11,11 @@ import {
   parseCsvToObjects,
   detectColumnMapping,
   rowsToStatementImports,
+  type StatementImportRow,
 } from "../lib/statementCsv";
+import { parseTransactionsFromPdfText } from "../lib/statementPdf";
+import { toIsoStringOrNull, asDate } from "../lib/safeIso";
+import { stringifyJsonForApi } from "../lib/jsonSafe";
 
 /** Recompute a bank account's currentBalance from all its non-void transactions. */
 async function recomputeBankBalance(bankAccountId: string | null | undefined, companyId: string): Promise<void> {
@@ -32,22 +36,43 @@ async function recomputeBankBalance(bankAccountId: string | null | undefined, co
 
 async function getClosedUntil(companyId: string): Promise<Date | null> {
   const [co] = await db.select({ closedUntil: companies.closedUntil }).from(companies).where(eq(companies.id, companyId));
-  return co?.closedUntil ?? null;
+  return asDate(co?.closedUntil);
 }
 
-function isInClosedPeriod(txDate: Date | string, closedUntil: Date | null): boolean {
-  if (!closedUntil) return false;
-  const d = txDate instanceof Date ? txDate : new Date(txDate);
-  return d <= closedUntil;
+function isInClosedPeriod(txDate: unknown, closedUntil: unknown): boolean {
+  const cu = asDate(closedUntil);
+  if (!cu) return false;
+  const d = asDate(txDate);
+  if (!d) return false;
+  return d <= cu;
+}
+
+/** Period-lock error line; closedUntil may be string from DB in some code paths. */
+function closedUntilLabel(closedUntil: unknown): string {
+  const d = asDate(closedUntil);
+  return d ? d.toISOString().slice(0, 10) : "(unknown)";
 }
 
 const router = Router();
 
 // ── Fingerprint helpers ────────────────────────────────────────────────────────
+/** ISO string for API JSON; invalid DB dates must not throw (would 500 GET /transactions). */
+function formatTxIso(value: unknown): string {
+  try {
+    const d = value instanceof Date ? value : new Date(value as string | number);
+    if (Number.isNaN(d.getTime())) return new Date(0).toISOString();
+    return d.toISOString();
+  } catch {
+    return new Date(0).toISOString();
+  }
+}
+
 /** Builds a stable duplicate-detection key: "{amount}_{YYYY-MM-DD}_{payee}" */
 function buildFingerprint(amount: number, date: Date | string, payee: string): string {
   const d = date instanceof Date ? date : new Date(date);
-  const dateStr = d.toISOString().substring(0, 10);
+  const dateStr = Number.isNaN(d.getTime())
+    ? "1970-01-01"
+    : d.toISOString().substring(0, 10);
   const payeeNorm = String(payee).trim().toLowerCase().replace(/\s+/g, " ");
   return `${Number(amount).toFixed(2)}_${dateStr}_${payeeNorm}`;
 }
@@ -89,6 +114,30 @@ async function getLookups(companyId: string) {
   };
 }
 
+/** Nested lookup rows still have raw Dates; res.json → JSON.stringify uses Date#toJSON → toISOString() and throws on invalid dates. */
+function serializeNestedEntity(row: Record<string, unknown> | null | undefined): Record<string, unknown> | null {
+  if (!row) return null;
+  return {
+    ...row,
+    createdAt: formatTxIso(row.createdAt),
+    updatedAt: formatTxIso(row.updatedAt),
+  };
+}
+
+function serializeNestedBank(row: Record<string, unknown> | null | undefined): Record<string, unknown> | null {
+  if (!row) return null;
+  const { plaidAccessToken, plaidItemId, ...rest } = row;
+  void plaidAccessToken;
+  void plaidItemId;
+  return {
+    ...rest,
+    createdAt: formatTxIso(row.createdAt),
+    updatedAt: formatTxIso(row.updatedAt),
+    plaidLastSyncedAt:
+      row.plaidLastSyncedAt != null ? formatTxIso(row.plaidLastSyncedAt) : null,
+  };
+}
+
 function serializeTx(
   tx: any,
   splits: any[],
@@ -97,21 +146,48 @@ function serializeTx(
   const { coaMap, fundMap, bankMap, vendorMap } = lookups;
   return {
     ...tx,
-    date: tx.date instanceof Date ? tx.date.toISOString() : tx.date,
-    createdAt: tx.createdAt instanceof Date ? tx.createdAt.toISOString() : tx.createdAt,
-    updatedAt: tx.updatedAt instanceof Date ? tx.updatedAt.toISOString() : tx.updatedAt,
-    chartAccount: tx.chartAccountId ? coaMap[tx.chartAccountId] ?? null : null,
-    fund: tx.fundId ? fundMap[tx.fundId] ?? null : null,
-    bankAccount: tx.bankAccountId ? bankMap[tx.bankAccountId] ?? null : null,
-    vendor: tx.vendorId ? vendorMap[tx.vendorId] ?? null : null,
+    date: formatTxIso(tx.date),
+    createdAt: formatTxIso(tx.createdAt),
+    updatedAt: formatTxIso(tx.updatedAt),
+    chartAccount: tx.chartAccountId
+      ? serializeNestedEntity(coaMap[tx.chartAccountId] as Record<string, unknown>)
+      : null,
+    fund: tx.fundId ? serializeNestedEntity(fundMap[tx.fundId] as Record<string, unknown>) : null,
+    bankAccount: tx.bankAccountId
+      ? serializeNestedBank(bankMap[tx.bankAccountId] as Record<string, unknown>)
+      : null,
+    vendor: tx.vendorId
+      ? serializeNestedEntity(vendorMap[tx.vendorId] as Record<string, unknown>)
+      : null,
     splits: splits.map((s) => ({
       ...s,
-      createdAt: s.createdAt instanceof Date ? s.createdAt.toISOString() : s.createdAt,
-      updatedAt: s.updatedAt instanceof Date ? s.updatedAt.toISOString() : s.updatedAt,
-      chartAccount: s.chartAccountId ? coaMap[s.chartAccountId] ?? null : null,
-      vendor: s.vendorId ? vendorMap[s.vendorId] ?? null : null,
+      createdAt: formatTxIso(s.createdAt),
+      updatedAt: formatTxIso(s.updatedAt),
+      chartAccount: s.chartAccountId
+        ? serializeNestedEntity(coaMap[s.chartAccountId] as Record<string, unknown>)
+        : null,
+      vendor: s.vendorId
+        ? serializeNestedEntity(vendorMap[s.vendorId] as Record<string, unknown>)
+        : null,
     })),
   };
+}
+
+const SPLIT_QUERY_CHUNK = 500;
+
+async function loadSplitsByTransactionIds(txIds: string[]): Promise<any[]> {
+  if (txIds.length === 0) return [];
+  const out: any[] = [];
+  for (let i = 0; i < txIds.length; i += SPLIT_QUERY_CHUNK) {
+    const chunk = txIds.slice(i, i + SPLIT_QUERY_CHUNK);
+    const rows = await db
+      .select()
+      .from(transactionSplits)
+      .where(inArray(transactionSplits.transactionId, chunk))
+      .orderBy(asc(transactionSplits.transactionId), asc(transactionSplits.sortOrder));
+    out.push(...rows);
+  }
+  return out;
 }
 
 async function upsertSplits(
@@ -132,6 +208,140 @@ async function upsertSplits(
       sortOrder: s.sortOrder ?? i,
     });
   }
+}
+
+/** Shared CSV/PDF bulk import (admin). */
+async function commitStatementImportRows(
+  req: Request,
+  companyId: string,
+  bankAccountId: string,
+  bankName: string,
+  rows: StatementImportRow[],
+  parseErrors: string[],
+  auditSuffix: string,
+): Promise<{
+  imported: number;
+  skippedDuplicates: number;
+  skippedLockedPeriod: number;
+  parseErrors: string[];
+  parseErrorsTruncated: boolean;
+  message?: string;
+}> {
+  if (rows.length > 5000) {
+    throw Object.assign(new Error("Too many rows (max 5000 per import)"), { status: 400 });
+  }
+
+  const closedUntil = await getClosedUntil(companyId);
+  let skippedDuplicates = 0;
+  let skippedLockedPeriod = 0;
+  const batchSeen = new Set<string>();
+  const candidates: Array<{
+    date: Date;
+    payee: string;
+    amount: number;
+    type: "DEBIT" | "CREDIT";
+    fingerprint: string;
+  }> = [];
+
+  for (const r of rows) {
+    if (isInClosedPeriod(r.date, closedUntil)) {
+      skippedLockedPeriod++;
+      continue;
+    }
+    const fingerprint = buildFingerprint(r.amount, r.date, r.payee);
+    if (batchSeen.has(fingerprint)) {
+      skippedDuplicates++;
+      continue;
+    }
+    batchSeen.add(fingerprint);
+    candidates.push({ ...r, fingerprint });
+  }
+
+  let finalRows = candidates;
+  if (candidates.length > 0) {
+    const fps = candidates.map((c) => c.fingerprint);
+    const existingFp = new Set<string>();
+    const chunkSize = 400;
+    for (let i = 0; i < fps.length; i += chunkSize) {
+      const part = [...new Set(fps.slice(i, i + chunkSize))].filter(
+        (f): f is string => typeof f === "string" && f.length > 0,
+      );
+      if (part.length === 0) continue;
+      const hits = await db
+        .select({ f: transactions.transactionFingerprint })
+        .from(transactions)
+        .where(
+          and(
+            eq(transactions.companyId, companyId),
+            eq(transactions.isVoid, false),
+            inArray(transactions.transactionFingerprint, part),
+          ),
+        );
+      for (const h of hits) {
+        if (h.f) existingFp.add(h.f);
+      }
+    }
+    finalRows = candidates.filter((c) => !existingFp.has(c.fingerprint));
+    skippedDuplicates += candidates.length - finalRows.length;
+  }
+
+  if (finalRows.length === 0) {
+    return {
+      imported: 0,
+      skippedDuplicates,
+      skippedLockedPeriod,
+      parseErrors: parseErrors.slice(0, 40),
+      parseErrorsTruncated: parseErrors.length > 40,
+      message: "No new transactions to import (duplicates, locked period, or empty).",
+    };
+  }
+
+  const inserted = await db
+    .insert(transactions)
+    .values(
+      finalRows.map((r) => ({
+        companyId,
+        bankAccountId,
+        date: r.date,
+        payee: r.payee,
+        amount: r.amount,
+        type: r.type,
+        status: "UNCLEARED" as const,
+        isSplit: false,
+        transactionFingerprint: r.fingerprint,
+        isVoid: false,
+      })),
+    )
+    .returning({ id: transactions.id });
+
+  for (const row of inserted) {
+    generateGlEntries(row.id, companyId).catch((e) =>
+      console.error("[GL] statement import error:", e),
+    );
+  }
+  await recomputeBankBalance(bankAccountId, companyId);
+
+  const { id: userId, email: userEmail, name: userName } = (req as any).user;
+  logAudit({
+    req,
+    companyId,
+    userId,
+    userEmail,
+    userName,
+    action: "CREATE",
+    entityType: "TRANSACTION",
+    entityId: inserted[0]?.id ?? null,
+    description: `Imported ${inserted.length} transaction(s) from ${auditSuffix} into ${bankName}`,
+    newValue: { count: inserted.length, bankAccountId },
+  });
+
+  return {
+    imported: inserted.length,
+    skippedDuplicates,
+    skippedLockedPeriod,
+    parseErrors: parseErrors.slice(0, 40),
+    parseErrorsTruncated: parseErrors.length > 40,
+  };
 }
 
 // ── GET /transactions ─────────────────────────────────────────────────────────
@@ -156,14 +366,7 @@ router.get("/", requireAuth, async (req, res) => {
     if (status) all = all.filter((t) => t.status === status);
 
     const txIds = all.map((t) => t.id);
-    let allSplits: any[] = [];
-    if (txIds.length) {
-      allSplits = await db
-        .select()
-        .from(transactionSplits)
-        .where(inArray(transactionSplits.transactionId, txIds))
-        .orderBy(transactionSplits.transactionId, transactionSplits.sortOrder);
-    }
+    const allSplits = await loadSplitsByTransactionIds(txIds);
 
     const splitsByTx = allSplits.reduce<Record<string, any[]>>((acc, s) => {
       (acc[s.transactionId] ??= []).push(s);
@@ -173,16 +376,25 @@ router.get("/", requireAuth, async (req, res) => {
     const lookups = await getLookups(companyId);
     const closedUntil = await getClosedUntil(companyId);
 
-    res.json({
-      closedUntil: closedUntil ? closedUntil.toISOString() : null,
+    const payload = {
+      closedUntil: toIsoStringOrNull(closedUntil),
       transactions: all.map((tx) => ({
         ...serializeTx(tx, splitsByTx[tx.id] ?? [], lookups),
         isClosed: isInClosedPeriod(tx.date, closedUntil),
       })),
-    });
+    };
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.send(stringifyJsonForApi(payload));
   } catch (err) {
-    console.error("Get transactions error:", err);
-    res.status(500).json({ error: "Internal server error" });
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("Get transactions error:", msg, err);
+    const debug =
+      process.env.MISSIONLEDGER_DEBUG_API_ERRORS === "1" ||
+      process.env.MISSIONLEDGER_DEBUG_API_ERRORS === "true";
+    res.status(500).json({
+      error: "Internal server error",
+      ...(debug ? { detail: msg } : {}),
+    });
   }
 });
 
@@ -204,7 +416,7 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
     const closedUntil = await getClosedUntil(companyId);
     if (isInClosedPeriod(date, closedUntil)) {
       return res.status(403).json({
-        error: `This period is locked through ${closedUntil!.toISOString().substring(0, 10)}. Reopen the period before adding transactions.`,
+        error: `This period is locked through ${closedUntilLabel(closedUntil)}. Reopen the period before adding transactions.`,
         code: "PERIOD_LOCKED",
       });
     }
@@ -296,7 +508,7 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
       action: "CREATE",
       entityType: "TRANSACTION",
       entityId: created.id,
-      description: `Created transaction: ${created.payee} $${created.amount.toFixed(2)} on ${created.date instanceof Date ? created.date.toISOString().substring(0, 10) : created.date}`,
+      description: `Created transaction: ${created.payee} $${created.amount.toFixed(2)} on ${formatTxIso(created.date).slice(0, 10)}`,
       newValue: snap(created as any),
     });
 
@@ -348,118 +560,94 @@ router.post("/import-statement", requireAuth, requireAdmin, async (req, res) => 
     if (ok.length > 5000) {
       return res.status(400).json({ error: "Too many rows (max 5000 per import)" });
     }
+    const result = await commitStatementImportRows(
+      req,
+      companyId,
+      bankAccountId,
+      bank.name,
+      ok,
+      parseErrors,
+      "bank statement CSV",
+    );
+    res.json(result);
+  } catch (err: any) {
+    console.error("Statement import error:", err);
+    const status = err?.status === 400 ? 400 : 500;
+    const msg =
+      status === 400 && err?.message ? err.message : "Failed to import statement";
+    res.status(status).json({ error: msg });
+  }
+});
 
-    const closedUntil = await getClosedUntil(companyId);
-    let skippedDuplicates = 0;
-    let skippedLockedPeriod = 0;
-    const batchSeen = new Set<string>();
-    const candidates: Array<{
-      date: Date;
-      payee: string;
-      amount: number;
-      type: "DEBIT" | "CREDIT";
-      fingerprint: string;
-    }> = [];
-
-    for (const r of ok) {
-      if (isInClosedPeriod(r.date, closedUntil)) {
-        skippedLockedPeriod++;
-        continue;
-      }
-      const fingerprint = buildFingerprint(r.amount, r.date, r.payee);
-      if (batchSeen.has(fingerprint)) {
-        skippedDuplicates++;
-        continue;
-      }
-      batchSeen.add(fingerprint);
-      candidates.push({ ...r, fingerprint });
+// ── POST /transactions/import-statement-pdf — text-layer PDF (admin) ───────────
+router.post("/import-statement-pdf", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { companyId } = (req as any).user;
+    const { bankAccountId, pdfBase64 } = req.body ?? {};
+    if (!bankAccountId || typeof pdfBase64 !== "string") {
+      return res.status(400).json({ error: "bankAccountId and pdfBase64 are required" });
     }
 
-    let finalRows = candidates;
-    if (candidates.length > 0) {
-      const fps = candidates.map((c) => c.fingerprint);
-      const existingFp = new Set<string>();
-      const chunkSize = 400;
-      for (let i = 0; i < fps.length; i += chunkSize) {
-        const part = fps.slice(i, i + chunkSize);
-        const hits = await db
-          .select({ f: transactions.transactionFingerprint })
-          .from(transactions)
-          .where(
-            and(
-              eq(transactions.companyId, companyId),
-              eq(transactions.isVoid, false),
-              inArray(transactions.transactionFingerprint, part),
-            ),
-          );
-        for (const h of hits) {
-          if (h.f) existingFp.add(h.f);
-        }
-      }
-      finalRows = candidates.filter((c) => !existingFp.has(c.fingerprint));
-      skippedDuplicates += candidates.length - finalRows.length;
+    const [bank] = await db
+      .select()
+      .from(bankAccounts)
+      .where(and(eq(bankAccounts.id, bankAccountId), eq(bankAccounts.companyId, companyId)));
+    if (!bank) return res.status(404).json({ error: "Bank account not found" });
+
+    let buffer: Buffer;
+    try {
+      buffer = Buffer.from(pdfBase64.replace(/^data:application\/pdf;base64,/, ""), "base64");
+    } catch {
+      return res.status(400).json({ error: "Invalid base64 PDF data" });
+    }
+    if (buffer.length < 100) {
+      return res.status(400).json({ error: "PDF file is too small or empty" });
+    }
+    if (buffer.length > 12 * 1024 * 1024) {
+      return res.status(400).json({ error: "PDF too large (max 12MB)" });
     }
 
-    if (finalRows.length === 0) {
-      return res.json({
-        imported: 0,
-        skippedDuplicates,
-        skippedLockedPeriod,
-        parseErrors: parseErrors.slice(0, 40),
-        parseErrorsTruncated: parseErrors.length > 40,
-        message: "No new transactions to import (duplicates, locked period, or empty).",
+    const pdfParseMod: { default?: (b: Buffer) => Promise<{ text: string }> } = await import(
+      "pdf-parse",
+    );
+    const pdfParse = pdfParseMod.default ?? (pdfParseMod as unknown as (b: Buffer) => Promise<{ text: string }>);
+    const parsed = await pdfParse(buffer);
+    const text = (parsed?.text ?? "").trim();
+    if (!text || text.length < 20) {
+      return res.status(400).json({
+        error:
+          "Could not read text from this PDF. It may be a scanned image; use your bank’s CSV download or a PDF with selectable text.",
       });
     }
 
-    const inserted = await db
-      .insert(transactions)
-      .values(
-        finalRows.map((r) => ({
-          companyId,
-          bankAccountId,
-          date: r.date,
-          payee: r.payee,
-          amount: r.amount,
-          type: r.type,
-          status: "UNCLEARED" as const,
-          isSplit: false,
-          transactionFingerprint: r.fingerprint,
-          isVoid: false,
-        })),
-      )
-      .returning({ id: transactions.id });
-
-    for (const row of inserted) {
-      generateGlEntries(row.id, companyId).catch((e) =>
-        console.error("[GL] statement import error:", e),
-      );
+    const { ok, errors: parseErrors } = parseTransactionsFromPdfText(text);
+    if (ok.length === 0) {
+      return res.status(400).json({
+        error:
+          "No transaction lines found in the PDF. Layout may be unsupported — try CSV export, or a PDF with a standard date + amount line format.",
+        parseErrors: parseErrors.slice(0, 20),
+      });
     }
-    await recomputeBankBalance(bankAccountId, companyId);
+    if (ok.length > 5000) {
+      return res.status(400).json({ error: "Too many rows (max 5000 per import)" });
+    }
 
-    const { id: userId, email: userEmail, name: userName } = (req as any).user;
-    logAudit({
+    const result = await commitStatementImportRows(
       req,
       companyId,
-      userId,
-      userEmail,
-      userName,
-      action: "CREATE",
-      entityType: "TRANSACTION",
-      entityId: inserted[0]?.id ?? "",
-      description: `Imported ${inserted.length} transaction(s) from bank statement CSV into ${bank.name}`,
-      newValue: { count: inserted.length, bankAccountId },
-    });
-
-    res.json({
-      imported: inserted.length,
-      skippedDuplicates,
-      skippedLockedPeriod,
-      parseErrors: parseErrors.slice(0, 40),
-      parseErrorsTruncated: parseErrors.length > 40,
-    });
-  } catch (err) {
-    console.error("Statement import error:", err);
-    res.status(500).json({ error: "Failed to import statement" });
+      bankAccountId,
+      bank.name,
+      ok,
+      parseErrors,
+      "bank statement PDF",
+    );
+    res.json(result);
+  } catch (err: any) {
+    console.error("PDF statement import error:", err);
+    const msg = err?.code === "MODULE_NOT_FOUND" || err?.message?.includes("pdf-parse")
+      ? "PDF import dependency missing on server"
+      : err?.message || "Failed to import PDF";
+    res.status(500).json({ error: msg });
   }
 });
 
@@ -493,8 +681,8 @@ router.get("/:id/splits", requireAuth, async (req, res) => {
         source: "JOURNAL_ENTRY",
         splits: lines.map((l) => ({
           id: l.id,
-          account: coaMap[l.accountId] ?? null,
-          fund: l.fundId ? (fundMap[l.fundId] ?? null) : null,
+          account: serializeNestedEntity(coaMap[l.accountId] as Record<string, unknown>),
+          fund: l.fundId ? serializeNestedEntity(fundMap[l.fundId] as Record<string, unknown>) : null,
           debit: l.debit ?? 0,
           credit: l.credit ?? 0,
           memo: l.description ?? null,
@@ -507,7 +695,7 @@ router.get("/:id/splits", requireAuth, async (req, res) => {
       .select()
       .from(transactionSplits)
       .where(eq(transactionSplits.transactionId, tx.id))
-      .orderBy(transactionSplits.sortOrder);
+      .orderBy(asc(transactionSplits.sortOrder));
 
     return res.json({
       transactionId: tx.id,
@@ -515,7 +703,9 @@ router.get("/:id/splits", requireAuth, async (req, res) => {
       source: "TRANSACTION_SPLIT",
       splits: splits.map((s) => ({
         id: s.id,
-        account: s.chartAccountId ? (coaMap[s.chartAccountId] ?? null) : null,
+        account: s.chartAccountId
+          ? serializeNestedEntity(coaMap[s.chartAccountId] as Record<string, unknown>)
+          : null,
         fund: null,
         debit: tx.type === "DEBIT" ? s.amount : 0,
         credit: tx.type === "CREDIT" ? s.amount : 0,
@@ -550,7 +740,7 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
     const effectiveDate = date ? new Date(date) : existing.date;
     if (isInClosedPeriod(existing.date, closedUntil) || isInClosedPeriod(effectiveDate, closedUntil)) {
       return res.status(403).json({
-        error: `This period is locked through ${closedUntil!.toISOString().substring(0, 10)}. Reopen the period to edit this transaction.`,
+        error: `This period is locked through ${closedUntilLabel(closedUntil)}. Reopen the period to edit this transaction.`,
         code: "PERIOD_LOCKED",
       });
     }
@@ -679,7 +869,7 @@ router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
     const closedUntil = await getClosedUntil(companyId);
     if (isInClosedPeriod(existing.date, closedUntil)) {
       return res.status(403).json({
-        error: `This period is locked through ${closedUntil!.toISOString().substring(0, 10)}. Reopen the period to delete this transaction.`,
+        error: `This period is locked through ${closedUntilLabel(closedUntil)}. Reopen the period to delete this transaction.`,
         code: "PERIOD_LOCKED",
       });
     }
@@ -710,7 +900,7 @@ router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
       action: "VOID",
       entityType: "TRANSACTION",
       entityId: existing.id,
-      description: `Voided transaction: ${existing.payee} $${existing.amount.toFixed(2)} on ${existing.date instanceof Date ? existing.date.toISOString().substring(0, 10) : existing.date}`,
+      description: `Voided transaction: ${existing.payee} $${existing.amount.toFixed(2)} on ${formatTxIso(existing.date).slice(0, 10)}`,
       oldValue: snap(existing as any),
       newValue: { isVoid: true, status: "VOID" },
     });

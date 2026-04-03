@@ -2,6 +2,7 @@ import { Router } from "express";
 import { db, funds, donations, expenses, glEntries, chartOfAccounts } from "@workspace/db";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
+import { toIsoString } from "../lib/safeIso";
 
 const router = Router();
 
@@ -58,8 +59,8 @@ router.get("/", requireAuth, async (req, res) => {
 
       return {
         ...fund,
-        createdAt: fund.createdAt.toISOString(),
-        updatedAt: fund.updatedAt.toISOString(),
+        createdAt: toIsoString(fund.createdAt),
+        updatedAt: toIsoString(fund.updatedAt),
         balance,
         totalDonations,
         totalExpenses,
@@ -88,7 +89,11 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
       isActive: isActive !== false,
     }).returning();
 
-    res.status(201).json({ ...created, createdAt: created.createdAt.toISOString(), updatedAt: created.updatedAt.toISOString() });
+    res.status(201).json({
+      ...created,
+      createdAt: toIsoString(created.createdAt),
+      updatedAt: toIsoString(created.updatedAt),
+    });
   } catch (error) {
     res.status(500).json({ error: "Internal server error" });
   }
@@ -108,7 +113,11 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
     }).where(and(eq(funds.id, req.params.id), eq(funds.companyId, companyId))).returning();
 
     if (!updated) return res.status(404).json({ error: "Not found" });
-    res.json({ ...updated, createdAt: updated.createdAt.toISOString(), updatedAt: updated.updatedAt.toISOString() });
+    res.json({
+      ...updated,
+      createdAt: toIsoString(updated.createdAt),
+      updatedAt: toIsoString(updated.updatedAt),
+    });
   } catch (error) {
     res.status(500).json({ error: "Internal server error" });
   }

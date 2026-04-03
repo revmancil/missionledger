@@ -58,10 +58,21 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
 
   // Enforce company-level guards on every request
   if (user.companyId && !user.isPlatformAdmin) {
-    const { rows } = await pool.query(
-      `SELECT is_active, subscription_status, created_at, is_comped FROM companies WHERE id = $1 LIMIT 1`,
-      [user.companyId]
-    );
+    let rows: Record<string, unknown>[];
+    try {
+      const result = await pool.query(
+        `SELECT is_active, subscription_status, created_at, is_comped FROM companies WHERE id = $1 LIMIT 1`,
+        [user.companyId],
+      );
+      rows = result.rows as Record<string, unknown>[];
+    } catch (e) {
+      console.error("requireAuth: company lookup failed:", e);
+      res.status(503).json({
+        error: "SERVICE_UNAVAILABLE",
+        message: "Could not verify your organization. Try again in a moment.",
+      });
+      return;
+    }
     const company = rows[0];
 
     if (company) {

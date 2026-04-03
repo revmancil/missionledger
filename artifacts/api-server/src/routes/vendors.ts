@@ -2,6 +2,7 @@ import { Router } from "express";
 import { db, vendors } from "@workspace/db";
 import { eq, and, desc } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
+import { toIsoString } from "../lib/safeIso";
 
 const router = Router();
 
@@ -9,7 +10,13 @@ router.get("/", requireAuth, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
     const all = await db.select().from(vendors).where(eq(vendors.companyId, companyId)).orderBy(vendors.name);
-    res.json(all.map(v => ({ ...v, createdAt: v.createdAt.toISOString(), updatedAt: v.updatedAt.toISOString() })));
+    res.json(
+      all.map((v) => ({
+        ...v,
+        createdAt: toIsoString(v.createdAt),
+        updatedAt: toIsoString(v.updatedAt),
+      })),
+    );
   } catch (error) {
     res.status(500).json({ error: "Internal server error" });
   }
@@ -31,7 +38,11 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
       isActive: isActive !== false,
     }).returning();
 
-    res.status(201).json({ ...created, createdAt: created.createdAt.toISOString(), updatedAt: created.updatedAt.toISOString() });
+    res.status(201).json({
+      ...created,
+      createdAt: toIsoString(created.createdAt),
+      updatedAt: toIsoString(created.updatedAt),
+    });
   } catch (error) {
     res.status(500).json({ error: "Internal server error" });
   }
@@ -53,7 +64,11 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
     }).where(and(eq(vendors.id, req.params.id), eq(vendors.companyId, companyId))).returning();
 
     if (!updated) return res.status(404).json({ error: "Not found" });
-    res.json({ ...updated, createdAt: updated.createdAt.toISOString(), updatedAt: updated.updatedAt.toISOString() });
+    res.json({
+      ...updated,
+      createdAt: toIsoString(updated.createdAt),
+      updatedAt: toIsoString(updated.updatedAt),
+    });
   } catch (error) {
     res.status(500).json({ error: "Internal server error" });
   }

@@ -41,6 +41,16 @@ function apiFetch(path: string, init?: RequestInit) {
   });
 }
 
+function summarizeErrorBody(body: unknown, status: number): string {
+  const o = body as Record<string, unknown> | null | undefined;
+  const detail =
+    (typeof o?.detail === "string" && o.detail.trim()) ||
+    (typeof o?.message === "string" && o.message.trim()) ||
+    (typeof o?.error === "string" && o.error.trim()) ||
+    "";
+  return detail ? `${detail} (${status})` : `HTTP ${status}`;
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface BankAccount { id: string; name: string; accountNumber: string; currentBalance: number; isPlaidLinked?: boolean; plaidInstitutionName?: string; }
 interface ChartAccount { id: string; code: string; name: string; type: string; }
@@ -518,8 +528,10 @@ export default function BankRegisterPage() {
   const [syncing, setSyncing] = useState(false);
   const [importCsvOpen, setImportCsvOpen] = useState(false);
   const [importBankId, setImportBankId] = useState("");
+  const [importKind, setImportKind] = useState<"csv" | "pdf">("csv");
   const [importingCsv, setImportingCsv] = useState(false);
   const csvFileRef = useRef<HTMLInputElement>(null);
+  const pdfFileRef = useRef<HTMLInputElement>(null);
   const [showAddVendor, setShowAddVendor] = useState(false);
   const [showAddAccount, setShowAddAccount] = useState(false);
   const [formError, setFormError] = useState("");
@@ -537,10 +549,36 @@ export default function BankRegisterPage() {
         apiFetch("/api/vendors"),
         apiFetch("/api/transactions"),
       ]);
+
+      const loadFailures: string[] = [];
+
       if (banksR.ok) setBankAccounts(await banksR.json());
+      else {
+        const body = await readJsonSafe(banksR);
+        logApiFailure("/api/bank-accounts", banksR, body);
+        loadFailures.push(`Bank accounts: ${summarizeErrorBody(body, banksR.status)}`);
+      }
       if (coaR.ok) setCoaList(await coaR.json());
-      if (fundsR.ok) { const d = await fundsR.json(); setFundList(Array.isArray(d) ? d : (d.data ?? [])); }
+      else {
+        const body = await readJsonSafe(coaR);
+        logApiFailure("/api/chart-of-accounts", coaR, body);
+        loadFailures.push(`Chart of accounts: ${summarizeErrorBody(body, coaR.status)}`);
+      }
+      if (fundsR.ok) {
+        const d = await fundsR.json();
+        setFundList(Array.isArray(d) ? d : (d.data ?? []));
+      } else {
+        const body = await readJsonSafe(fundsR);
+        logApiFailure("/api/funds", fundsR, body);
+        loadFailures.push(`Funds: ${summarizeErrorBody(body, fundsR.status)}`);
+      }
       if (vendorsR.ok) setVendorList(await vendorsR.json());
+      else {
+        const body = await readJsonSafe(vendorsR);
+        logApiFailure("/api/vendors", vendorsR, body);
+        loadFailures.push(`Vendors: ${summarizeErrorBody(body, vendorsR.status)}`);
+      }
+
       if (txR.ok) {
         const txData = await txR.json();
         if (Array.isArray(txData)) {
@@ -557,6 +595,7 @@ export default function BankRegisterPage() {
           (typeof o?.message === "string" && o.message.trim()) ||
           (typeof o?.error === "string" && o.error.trim()) ||
           "";
+        loadFailures.push(`Transactions: ${summarizeErrorBody(errBody, txR.status)}`);
         if (txR.status === 402 || o?.error === "SUBSCRIPTION_REQUIRED") {
           toast.error(fromApi || "Subscription required", {
             description: "Open Billing to renew or start a subscription.",
@@ -566,10 +605,22 @@ export default function BankRegisterPage() {
         } else if (txR.status === 403) {
           toast.error(fromApi || "You don’t have access to load transactions.");
         } else {
+          const dbg =
+            typeof o?.detail === "string" && String(o.detail).trim()
+              ? String(o.detail).trim()
+              : undefined;
           toast.error(
-            fromApi || `Could not load bank register (${txR.status}). Try Refresh or check your connection.`,
+            fromApi || `Could not load transactions (${txR.status}). Try Refresh or check your connection.`,
+            dbg ? { description: dbg } : undefined,
           );
         }
+      }
+
+      const hasNonTxFailure = loadFailures.some((f) => !f.startsWith("Transactions:"));
+      if (loadFailures.length > 0 && (hasNonTxFailure || loadFailures.length > 1)) {
+        const summary = loadFailures.slice(0, 2).join(" · ");
+        const extra = loadFailures.length > 2 ? ` (+${loadFailures.length - 2} more)` : "";
+        toast.message("Some data failed to load", { description: `${summary}${extra}` });
       }
     } catch (e) {
       console.error("Bank register loadAll:", e);
@@ -823,42 +874,84 @@ export default function BankRegisterPage() {
     }
   }
 
-  async function handleImportCsv() {
-    const file = csvFileRef.current?.files?.[0];
-    if (!file) {
-      toast.error("Choose a CSV file exported from your bank.");
-      return;
-    }
+  async function handleImportStatement() {
     if (!importBankId) {
       toast.error("Select the bank account these transactions belong to.");
       return;
     }
+    const token = localStorage.getItem("ml_token");
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    };
+
     setImportingCsv(true);
     try {
-      const csvText = await file.text();
-      const token = localStorage.getItem("ml_token");
-      const res = await fetch(apiUrl("/api/transactions/import-statement"), {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({ bankAccountId: importBankId, csvText }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json.error || "Import failed");
-      const parts = [`Imported ${json.imported} transaction(s).`];
-      if (json.skippedDuplicates) parts.push(`Skipped ${json.skippedDuplicates} duplicate(s).`);
-      if (json.skippedLockedPeriod) parts.push(`${json.skippedLockedPeriod} in locked period.`);
-      toast.success(parts.join(" "));
-      if (json.parseErrors?.length) {
-        toast.message("Row warnings", {
-          description: json.parseErrors.slice(0, 6).join(" · "),
+      if (importKind === "csv") {
+        const file = csvFileRef.current?.files?.[0];
+        if (!file) {
+          toast.error("Choose a CSV file exported from your bank.");
+          return;
+        }
+        const csvText = await file.text();
+        const res = await fetch(apiUrl("/api/transactions/import-statement"), {
+          method: "POST",
+          credentials: "include",
+          headers,
+          body: JSON.stringify({ bankAccountId: importBankId, csvText }),
         });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(json.error || "Import failed");
+        const parts = [`Imported ${json.imported} transaction(s).`];
+        if (json.skippedDuplicates) parts.push(`Skipped ${json.skippedDuplicates} duplicate(s).`);
+        if (json.skippedLockedPeriod) parts.push(`${json.skippedLockedPeriod} in locked period.`);
+        toast.success(parts.join(" "));
+        if (json.parseErrors?.length) {
+          toast.message("Row warnings", {
+            description: json.parseErrors.slice(0, 6).join(" · "),
+          });
+        }
+        if (csvFileRef.current) csvFileRef.current.value = "";
+      } else {
+        const file = pdfFileRef.current?.files?.[0];
+        if (!file) {
+          toast.error("Choose a PDF statement from your bank (text-based PDF, not a photo scan).");
+          return;
+        }
+        if (file.type && file.type !== "application/pdf") {
+          toast.error("Please select a PDF file.");
+          return;
+        }
+        const buf = await file.arrayBuffer();
+        let pdfBase64 = "";
+        const bytes = new Uint8Array(buf);
+        let binary = "";
+        const step = 8192;
+        for (let i = 0; i < bytes.length; i += step) {
+          binary += String.fromCharCode.apply(null, bytes.subarray(i, i + step) as unknown as number[]);
+        }
+        pdfBase64 = btoa(binary);
+        const res = await fetch(apiUrl("/api/transactions/import-statement-pdf"), {
+          method: "POST",
+          credentials: "include",
+          headers,
+          body: JSON.stringify({ bankAccountId: importBankId, pdfBase64 }),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(json.error || "PDF import failed");
+        const parts = [`Imported ${json.imported} transaction(s) from PDF.`];
+        if (json.skippedDuplicates) parts.push(`Skipped ${json.skippedDuplicates} duplicate(s).`);
+        if (json.skippedLockedPeriod) parts.push(`${json.skippedLockedPeriod} in locked period.`);
+        toast.success(parts.join(" "));
+        if (json.parseErrors?.length) {
+          toast.message("Parse notes", {
+            description: json.parseErrors.slice(0, 6).join(" · "),
+          });
+        }
+        if (pdfFileRef.current) pdfFileRef.current.value = "";
       }
       setImportCsvOpen(false);
-      if (csvFileRef.current) csvFileRef.current.value = "";
+      setImportKind("csv");
       await loadAll();
       globalRefetch();
     } catch (err: any) {
@@ -874,6 +967,7 @@ export default function BankRegisterPage() {
       return;
     }
     setImportBankId(selectedBank !== "ALL" ? selectedBank : bankAccounts[0]!.id);
+    setImportKind("csv");
     setImportCsvOpen(true);
   }
 
@@ -946,7 +1040,7 @@ export default function BankRegisterPage() {
                 title="Upload a bank CSV export"
               >
                 <Upload className="h-3 w-3 mr-1" />
-                Import CSV
+                Import
               </Button>
               {selectedBank !== "ALL" && selectedBankObj?.isPlaidLinked && (
                 <Button
@@ -1784,13 +1878,41 @@ export default function BankRegisterPage() {
       <Dialog open={importCsvOpen} onOpenChange={setImportCsvOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Import bank CSV</DialogTitle>
+            <DialogTitle>Import bank statement</DialogTitle>
           </DialogHeader>
-          <p className="text-xs text-muted-foreground leading-relaxed">
-            Export transactions as CSV from your bank’s website. We look for <strong>Date</strong>,{" "}
-            <strong>Amount</strong> (or separate Debit/Credit columns), and a description column.{" "}
-            Negative amounts are treated as payments; positive as deposits. PDF statements are not supported—use CSV.
-          </p>
+          <div className="flex rounded-lg border border-input p-0.5 gap-0.5 bg-muted/40">
+            <button
+              type="button"
+              className={cn(
+                "flex-1 text-xs font-medium py-1.5 rounded-md transition-colors",
+                importKind === "csv" ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground",
+              )}
+              onClick={() => setImportKind("csv")}
+            >
+              CSV export
+            </button>
+            <button
+              type="button"
+              className={cn(
+                "flex-1 text-xs font-medium py-1.5 rounded-md transition-colors",
+                importKind === "pdf" ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground",
+              )}
+              onClick={() => setImportKind("pdf")}
+            >
+              PDF (text)
+            </button>
+          </div>
+          {importKind === "csv" ? (
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Use your bank’s <strong>Download CSV</strong> option. We detect <strong>Date</strong>,{" "}
+              <strong>Amount</strong> (or Debit/Credit columns), and description. Negative amounts = payments; positive = deposits.
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Upload a PDF that has <strong>selectable text</strong> (not a scan/photo). We parse lines that look like{" "}
+              <strong>date + description + amount</strong>. If nothing imports, use CSV instead — it’s more reliable.
+            </p>
+          )}
           <div className="space-y-2">
             <Label className="text-xs">Bank account</Label>
             <Select value={importBankId} onValueChange={setImportBankId}>
@@ -1806,17 +1928,24 @@ export default function BankRegisterPage() {
               </SelectContent>
             </Select>
           </div>
-          <div className="space-y-2">
-            <Label className="text-xs">CSV file</Label>
-            <Input ref={csvFileRef} type="file" accept=".csv,text/csv" className="h-9 text-sm cursor-pointer" />
-          </div>
+          {importKind === "csv" ? (
+            <div className="space-y-2">
+              <Label className="text-xs">CSV file</Label>
+              <Input ref={csvFileRef} type="file" accept=".csv,text/csv" className="h-9 text-sm cursor-pointer" />
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <Label className="text-xs">PDF file</Label>
+              <Input ref={pdfFileRef} type="file" accept="application/pdf,.pdf" className="h-9 text-sm cursor-pointer" />
+            </div>
+          )}
           <DialogFooter className="gap-2 sm:gap-0">
             <Button variant="outline" onClick={() => setImportCsvOpen(false)} disabled={importingCsv}>
               Cancel
             </Button>
             <Button
               className="bg-[hsl(210,60%,25%)] hover:bg-[hsl(210,60%,20%)] text-white"
-              onClick={handleImportCsv}
+              onClick={handleImportStatement}
               disabled={importingCsv}
             >
               {importingCsv ? "Importing…" : "Import"}

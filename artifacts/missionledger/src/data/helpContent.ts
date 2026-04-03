@@ -210,8 +210,8 @@ export const faqItems: FaqItem[] = [
     id: "import-bank-csv",
     question: "How do I import transactions from a bank statement?",
     answer:
-      "On the Bank Register, click Import CSV. Download a transaction export as CSV from your bank’s website (not PDF). Choose which MissionLedger bank account the file belongs to, then upload. We match common column names for date, amount (or debit/credit), and description. Rows that match an existing transaction (same date, amount, and payee) are skipped. You need admin permission to import.",
-    tags: ["import", "csv", "bank statement", "upload", "bank register", "transactions"],
+      "On the Bank Register, click Import. Choose CSV (recommended: your bank’s transaction export) or PDF (only if the PDF has selectable text — scanned statements won’t work). Pick the MissionLedger bank account the file belongs to, then upload. We match date, amount, and description; duplicates are skipped. CSV is more reliable than PDF because every bank formats PDFs differently. You need admin permission to import.",
+    tags: ["import", "csv", "pdf", "bank statement", "upload", "bank register", "transactions"],
   },
   {
     id: "chart-of-accounts",
