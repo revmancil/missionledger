@@ -1,8 +1,9 @@
 import { Router } from "express";
 import { db, chartOfAccounts } from "@workspace/db";
-import { eq, asc, sql } from "drizzle-orm";
+import { eq, asc, sql, and } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
 import { toIsoString } from "../lib/safeIso";
+import { sqlRows } from "../lib/sqlRows";
 
 const router = Router();
 
@@ -168,7 +169,6 @@ export async function seedChartOfAccounts(companyId: string): Promise<void> {
 }
 
 // GET /chart-of-accounts
-// AFTER
 router.get("/", requireAuth, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
@@ -383,6 +383,78 @@ router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
 
     res.json({ success: true });
   } catch (error) {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.get("/:id/ledger", requireAuth, async (req, res) => {
+  try {
+    const { companyId } = (req as any).user;
+    const accountId = req.params.id;
+
+    const [account] = await db
+      .select()
+      .from(chartOfAccounts)
+      .where(and(eq(chartOfAccounts.id, accountId), eq(chartOfAccounts.companyId, companyId)));
+    if (!account) return res.status(404).json({ error: "Account not found" });
+
+    const rows = await db.execute(sql`
+      SELECT
+        ge.id,
+        ge.date,
+        ge.entry_type,
+        ge.amount,
+        ge.description,
+        ge.source_type,
+        ge.fund_name,
+        ge.is_void,
+        je.entry_number   AS journal_entry_number,
+        je.reference_number AS reference_number
+      FROM gl_entries ge
+      LEFT JOIN journal_entries je ON ge.journal_entry_id = je.id
+      WHERE ge.account_id = ${accountId}
+        AND ge.company_id = ${companyId}
+        AND (ge.is_void IS NULL OR ge.is_void = false)
+      ORDER BY ge.date ASC, ge.created_at ASC
+    `);
+
+    const debitNormal = ["ASSET", "EXPENSE"].includes(account.type);
+
+    let runningBalance = 0;
+    const entries = sqlRows(rows).map((r) => {
+      const amount = Number(r.amount ?? 0);
+      const isDebit = String(r.entry_type).toUpperCase() === "DEBIT";
+      if (debitNormal) {
+        runningBalance += isDebit ? amount : -amount;
+      } else {
+        runningBalance += isDebit ? -amount : amount;
+      }
+      const d = r.date;
+      const dateIso =
+        d instanceof Date ? d.toISOString() : d != null ? String(d) : null;
+      return {
+        id: r.id,
+        date: dateIso,
+        description: r.description,
+        sourceType: r.source_type,
+        reference: r.journal_entry_number || r.reference_number || null,
+        fundName: r.fund_name,
+        debit: isDebit ? amount : null,
+        credit: !isDebit ? amount : null,
+        runningBalance,
+      };
+    });
+
+    res.json({
+      account: {
+        ...account,
+        createdAt: toIsoString(account.createdAt),
+        updatedAt: toIsoString(account.updatedAt),
+      },
+      entries,
+    });
+  } catch (error) {
+    console.error("Ledger error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });

@@ -23,6 +23,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { useLocation } from "wouter";
 
 const COA_TYPES = ["ASSET", "LIABILITY", "EQUITY", "INCOME", "EXPENSE"] as const;
 
@@ -142,7 +143,12 @@ function AccountTreeRows({
               </TableCell>
               <TableCell className="align-middle">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium">{acct.name}</span>
+                  <span
+                    className="font-medium cursor-pointer hover:underline hover:text-primary"
+                    onClick={() => setLocation(`/accounts/${acct.id}/ledger`)}
+                  >
+                    {acct.name}
+                  </span>
                   {acct.isSystem && (
                     <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
                       System

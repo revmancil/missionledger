@@ -14,6 +14,7 @@ import RegisterPage from "@/pages/auth/register";
 import DashboardPage from "@/pages/dashboard";
 import FundsPage from "@/pages/funds";
 import AccountsPage from "@/pages/accounts";
+import AccountLedgerPage from "@/pages/account-ledger";
 import VendorsPage from "@/pages/vendors";
 import PledgesPage from "@/pages/pledges";
 import BankAccountsPage from "@/pages/bank-accounts";
@@ -109,6 +110,7 @@ function Router() {
 
       <Route path="/dashboard"><SubscriptionGatedRoute component={DashboardPage} /></Route>
       <Route path="/funds"><SubscriptionGatedRoute component={FundsPage} /></Route>
+      <Route path="/accounts/:id/ledger"><SubscriptionGatedRoute component={AccountLedgerPage} /></Route>
       <Route path="/accounts"><SubscriptionGatedRoute component={AccountsPage} /></Route>
       <Route path="/vendors"><SubscriptionGatedRoute component={VendorsPage} /></Route>
       <Route path="/pledges"><SubscriptionGatedRoute component={PledgesPage} /></Route>
