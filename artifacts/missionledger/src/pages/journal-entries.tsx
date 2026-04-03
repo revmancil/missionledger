@@ -143,7 +143,7 @@ export default function JournalEntriesPage() {
     if (!canPost) return;
     setPosting(true);
     try {
-      const createRes = await api(`${BASE}api/journal-entries`, {
+      const createRes = await api(`/api/journal-entries`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -168,7 +168,7 @@ export default function JournalEntriesPage() {
 
       const draft = await createRes.json();
 
-      const postRes = await api(`${BASE}api/journal-entries/${draft.id}/post`, {
+      const postRes = await api(`/api/journal-entries/${draft.id}/post`, {
         method: "POST",
       });
 
@@ -190,7 +190,7 @@ export default function JournalEntriesPage() {
   const loadHistory = async () => {
     setLoadingHistory(true);
     try {
-      const res = await api(`${BASE}api/journal-entries`);
+      const res = await api(`/api/journal-entries`);
       if (res.ok) {
         const data = await res.json();
         const list = Array.isArray(data) ? data : [];
