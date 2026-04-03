@@ -121,6 +121,8 @@ function AccountTreeRows({
   onEdit: (a: ChartCoaAccount) => void;
   onDelete: (a: ChartCoaAccount) => void;
 }) {
+  const [, setLocation] = useLocation();
+
   return (
     <>
       {nodes.map((acct) => {
