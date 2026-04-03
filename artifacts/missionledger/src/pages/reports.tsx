@@ -884,6 +884,9 @@ export default function ReportsPage() {
                   <CardHeader className="pb-2">
                     <CardTitle className="text-base">Statement of Activities</CardTitle>
                     <p className="text-xs text-muted-foreground">{formatDate(profitLoss?.startDate ?? "")} – {formatDate(profitLoss?.endDate ?? "")}</p>
+                    <p className="text-[11px] text-muted-foreground/90 leading-snug mt-1.5">
+                      Revenue and expenses only for the dates above. Opening balances post to balance sheet accounts (assets, liabilities, equity), not to this activity view — widen the range to include months where you have income or expense, and use the balance sheet as-of date on the right for starting net position.
+                    </p>
                   </CardHeader>
                   <CardContent className="space-y-4">
                     {/* Revenue */}
@@ -933,6 +936,9 @@ export default function ReportsPage() {
                       <div>
                         <CardTitle className="text-base">Statement of Financial Position</CardTitle>
                         <p className="text-xs text-muted-foreground mt-0.5">As of {formatDate(bsQueryDate)}</p>
+                        <p className="text-[11px] text-muted-foreground/90 leading-snug mt-1">
+                          Includes general ledger through this date. Set as-of on or after your opening balance date if totals look too low.
+                        </p>
                       </div>
                       <div className="flex items-center gap-2">
                         <Input

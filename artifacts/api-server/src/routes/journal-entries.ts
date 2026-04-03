@@ -51,7 +51,11 @@ async function enrichEntry(entry: any, companyId: string) {
 router.get("/", requireAuth, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
-    const all = await db.select().from(journalEntries).where(eq(journalEntries.companyId, companyId)).orderBy(desc(journalEntries.date));
+    const all = await db
+      .select()
+      .from(journalEntries)
+      .where(eq(journalEntries.companyId, companyId))
+      .orderBy(desc(journalEntries.date), desc(journalEntries.createdAt));
     const enriched = await Promise.all(all.map(e => enrichEntry(e, companyId)));
     res.json(enriched);
   } catch (error) {

@@ -114,6 +114,10 @@ export async function generateGlEntries(
   // 3. Voided transactions get no GL entries
   if (tx.isVoid) return;
 
+  // 3b. Lines tied to a posted journal entry (e.g. Opening Balance register rows): GL lives on the JE only.
+  // Generating TRANSACTION GL here would duplicate or distort the ledger (e.g. trial-balance /sync).
+  if (tx.journalEntryId) return;
+
   // 4. Resolve fund name (denormalised onto entries)
   let txFundName: string | null = null;
   if (tx.fundId) {

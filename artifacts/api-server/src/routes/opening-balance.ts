@@ -4,6 +4,7 @@ import { eq, and, asc, desc, inArray, sql } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
 import { parseYmdToUtcNoon, utcYmdToday } from "../lib/safeIso";
 import { firstSqlRow, sqlRows } from "../lib/sqlRows";
+import { voidGlEntries } from "../lib/gl";
 
 function moneyToCents(n: number): number {
   return Math.round(Number(n) * 100 + Number.EPSILON);
@@ -219,9 +220,40 @@ router.post("/finalize", requireAuth, requireAdmin, async (req, res) => {
       if (!["DEBIT", "CREDIT"].includes(r.entryType)) return res.status(400).json({ error: "Invalid entry type on one or more rows." });
     }
 
+    const allCoaForResolve = await db
+      .select()
+      .from(chartOfAccounts)
+      .where(eq(chartOfAccounts.companyId, companyId));
+    const coaCanonByNorm = new Map<string, string>();
+    for (const a of allCoaForResolve) {
+      const k = normCoaKey(a.id);
+      if (k) coaCanonByNorm.set(k, a.id);
+    }
+    const allFundsForResolve = await db.select().from(funds).where(eq(funds.companyId, companyId));
+    const fundCanonByNorm = new Map<string, string>();
+    for (const f of allFundsForResolve) {
+      const k = normCoaKey(f.id);
+      if (k) fundCanonByNorm.set(k, f.id);
+    }
+
+    const rowsToPost: typeof activeRows = [];
+    for (const r of activeRows) {
+      const ak = normCoaKey(r.accountId);
+      const fk = normCoaKey(r.fundId);
+      const canonA = ak ? coaCanonByNorm.get(ak) : undefined;
+      const canonF = fk ? fundCanonByNorm.get(fk) : undefined;
+      if (!canonA) {
+        return res.status(400).json({ error: `Unknown chart of accounts id: ${String(r.accountId)}` });
+      }
+      if (!canonF) {
+        return res.status(400).json({ error: `Unknown fund id: ${String(r.fundId)}` });
+      }
+      rowsToPost.push({ ...r, accountId: canonA, fundId: canonF });
+    }
+
     let debitCents = 0;
     let creditCents = 0;
-    for (const r of activeRows) {
+    for (const r of rowsToPost) {
       const c = moneyToCents(Number(r.amount));
       if (r.entryType === "DEBIT") debitCents += c;
       else creditCents += c;
@@ -236,23 +268,24 @@ router.post("/finalize", requireAuth, requireAdmin, async (req, res) => {
       });
     }
 
-    // Fetch account metadata for denormalization
-    const accountIds = [...new Set(activeRows.map((r: any) => String(r.accountId ?? "").trim()).filter(Boolean))];
+    // Fetch account metadata for denormalization (canonical ids from rowsToPost)
+    const accountIds = [...new Set(rowsToPost.map((r: any) => String(r.accountId ?? "").trim()).filter(Boolean))];
     const accountIdNormSet = new Set(
-      activeRows.map((r: any) => normCoaKey(r.accountId)).filter((x): x is string => x != null),
+      rowsToPost.map((r: any) => normCoaKey(r.accountId)).filter((x): x is string => x != null),
     );
 
-    const allActiveBanks = await db
+    const allCompanyBanks = await db
       .select()
       .from(bankAccounts)
-      .where(and(eq(bankAccounts.companyId, companyId), eq(bankAccounts.isActive, true)));
-    const linkedBanks = allActiveBanks.filter((ba) => {
+      .where(eq(bankAccounts.companyId, companyId));
+    const linkedBanks = allCompanyBanks.filter((ba) => {
       const g = normCoaKey(ba.glAccountId);
       return g != null && accountIdNormSet.has(g);
     });
-    const banksNotInEntry = allActiveBanks.filter((ba) => {
+    const banksNotInEntry = allCompanyBanks.filter((ba) => {
       const g = normCoaKey(ba.glAccountId);
-      return g != null && !accountIdNormSet.has(g);
+      if (g == null || accountIdNormSet.has(g)) return false;
+      return ba.isActive || ba.isPlaidLinked;
     });
 
     const accountsInEntry = accountIds.length
@@ -261,7 +294,7 @@ router.post("/finalize", requireAuth, requireAdmin, async (req, res) => {
     const acctMap = Object.fromEntries(accountsInEntry.map((a) => [a.id, a]));
 
     // Fetch fund metadata for denormalization
-    const fundIds = [...new Set(activeRows.map((r: any) => r.fundId as string))];
+    const fundIds = [...new Set(rowsToPost.map((r: any) => r.fundId as string))];
     const fundsInEntry = fundIds.length
       ? await db.select().from(funds).where(inArray(funds.id, fundIds))
       : [];
@@ -330,7 +363,7 @@ router.post("/finalize", requireAuth, requireAdmin, async (req, res) => {
     }
 
     // Insert JE lines and GL entries
-    for (const row of activeRows) {
+    for (const row of rowsToPost) {
       const acct = acctMap[row.accountId];
       const fund = fundMap[row.fundId];
       const amt = Number(row.amount);
@@ -381,16 +414,22 @@ router.post("/finalize", requireAuth, requireAdmin, async (req, res) => {
     }
 
     // ── Bug 2: Create / refresh bank-register transactions for OB entry ────────
-    // Void any transactions from a previous OB posting
+    // Void any transactions from a previous OB posting, and void their TRANSACTION GL
+    // (trial-balance sync may have posted duplicate GL; those rows are keyed by transaction_id only).
     if (company.openingBalanceEntryId) {
+      const oldJeIdForTx = company.openingBalanceEntryId;
+      const priorObTxs = await db
+        .select({ id: transactions.id })
+        .from(transactions)
+        .where(and(eq(transactions.companyId, companyId), eq(transactions.journalEntryId as any, oldJeIdForTx)));
+      for (const t of priorObTxs) {
+        await voidGlEntries(t.id, companyId);
+      }
       await db
         .update(transactions)
         .set({ isVoid: true, status: "VOID", updatedAt: new Date() })
         .where(
-          and(
-            eq(transactions.companyId, companyId),
-            eq(transactions.journalEntryId as any, company.openingBalanceEntryId)
-          )
+          and(eq(transactions.companyId, companyId), eq(transactions.journalEntryId as any, oldJeIdForTx)),
         );
     }
 
@@ -401,7 +440,7 @@ router.post("/finalize", requireAuth, requireAdmin, async (req, res) => {
       if (g) glToBankId[g] = ba.id;
     }
 
-    for (const row of activeRows) {
+    for (const row of rowsToPost) {
       const bankAccountId = glToBankId[normCoaKey(row.accountId) ?? ""];
       if (!bankAccountId) continue; // only create transactions for bank account rows
       // DR to asset account = DEPOSIT in the register (CREDIT type)
@@ -441,7 +480,7 @@ router.post("/finalize", requireAuth, requireAdmin, async (req, res) => {
       entryNumber: je.entryNumber,
       totalDebits,
       totalCredits,
-      lineCount: activeRows.length,
+      lineCount: rowsToPost.length,
       date: asOf.toISOString(),
       accountingMethod: accountingMethod ?? "CASH",
       ...(banksNotInEntry.length
