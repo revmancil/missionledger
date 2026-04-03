@@ -14,8 +14,15 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { cn } from "@/lib/utils";
 
 async function apiFetch(path: string, opts?: RequestInit): Promise<Response> {
-  const res = await fetch(path, { credentials: "include", ...opts });
-  if (res.status === 401) window.location.href = `${import.meta.env.BASE_URL}login`;
+  const token = localStorage.getItem("ml_token");
+  const res = await fetch(path, {
+    credentials: "include",
+    ...opts,
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(opts?.headers ?? {}),
+    },
+  });
   return res;
 }
 
