@@ -13,10 +13,23 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { apiUrl } from "@/lib/api-base";
 
 const BASE = import.meta.env.BASE_URL;
-const api  = (url: string, init?: RequestInit) =>
-  fetch(url, { credentials: "include", ...init });
+
+/** Same-origin or `VITE_API_BASE_URL`, with bearer token — matches Bank Register / Funds API calls. */
+function api(path: string, init?: RequestInit): Promise<Response> {
+  const token = typeof window !== "undefined" ? localStorage.getItem("ml_token") : null;
+  const url = path.startsWith("http") ? path : apiUrl(path.startsWith("/") ? path : `/${path}`);
+  return fetch(url, {
+    credentials: "include",
+    ...init,
+    headers: {
+      ...(init?.headers as Record<string, string>),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type Method    = "CASH" | "ACCRUAL";
@@ -368,7 +381,7 @@ function AddAccountModal({
     if (!name.trim()) { setError("Account name is required."); return; }
     setSaving(true);
     try {
-      const res = await api(`${BASE}api/chart-of-accounts`, {
+      const res = await api("/api/chart-of-accounts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code: code.trim(), name: name.trim(), type, sortOrder: parseInt(code.trim()) || 0 }),
@@ -606,6 +619,7 @@ export default function OpeningBalancePage() {
   const [loading, setLoading]   = useState(true);
   const [saving, setSaving]     = useState(false);
   const [error, setError]       = useState("");
+  const [loadError, setLoadError] = useState("");
   const [phase, setPhase]       = useState<"wizard" | "done">("wizard");
   const [method, setMethod]     = useState<Method>("CASH");
   const [asOfDate, setAsOfDate] = useState(format(new Date(), "yyyy-MM-dd"));
@@ -633,10 +647,19 @@ export default function OpeningBalancePage() {
   // ── Load ─────────────────────────────────────────────────────────────────────
   const load = useCallback(async () => {
     setLoading(true);
+    setError("");
+    setLoadError("");
     try {
-      const res = await api(`${BASE}api/opening-balance`);
-      if (!res.ok) return;
-      const data = await res.json();
+      const res = await api("/api/opening-balance");
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setLoadError(
+          typeof (data as { error?: string }).error === "string"
+            ? (data as { error: string }).error
+            : `Could not load opening balance (${res.status}). Check API URL (VITE_API_BASE_URL) and sign-in.`,
+        );
+        return;
+      }
 
       setMethod(data.accountingMethod ?? "CASH");
       setAllCoa(data.coa ?? []);
@@ -709,7 +732,7 @@ export default function OpeningBalancePage() {
   // ── Method change ─────────────────────────────────────────────────────────────
   async function handleMethodChange(m: Method) {
     setMethod(m);
-    await api(`${BASE}api/opening-balance/method`, {
+    await api("/api/opening-balance/method", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ accountingMethod: m }),
@@ -847,7 +870,7 @@ export default function OpeningBalancePage() {
   async function handleFinalize() {
     setSaving(true); setError("");
     try {
-      const res = await api(`${BASE}api/opening-balance/finalize`, {
+      const res = await api("/api/opening-balance/finalize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ date: asOfDate, accountingMethod: method, rows: finalSubmitRows }),
@@ -864,7 +887,7 @@ export default function OpeningBalancePage() {
   async function handleSync() {
     setSyncing(true); setSyncResult(null);
     try {
-      const res = await api(`${BASE}api/opening-balance/sync`, { method: "POST" });
+      const res = await api("/api/opening-balance/sync", { method: "POST" });
       const data = await res.json();
       if (!res.ok) { setSyncResult(`Error: ${data.error ?? "Sync failed"}`); return; }
       const updated = data.bankBalancesUpdated?.length ?? 0;
@@ -1010,6 +1033,18 @@ export default function OpeningBalancePage() {
             <MethodToggle value={method} onChange={handleMethodChange} />
           </div>
         </div>
+
+        {loadError && (
+          <div className="flex flex-col gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+              <span>{loadError}</span>
+            </div>
+            <Button type="button" variant="outline" size="sm" className="w-fit border-red-300" onClick={() => load()}>
+              Retry
+            </Button>
+          </div>
+        )}
 
         {/* Date + existing-entry banner */}
         <div className="flex flex-wrap items-end gap-4">

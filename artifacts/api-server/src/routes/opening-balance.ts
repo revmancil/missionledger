@@ -95,10 +95,11 @@ router.get("/", requireAuth, async (req, res) => {
       return bankInfo ? { ...a, isLinkedBankAccount: true, linkedBankName: bankInfo.bankName, isPlaidLinked: bankInfo.isPlaid } : a;
     });
 
+    // Same scope as GET /funds — all company funds (not only is_active), so Opening Balance matches the Funds page.
     const activeFunds = await db
       .select()
       .from(funds)
-      .where(and(eq(funds.companyId, companyId), eq(funds.isActive, true)))
+      .where(eq(funds.companyId, companyId))
       .orderBy(asc(funds.name));
 
     // Reconstruct rows from existing JE (all lines, explicit DR/CR)
