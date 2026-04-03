@@ -155,6 +155,11 @@ function AccountTreeRows({
                   )}
                 </div>
               </TableCell>
+              <TableCell className="text-right font-mono text-sm">
+                {acct.balance != null
+                  ? new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(acct.balance))
+                  : "—"}
+              </TableCell>
               <TableCell className="text-right align-middle whitespace-nowrap">
                 <Button
                   type="button"
@@ -279,6 +284,7 @@ export default function AccountsPage() {
                       <TableRow>
                         <TableHead className="w-[140px]">Code</TableHead>
                         <TableHead>Name</TableHead>
+                        <TableHead className="text-right w-36">GL Balance</TableHead>
                         <TableHead className="w-[120px] text-right">Actions</TableHead>
                       </TableRow>
                     </TableHeader>

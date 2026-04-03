@@ -16,6 +16,8 @@ export interface ChartCoaAccount {
   sortOrder: number;
   createdAt: string;
   updatedAt: string;
+  /** GL balance when returned by GET /chart-of-accounts */
+  balance?: number | null;
 }
 
 function coaAuthHeaders(): HeadersInit {
