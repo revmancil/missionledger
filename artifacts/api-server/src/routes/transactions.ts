@@ -17,6 +17,7 @@ import { parseTransactionsFromPdfText } from "../lib/statementPdf";
 import { toIsoStringOrNull, asDate } from "../lib/safeIso";
 import { stringifyJsonForApi } from "../lib/jsonSafe";
 import { listTransactionRowsForCompany, loadSplitRowsByTransactionIds } from "../lib/transactionList";
+import { firstSqlRow } from "../lib/sqlRows";
 
 /** Recompute a bank account's currentBalance from all its non-void transactions. */
 async function recomputeBankBalance(bankAccountId: string | null | undefined, companyId: string): Promise<void> {
@@ -29,7 +30,7 @@ async function recomputeBankBalance(bankAccountId: string | null | undefined, co
       AND company_id = ${companyId}
       AND is_void = false
   `);
-  const balance = parseFloat((result.rows[0] as any)?.balance ?? "0") || 0;
+  const balance = parseFloat(String((firstSqlRow(result) as any)?.balance ?? "0")) || 0;
   await db.update(bankAccounts)
     .set({ currentBalance: balance, updatedAt: new Date() })
     .where(eq(bankAccounts.id, bankAccountId));

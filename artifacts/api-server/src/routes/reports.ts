@@ -2,6 +2,7 @@ import { Router } from "express";
 import { db, accounts, chartOfAccounts, journalEntries, journalEntryLines, donations, expenses, budgets, budgetLines, glEntries, funds, transactions, transactionSplits } from "@workspace/db";
 import { eq, and, gte, lte, inArray, sql, isNotNull, isNull, ne } from "drizzle-orm";
 import { requireAuth } from "../lib/auth";
+import { sqlRows } from "../lib/sqlRows";
 
 const router = Router();
 
@@ -39,7 +40,7 @@ router.get("/profit-loss", requireAuth, async (req, res) => {
       ORDER BY c.sort_order, c.code
     `);
 
-    const rows = (glRows.rows as any[]).map((r) => {
+    const rows = sqlRows(glRows).map((r) => {
       const debit  = parseFloat(r.total_debit)  || 0;
       const credit = parseFloat(r.total_credit) || 0;
       const amount = r.account_type === "INCOME" ? credit - debit : debit - credit;
@@ -155,7 +156,7 @@ router.get("/balance-sheet", requireAuth, async (req, res) => {
 
     // Build a map: gl_account_id → register-based balance
     const bankBalanceMap = new Map<string, number>();
-    for (const row of bankRegisterRows.rows as any[]) {
+    for (const row of sqlRows(bankRegisterRows) as any[]) {
       const ob  = parseFloat(row.ob_balance)     || 0;
       const net = parseFloat(row.register_net)   || 0;
       const existing = bankBalanceMap.get(row.gl_account_id) || 0;
@@ -197,7 +198,7 @@ router.get("/balance-sheet", requireAuth, async (req, res) => {
     `);
 
     // Map asset/liability rows — override GL balance with bank register for bank-linked accounts
-    const assetLiabMapped = (assetLiabRows.rows as any[]).map((r) => {
+    const assetLiabMapped = sqlRows(assetLiabRows).map((r) => {
       const debit  = parseFloat(r.total_debit)  || 0;
       const credit = parseFloat(r.total_credit) || 0;
       let amount = r.account_type === "ASSET" ? debit - credit : credit - debit;
@@ -223,7 +224,7 @@ router.get("/balance-sheet", requireAuth, async (req, res) => {
     // Per-fund restricted detail for display
     const restrictedByFund: Record<string, { fundName: string; fundType: string; equity: number; income: number; expense: number }> = {};
 
-    for (const r of netAssetRows.rows as any[]) {
+    for (const r of sqlRows(netAssetRows) as any[]) {
       const debit  = parseFloat(r.total_debit)  || 0;
       const credit = parseFloat(r.total_credit) || 0;
       const fundType = r.fund_type as string;
@@ -395,7 +396,7 @@ router.get("/general-ledger", requireAuth, async (req, res) => {
     const start = startDate ? new Date(startDate as string) : new Date(new Date().getFullYear(), 0, 1);
     const end = endDate ? new Date(endDate as string) : new Date();
 
-    const rows = await db.execute(sql`
+    const glRaw = await db.execute(sql`
       SELECT
         g.id, g.date, g.source_type, g.transaction_id, g.journal_entry_id,
         g.account_id, g.account_code, g.account_name,
@@ -409,7 +410,7 @@ router.get("/general-ledger", requireAuth, async (req, res) => {
       ORDER BY g.date ASC, g.created_at ASC
     `);
 
-    const entries = (rows.rows as any[]).map(r => ({
+    const entries = sqlRows(glRaw).map((r: any) => ({
       id: r.id,
       date: r.date instanceof Date ? r.date.toISOString() : r.date,
       sourceType: r.source_type,
@@ -501,7 +502,7 @@ router.get("/gl-by-account", requireAuth, async (req, res) => {
 
     // Beginning balance: debit-normal for ASSET/EXPENSE, credit-normal otherwise
     const beginMap: Record<string, { accountId: string; accountCode: string; accountName: string; coaType: string; sortOrder: number; beginBalance: number }> = {};
-    for (const r of beginRows.rows as any[]) {
+    for (const r of sqlRows(beginRows) as any[]) {
       const debit  = parseFloat(r.total_debit)  || 0;
       const credit = parseFloat(r.total_credit) || 0;
       const coaType = r.account_type as string;
@@ -534,7 +535,7 @@ router.get("/gl-by-account", requireAuth, async (req, res) => {
     const accountEntries: Record<string, any[]> = {};
     const accountMeta: Record<string, { accountId: string; accountCode: string; accountName: string; coaType: string; sortOrder: number }> = {};
 
-    for (const r of periodRows.rows as any[]) {
+    for (const r of sqlRows(periodRows) as any[]) {
       const aid = r.account_id as string;
       if (!accountEntries[aid]) accountEntries[aid] = [];
       if (!accountMeta[aid]) {
@@ -624,7 +625,7 @@ router.get("/general-journal", requireAuth, async (req, res) => {
       : sql``;
 
     // Pull all GL entries in the period, with reference info from transactions/journal_entries
-    const rows = await db.execute(sql`
+    const gjRaw = await db.execute(sql`
       SELECT
         g.id, g.date, g.source_type,
         g.transaction_id, g.journal_entry_id,
@@ -651,7 +652,7 @@ router.get("/general-journal", requireAuth, async (req, res) => {
     const groups: Record<string, any> = {};
     const groupOrder: string[] = [];
 
-    for (const r of rows.rows as any[]) {
+    for (const r of sqlRows(gjRaw) as any[]) {
       const groupKey = (r.transaction_id ?? r.journal_entry_id ?? r.id) as string;
       if (!groups[groupKey]) {
         groupOrder.push(groupKey);
@@ -713,7 +714,7 @@ router.get("/transaction-register", requireAuth, async (req, res) => {
       : sql``;
 
     // Aggregate each source transaction into one register row (sum of DEBIT side = amount)
-    const rows = await db.execute(sql`
+    const regRaw = await db.execute(sql`
       SELECT
         COALESCE(g.transaction_id, g.journal_entry_id, g.id) AS group_key,
         MIN(g.date)        AS date,
@@ -741,7 +742,7 @@ router.get("/transaction-register", requireAuth, async (req, res) => {
       ORDER BY MIN(g.date) DESC, group_key
     `);
 
-    let txns = (rows.rows as any[]).map(r => ({
+    let txns = sqlRows(regRaw).map((r: any) => ({
       groupKey:      r.group_key as string,
       date:          r.date instanceof Date ? r.date.toISOString() : r.date,
       sourceType:    r.source_type as string,
@@ -857,7 +858,7 @@ router.get("/990-readiness", requireAuth, async (req, res) => {
       ORDER BY g.date DESC
     `);
 
-    const rows = expenseRows.rows as any[];
+    const rows = sqlRows(expenseRows) as any[];
     const total = rows.length;
     const tagged = rows.filter((r) => r.functional_type).length;
     const score = total === 0 ? 100 : Math.round((tagged / total) * 100);
@@ -946,7 +947,7 @@ router.get("/990-preparer", requireAuth, async (req, res) => {
       accounts: Record<string, { code: string; name: string; total: number }>;
     }> = {};
 
-    for (const row of expenseRows.rows as any[]) {
+    for (const row of sqlRows(expenseRows) as any[]) {
       const { line, label } = irsLineForCode(String(row.account_code), String(row.account_name));
       if (!lineMap[line]) {
         lineMap[line] = { line, label, programService: 0, managementGeneral: 0, fundraising: 0, untagged: 0, total: 0, accounts: {} };
@@ -979,7 +980,7 @@ router.get("/990-preparer", requireAuth, async (req, res) => {
     // ── Public Support Test ────────────────────────────────────────────────
     // IRS 501(c)(3) public support = contributions, government grants
     // Test: publicSupport / totalRevenue >= 33.33%
-    const allIncome = incomeRows.rows as any[];
+    const allIncome = sqlRows(incomeRows) as any[];
     const totalRevenue = allIncome.reduce((s, r) => s + parseFloat(r.net_amount), 0);
 
     const publicSupportAccounts = allIncome.filter((r) =>
@@ -1029,7 +1030,7 @@ router.get("/990-export", requireAuth, async (req, res) => {
     const end   = endDate   ? new Date(endDate   as string) : new Date();
     const endOfDay = new Date(end); endOfDay.setHours(23, 59, 59, 999);
 
-    const rows = await db.execute(sql`
+    const exportRaw = await db.execute(sql`
       SELECT
         g.date,
         g.description,
@@ -1072,7 +1073,7 @@ router.get("/990-export", requireAuth, async (req, res) => {
       ].join(","),
     ];
 
-    for (const r of rows.rows as any[]) {
+    for (const r of sqlRows(exportRaw) as any[]) {
       const row = [
         new Date(r.date).toISOString().substring(0, 10),
         `"${String(r.description ?? "").replace(/"/g, '""')}"`,

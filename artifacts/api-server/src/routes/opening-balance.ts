@@ -3,25 +3,10 @@ import { db, companies, chartOfAccounts, bankAccounts, funds, journalEntries, jo
 import { eq, and, asc, desc, inArray, sql } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
 import { parseYmdToUtcNoon, utcYmdToday } from "../lib/safeIso";
+import { firstSqlRow, sqlRows } from "../lib/sqlRows";
 
 function moneyToCents(n: number): number {
   return Math.round(Number(n) * 100 + Number.EPSILON);
-}
-
-/** Drizzle `execute` may return `{ rows }`, a plain array, or an iterable row list depending on version/driver. */
-function firstSqlRow(result: unknown): Record<string, unknown> | undefined {
-  if (result == null) return undefined;
-  const any = result as { rows?: unknown[]; length?: number; [n: number]: unknown };
-  if (Array.isArray(any.rows) && any.rows.length > 0) return any.rows[0] as Record<string, unknown>;
-  if (Array.isArray(result) && result.length > 0) return result[0] as Record<string, unknown>;
-  if (typeof (result as Iterable<unknown>)[Symbol.iterator] === "function") {
-    const it = (result as Iterable<Record<string, unknown>>)[Symbol.iterator]();
-    const first = it.next();
-    if (!first.done && first.value && typeof first.value === "object") {
-      return first.value as Record<string, unknown>;
-    }
-  }
-  return undefined;
 }
 
 function exposeErrorDetails(): boolean {
@@ -426,6 +411,14 @@ router.post("/finalize", requireAuth, requireAdmin, async (req, res) => {
       })
       .where(eq(companies.id, companyId));
 
+    const activeBanks = await db
+      .select()
+      .from(bankAccounts)
+      .where(and(eq(bankAccounts.companyId, companyId), eq(bankAccounts.isActive, true)));
+    const banksNotInEntry = activeBanks.filter(
+      (ba) => ba.glAccountId != null && !accountIds.includes(ba.glAccountId as string),
+    );
+
     res.status(201).json({
       success: true,
       journalEntryId: je.id,
@@ -435,6 +428,17 @@ router.post("/finalize", requireAuth, requireAdmin, async (req, res) => {
       lineCount: activeRows.length,
       date: asOf.toISOString(),
       accountingMethod: accountingMethod ?? "CASH",
+      ...(banksNotInEntry.length
+        ? {
+            warnings: [
+              {
+                code: "BANK_GL_NOT_IN_OPENING_BALANCE" as const,
+                message: `Linked bank account(s) use a GL account that was not included in this entry, so register opening transactions and current_balance were not updated for: ${banksNotInEntry.map((b) => b.name).join(", ")}. Debit the same chart-of-accounts line that each bank is linked to (not a parent summary account unless that is the linked account).`,
+                bankNames: banksNotInEntry.map((b) => b.name),
+              },
+            ],
+          }
+        : {}),
     });
   } catch (err) {
     console.error("Opening balance finalize error:", err);
@@ -507,7 +511,7 @@ router.post("/recalculate", requireAuth, requireAdmin, async (req, res) => {
           AND company_id = ${companyId}
           AND is_void = false
       `);
-      const row = result.rows[0] as any;
+      const row = firstSqlRow(result) as any;
       const debit  = parseFloat(row?.total_debit  ?? "0") || 0;
       const credit = parseFloat(row?.total_credit ?? "0") || 0;
       // Asset accounts: DEBIT increases, CREDIT decreases
@@ -538,7 +542,7 @@ router.post("/recalculate", requireAuth, requireAdmin, async (req, res) => {
         AND c.coa_type IN ('EQUITY', 'INCOME', 'EXPENSE')
       GROUP BY g.fund_id, f.name
     `);
-    const fundBalances = (fundResult.rows as any[]).map((r) => ({
+    const fundBalances = sqlRows(fundResult).map((r) => ({
       fundId:   r.fund_id,
       name:     r.fund_name,
       balance:  parseFloat(r.total_credit) - parseFloat(r.total_debit),

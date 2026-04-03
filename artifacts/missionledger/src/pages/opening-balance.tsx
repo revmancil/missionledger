@@ -755,9 +755,11 @@ export default function OpeningBalancePage() {
             newAsset.push({ id: uid(), accountId: r.accountId, fundId: fid, amount: amt, memo });
           } else if (acct.type === "LIABILITY" && r.entryType === "CREDIT") {
             newLiab.push({ id: uid(), accountId: r.accountId, fundId: fid, amount: amt, memo });
-          } else if (acct.type === "EQUITY" && r.entryType === "CREDIT" && r.fundId) {
+          } else if (acct.type === "EQUITY" && r.fundId) {
             rebuiltEquityMap[r.fundId] = r.accountId;
-            rebuiltDirectAmounts[r.fundId] = String(r.amount ?? "");
+            const raw = Number(r.amount) || 0;
+            rebuiltDirectAmounts[r.fundId] =
+              r.entryType === "CREDIT" ? String(r.amount ?? "") : String(-raw);
           }
         }
 
@@ -1075,9 +1077,27 @@ export default function OpeningBalancePage() {
           <div>
             <h2 className="text-2xl font-bold text-[hsl(210,60%,25%)]">Opening Balances Posted!</h2>
             <p className="text-muted-foreground mt-2">
-              All bank account and fund balances are now updated. Your Dashboard is accurate.
+              General ledger and fund balances are updated from this entry.
             </p>
+            {createdEntry?.entryNumber && (
+              <p className="text-sm text-muted-foreground mt-3">
+                Journal entry <span className="font-mono font-semibold text-foreground">{createdEntry.entryNumber}</span>
+                {" "}— open <strong>Journal</strong>, then <strong>History</strong>, and use Refresh to see &quot;Opening Balance Entry&quot;.
+              </p>
+            )}
           </div>
+          {Array.isArray(createdEntry?.warnings) && createdEntry.warnings.length > 0 && (
+            <div className="w-full max-w-md rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-left text-sm text-amber-950">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  {createdEntry.warnings.map((w: { message?: string }, i: number) => (
+                    <p key={i}>{w.message}</p>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
           <div className="flex flex-col items-center gap-3 w-full">
             <Button
               variant="default"

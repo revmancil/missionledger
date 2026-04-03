@@ -636,8 +636,11 @@ function HistoryPanel({
       {loading ? (
         <div className="py-8 text-center text-muted-foreground text-sm">Loading…</div>
       ) : history.length === 0 ? (
-        <div className="py-8 text-center text-muted-foreground text-sm">
-          No posted journal entries yet.
+        <div className="py-8 text-center text-muted-foreground text-sm space-y-2 px-4">
+          <p>No posted journal entries in the list yet.</p>
+          <p className="text-xs max-w-sm mx-auto">
+            Opening balances post as &quot;Opening Balance Entry&quot; from the Opening Balances page. Choose Refresh above if you just posted one.
+          </p>
         </div>
       ) : (
         <div className="overflow-x-auto">

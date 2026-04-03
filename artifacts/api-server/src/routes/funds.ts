@@ -3,6 +3,7 @@ import { db, funds, donations, expenses, glEntries, chartOfAccounts } from "@wor
 import { eq, and, desc, sql } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
 import { toIsoString } from "../lib/safeIso";
+import { sqlRows } from "../lib/sqlRows";
 
 const router = Router();
 
@@ -33,7 +34,7 @@ router.get("/", requireAuth, async (req, res) => {
 
     // Build a map: fundId → net GL contribution (credits − debits for equity-like accounts)
     const glByFund: Record<string, number> = {};
-    for (const row of glRows.rows as any[]) {
+    for (const row of sqlRows(glRows) as any[]) {
       const credit = parseFloat(row.total_credit) || 0;
       const debit  = parseFloat(row.total_debit)  || 0;
       // For equity/income: credit normal (positive contribution)

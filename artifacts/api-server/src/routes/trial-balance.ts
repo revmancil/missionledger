@@ -3,6 +3,7 @@ import { db, glEntries, transactions, transactionSplits, chartOfAccounts, bankAc
 import { eq, and, sql } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
 import { generateGlEntries } from "../lib/gl";
+import { sqlRows } from "../lib/sqlRows";
 
 const router = Router();
 
@@ -49,9 +50,12 @@ router.get("/", requireAuth, async (req, res) => {
     const isBalanced       = Math.abs(difference) < 0.01;
 
     // Count of GL entries for informational display
-    const [{ count }] = await db.execute(
-      sql`SELECT COUNT(*)::int AS count FROM gl_entries WHERE company_id = ${companyId} AND is_void = false`
-    ).then((r) => r.rows as any[]);
+    const countRow = sqlRows(
+      await db.execute(
+        sql`SELECT COUNT(*)::int AS count FROM gl_entries WHERE company_id = ${companyId} AND is_void = false`,
+      ),
+    )[0] as { count?: number } | undefined;
+    const count = countRow?.count ?? 0;
 
     res.json({
       accounts,
@@ -59,7 +63,7 @@ router.get("/", requireAuth, async (req, res) => {
       grandTotalCredit,
       difference,
       isBalanced,
-      glEntryCount: parseInt(count) || 0,
+      glEntryCount: Number(count) || 0,
     });
   } catch (err) {
     console.error("Trial balance error:", err);
@@ -81,7 +85,7 @@ router.get("/health", requireAuth, async (req, res) => {
       WHERE company_id = ${companyId} AND is_void = false
     `);
 
-    const row = (result.rows as any[])[0] ?? {};
+    const row = sqlRows(result)[0] ?? {};
     const totalDebit  = parseFloat(row.total_debit)  || 0;
     const totalCredit = parseFloat(row.total_credit) || 0;
     const entryCount  = parseInt(row.entry_count)    || 0;
