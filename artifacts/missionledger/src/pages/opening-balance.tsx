@@ -781,12 +781,17 @@ export default function OpeningBalancePage() {
 
   // ── Equity totals by account (Section 3 data) ────────────────────────────────
   const equityTotals = useMemo(() => {
+    const netForFund = (fundId: string) => {
+      const directStr = directFundAmounts[fundId];
+      if (directStr !== undefined) return parseFloat(directStr) || 0;
+      return fundNetMap[fundId] ?? 0;
+    };
     const map: Record<string, { total: number; fundNames: string[] }> = {};
     // Walk ALL funds (not just those with rows) so Section 3 shows as soon as equity is assigned
     for (const f of funds) {
       const eqAcctId = fundEquityMap[f.id];
       if (!eqAcctId) continue;
-      const net = fundNetMap[f.id] ?? 0;
+      const net = netForFund(f.id);
       if (!map[eqAcctId]) map[eqAcctId] = { total: 0, fundNames: [] };
       map[eqAcctId].total += net;
       map[eqAcctId].fundNames.push(f.name);
@@ -800,7 +805,7 @@ export default function OpeningBalancePage() {
       const codeB = equityCoa.find((e) => e.id === b.equityAccountId)?.code ?? "";
       return codeA.localeCompare(codeB, undefined, { numeric: true });
     });
-  }, [funds, fundEquityMap, fundNetMap, equityCoa]);
+  }, [funds, fundEquityMap, fundNetMap, equityCoa, directFundAmounts]);
 
   const totalEquity = equityTotals.reduce((s, e) => s + e.total, 0);
 
