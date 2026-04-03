@@ -266,15 +266,76 @@ async function ensureAlter(label: string, sql: string): Promise<void> {
   }
 }
 
+/** Required for API to start; failures must abort startup (not a silent log). */
+async function ensureAlterThrow(label: string, sql: string): Promise<void> {
+  try {
+    await pool.query(sql);
+    console.log(`Schema check: ${label} OK`);
+  } catch (err: any) {
+    console.error(`Schema migration FATAL (${label}):`, err);
+    throw Object.assign(new Error(`Schema migration failed (${label}): ${err?.message ?? err}`), {
+      cause: err,
+    });
+  }
+}
+
+async function assertColumnExists(tableName: string, columnName: string): Promise<void> {
+  const { rows } = await pool.query(
+    `SELECT 1 FROM information_schema.columns
+     WHERE table_schema = 'public' AND table_name = $1 AND column_name = $2 LIMIT 1`,
+    [tableName, columnName],
+  );
+  if (!rows.length) {
+    throw new Error(
+      `Schema verification failed: public.${tableName}.${columnName} is still missing after ALTER. ` +
+        `Check that DATABASE_URL points at this Postgres instance and the DB user can ALTER TABLE.`,
+    );
+  }
+}
+
 async function ensureSchema() {
+  await pool.query(`SET search_path TO public, pg_catalog`);
+
   await ensureAlter(
     "bank_transactions.plaid_transaction_id",
     `ALTER TABLE bank_transactions ADD COLUMN IF NOT EXISTS plaid_transaction_id TEXT`,
   );
-  await ensureAlter(
+
+  // Run immediately: Drizzle SELECT lists vendor_id and other metadata on every /transactions call.
+  await ensureAlterThrow(
     "transactions.plaid_transaction_id",
-    `ALTER TABLE transactions ADD COLUMN IF NOT EXISTS plaid_transaction_id TEXT`,
+    `ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS plaid_transaction_id TEXT`,
   );
+  await ensureAlterThrow(
+    "transactions.donor_name",
+    `ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS donor_name TEXT`,
+  );
+  await ensureAlterThrow(
+    "transactions.vendor_id",
+    `ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS vendor_id TEXT`,
+  );
+  await ensureAlterThrow(
+    "transactions.is_split",
+    `ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS is_split BOOLEAN NOT NULL DEFAULT FALSE`,
+  );
+  await ensureAlterThrow("transactions.memo", `ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS memo TEXT`);
+  await ensureAlterThrow(
+    "transactions.check_number",
+    `ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS check_number TEXT`,
+  );
+  await ensureAlterThrow(
+    "transactions.reference_number",
+    `ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS reference_number TEXT`,
+  );
+  await ensureAlterThrow(
+    "transactions.functional_type",
+    `ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS functional_type TEXT`,
+  );
+  await ensureAlterThrow(
+    "transactions.transaction_fingerprint",
+    `ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS transaction_fingerprint TEXT`,
+  );
+  await assertColumnExists("transactions", "vendor_id");
 
   await ensureAlter(
     "bank_accounts.plaid_access_token",
@@ -421,33 +482,6 @@ async function ensureSchema() {
   await ensureAlter(
     "companies.opening_balance_date",
     `ALTER TABLE companies ADD COLUMN IF NOT EXISTS opening_balance_date TIMESTAMP`,
-  );
-  try {
-    await pool.query(`ALTER TABLE transactions ADD COLUMN IF NOT EXISTS donor_name TEXT`);
-    console.log("Schema check: transactions.donor_name OK");
-  } catch (err: any) {
-    console.error("Schema migration error (donor_name):", err.message);
-  }
-
-  // Transactions metadata — each ALTER is its own query so one failure does not roll back the rest.
-  await ensureAlter("transactions.vendor_id", `ALTER TABLE transactions ADD COLUMN IF NOT EXISTS vendor_id TEXT`);
-  await ensureAlter(
-    "transactions.is_split",
-    `ALTER TABLE transactions ADD COLUMN IF NOT EXISTS is_split BOOLEAN NOT NULL DEFAULT FALSE`,
-  );
-  await ensureAlter("transactions.memo", `ALTER TABLE transactions ADD COLUMN IF NOT EXISTS memo TEXT`);
-  await ensureAlter("transactions.check_number", `ALTER TABLE transactions ADD COLUMN IF NOT EXISTS check_number TEXT`);
-  await ensureAlter(
-    "transactions.reference_number",
-    `ALTER TABLE transactions ADD COLUMN IF NOT EXISTS reference_number TEXT`,
-  );
-  await ensureAlter(
-    "transactions.functional_type",
-    `ALTER TABLE transactions ADD COLUMN IF NOT EXISTS functional_type TEXT`,
-  );
-  await ensureAlter(
-    "transactions.transaction_fingerprint",
-    `ALTER TABLE transactions ADD COLUMN IF NOT EXISTS transaction_fingerprint TEXT`,
   );
 
   await ensureAlter(

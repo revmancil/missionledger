@@ -38,16 +38,16 @@ END $$;
 
 ALTER TYPE "role" ADD VALUE IF NOT EXISTS 'OFFICER';
 
--- ── transactions ────────────────────────────────────────────────────────────
-ALTER TABLE transactions ADD COLUMN IF NOT EXISTS plaid_transaction_id TEXT;
-ALTER TABLE transactions ADD COLUMN IF NOT EXISTS donor_name TEXT;
-ALTER TABLE transactions ADD COLUMN IF NOT EXISTS vendor_id TEXT;
-ALTER TABLE transactions ADD COLUMN IF NOT EXISTS is_split BOOLEAN NOT NULL DEFAULT FALSE;
-ALTER TABLE transactions ADD COLUMN IF NOT EXISTS memo TEXT;
-ALTER TABLE transactions ADD COLUMN IF NOT EXISTS check_number TEXT;
-ALTER TABLE transactions ADD COLUMN IF NOT EXISTS reference_number TEXT;
-ALTER TABLE transactions ADD COLUMN IF NOT EXISTS functional_type TEXT;
-ALTER TABLE transactions ADD COLUMN IF NOT EXISTS transaction_fingerprint TEXT;
+-- ── transactions (use public. so search_path cannot skip the app table) ────
+ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS plaid_transaction_id TEXT;
+ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS donor_name TEXT;
+ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS vendor_id TEXT;
+ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS is_split BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS memo TEXT;
+ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS check_number TEXT;
+ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS reference_number TEXT;
+ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS functional_type TEXT;
+ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS transaction_fingerprint TEXT;
 
 -- ── gl_entries (required for /api/transactions GL + 990-readiness) ───────────
 ALTER TABLE gl_entries ADD COLUMN IF NOT EXISTS transaction_id TEXT;
