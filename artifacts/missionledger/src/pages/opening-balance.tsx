@@ -781,10 +781,9 @@ export default function OpeningBalancePage() {
             newLiab.push({ id: uid(), accountId: r.accountId, fundId: fid, amount: amt, memo });
           } else if (acct.type === "EQUITY" && r.fundId) {
             rebuiltEquityMap[r.fundId] = r.accountId;
+            const raw = Number(r.amount) || 0;
             rebuiltDirectAmounts[r.fundId] =
-              r.entryType === "CREDIT"
-                ? parseFloat(String(r.amount ?? "0")).toFixed(2)
-                : (-parseFloat(String(r.amount ?? "0"))).toFixed(2);
+              r.entryType === "CREDIT" ? String(r.amount ?? "") : String(-raw);
           }
         }
 
