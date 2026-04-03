@@ -6,6 +6,7 @@ import { parseYmdToUtcNoon, utcYmdToday } from "../lib/safeIso";
 import { firstSqlRow, sqlRows } from "../lib/sqlRows";
 import { voidGlEntries } from "../lib/gl";
 import { nextJournalEntryNumber } from "../lib/nextJournalEntryNumber";
+import { recomputeBankBalanceFromTransactions } from "../lib/bankBalance";
 
 function moneyToCents(n: number): number {
   return Math.round(Number(n) * 100 + Number.EPSILON);
@@ -16,6 +17,19 @@ function normCoaKey(id: unknown): string | null {
   if (id == null) return null;
   const s = String(id).trim();
   return s ? s.toLowerCase() : null;
+}
+
+/** GL rows use chart_of_accounts.id from inserts; bank_accounts.gl_account_id may differ only by case. */
+function canonicalCoaIdForGlQuery(
+  bankGlAccountId: string | null | undefined,
+  coaCanonByNorm: Map<string, string>,
+): string | null {
+  if (bankGlAccountId == null) return null;
+  const trimmed = String(bankGlAccountId).trim();
+  if (!trimmed) return null;
+  const k = normCoaKey(trimmed);
+  if (k && coaCanonByNorm.has(k)) return coaCanonByNorm.get(k)!;
+  return trimmed;
 }
 
 function exposeErrorDetails(): boolean {
@@ -383,26 +397,7 @@ router.post("/finalize", requireAuth, requireAdmin, async (req, res) => {
       });
     }
 
-    // ── Bug 1: Sync bank account balances from GL entries ──────────────────────
-    // linkedBanks was resolved case-insensitively against entry lines (see above).
-
-    for (const ba of linkedBanks) {
-      if (!ba.glAccountId) continue;
-      const balResult = await db.execute(sql`
-        SELECT COALESCE(SUM(CASE WHEN entry_type='DEBIT' THEN amount ELSE 0 END), 0)
-             - COALESCE(SUM(CASE WHEN entry_type='CREDIT' THEN amount ELSE 0 END), 0) AS balance
-        FROM gl_entries
-        WHERE account_id = ${ba.glAccountId} AND company_id = ${companyId} AND is_void = false
-      `);
-      const row0 = firstSqlRow(balResult);
-      const newBalance = parseFloat(String((row0 as any)?.balance ?? "0")) || 0;
-      await db
-        .update(bankAccounts)
-        .set({ currentBalance: newBalance, updatedAt: new Date() })
-        .where(eq(bankAccounts.id, ba.id));
-    }
-
-    // ── Bug 2: Create / refresh bank-register transactions for OB entry ────────
+    // ── Create / refresh bank-register transactions for OB entry ───────────────
     // Void any transactions from a previous OB posting, and void their TRANSACTION GL
     // (trial-balance sync may have posted duplicate GL; those rows are keyed by transaction_id only).
     if (company.openingBalanceEntryId) {
@@ -450,6 +445,10 @@ router.post("/finalize", requireAuth, requireAdmin, async (req, res) => {
         journalEntryId: je.id,
         isVoid: false,
       });
+    }
+
+    for (const ba of linkedBanks) {
+      await recomputeBankBalanceFromTransactions(ba.id, companyId);
     }
 
     // Update company record
@@ -542,16 +541,28 @@ router.post("/recalculate", requireAuth, requireAdmin, async (req, res) => {
 
     const linkedBanks = allBanks.filter((ba) => ba.glAccountId);
 
+    const allCoaRecalc = await db
+      .select()
+      .from(chartOfAccounts)
+      .where(eq(chartOfAccounts.companyId, companyId));
+    const coaCanonByNormRecalc = new Map<string, string>();
+    for (const a of allCoaRecalc) {
+      const k = normCoaKey(a.id);
+      if (k) coaCanonByNormRecalc.set(k, a.id);
+    }
+
     const bankResults: Array<{ name: string; newBalance: number }> = [];
 
     // ── Step C: For each bank account, replay all gl_entries ─────────────
     for (const ba of linkedBanks) {
+      const coaId = canonicalCoaIdForGlQuery(ba.glAccountId, coaCanonByNormRecalc);
+      if (!coaId) continue;
       const result = await db.execute(sql`
         SELECT
           COALESCE(SUM(CASE WHEN entry_type = 'DEBIT'  THEN amount ELSE 0 END), 0) AS total_debit,
           COALESCE(SUM(CASE WHEN entry_type = 'CREDIT' THEN amount ELSE 0 END), 0) AS total_credit
         FROM gl_entries
-        WHERE account_id = ${ba.glAccountId}
+        WHERE account_id = ${coaId}
           AND company_id = ${companyId}
           AND is_void = false
       `);
@@ -711,25 +722,6 @@ router.post("/sync", requireAuth, requireAdmin, async (req, res) => {
 
     const bankUpdates: Array<{ name: string; newBalance: number }> = [];
 
-    for (const ba of linkedBanks) {
-      if (!ba.glAccountId) continue;
-      const balResult = await db.execute(sql`
-        SELECT COALESCE(SUM(CASE WHEN entry_type='DEBIT' THEN amount ELSE 0 END), 0)
-             - COALESCE(SUM(CASE WHEN entry_type='CREDIT' THEN amount ELSE 0 END), 0) AS balance
-        FROM gl_entries
-        WHERE account_id = ${ba.glAccountId} AND company_id = ${companyId} AND is_void = false
-      `);
-      const row0 = firstSqlRow(balResult);
-      const newBalance = parseFloat(String((row0 as any)?.balance ?? "0")) || 0;
-      await db
-        .update(bankAccounts)
-        .set({ currentBalance: newBalance, updatedAt: new Date() })
-        .where(eq(bankAccounts.id, ba.id));
-
-      bankUpdates.push({ name: ba.name, newBalance });
-      console.log(`[OB Sync] Successfully updated "${ba.name}" balance to ${newBalance.toFixed(2)}`);
-    }
-
     // ── Step 2: Create bank-register transactions (void existing, insert new) ─
     // Void any previously created OB transactions for this JE
     await db
@@ -775,6 +767,17 @@ router.post("/sync", requireAuth, requireAdmin, async (req, res) => {
       const bankName = linkedBanks.find((b) => b.id === bankAccountId)?.name ?? "Unknown";
       txCreated.push(`${bankName}: ${txType === "CREDIT" ? "Deposit" : "Payment"} $${entry.amount.toFixed(2)}`);
       console.log(`[OB Sync] Created bank register transaction for "${bankName}" — ${txType} $${entry.amount.toFixed(2)}`);
+    }
+
+    for (const ba of linkedBanks) {
+      await recomputeBankBalanceFromTransactions(ba.id, companyId);
+      const [row] = await db
+        .select({ currentBalance: bankAccounts.currentBalance })
+        .from(bankAccounts)
+        .where(eq(bankAccounts.id, ba.id));
+      const newBalance = row?.currentBalance ?? 0;
+      bankUpdates.push({ name: ba.name, newBalance });
+      console.log(`[OB Sync] Successfully updated "${ba.name}" balance to ${newBalance.toFixed(2)}`);
     }
 
     res.json({

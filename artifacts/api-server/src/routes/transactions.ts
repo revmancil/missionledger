@@ -17,24 +17,7 @@ import { parseTransactionsFromPdfText } from "../lib/statementPdf";
 import { toIsoStringOrNull, asDate } from "../lib/safeIso";
 import { stringifyJsonForApi } from "../lib/jsonSafe";
 import { listTransactionRowsForCompany, loadSplitRowsByTransactionIds } from "../lib/transactionList";
-import { firstSqlRow } from "../lib/sqlRows";
-
-/** Recompute a bank account's currentBalance from all its non-void transactions. */
-async function recomputeBankBalance(bankAccountId: string | null | undefined, companyId: string): Promise<void> {
-  if (!bankAccountId) return;
-  const result = await db.execute(sql`
-    SELECT COALESCE(SUM(CASE WHEN type = 'CREDIT' THEN amount ELSE 0 END), 0)
-         - COALESCE(SUM(CASE WHEN type = 'DEBIT'  THEN amount ELSE 0 END), 0) AS balance
-    FROM transactions
-    WHERE bank_account_id = ${bankAccountId}
-      AND company_id = ${companyId}
-      AND is_void = false
-  `);
-  const balance = parseFloat(String((firstSqlRow(result) as any)?.balance ?? "0")) || 0;
-  await db.update(bankAccounts)
-    .set({ currentBalance: balance, updatedAt: new Date() })
-    .where(eq(bankAccounts.id, bankAccountId));
-}
+import { recomputeBankBalanceFromTransactions as recomputeBankBalance } from "../lib/bankBalance";
 
 async function getClosedUntil(companyId: string): Promise<Date | null> {
   const [co] = await db.select({ closedUntil: companies.closedUntil }).from(companies).where(eq(companies.id, companyId));

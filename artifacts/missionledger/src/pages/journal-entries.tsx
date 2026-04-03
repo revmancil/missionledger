@@ -193,8 +193,13 @@ export default function JournalEntriesPage() {
       const res = await api(`${BASE}api/journal-entries`);
       if (res.ok) {
         const data = await res.json();
-        // Include VOID so replaced opening-balance entries (same # shown on confirm) are visible
-        setHistory(data.filter((e: any) => e.status === "POSTED" || e.status === "VOID"));
+        const list = Array.isArray(data) ? data : [];
+        setHistory(
+          list.filter((e: any) => {
+            const s = String(e?.status ?? "").toUpperCase();
+            return s === "POSTED" || s === "VOID";
+          }),
+        );
       }
     } catch {
     } finally {
@@ -203,8 +208,11 @@ export default function JournalEntriesPage() {
   };
 
   const handleToggleHistory = () => {
-    if (!showHistory && history.length === 0) loadHistory();
-    setShowHistory(v => !v);
+    setShowHistory((v) => {
+      const next = !v;
+      if (next) void loadHistory();
+      return next;
+    });
   };
 
   const sortedAccounts = [...allAccounts].sort((a: any, b: any) =>
@@ -649,6 +657,7 @@ function HistoryPanel({
             <TableHeader>
               <TableRow className="bg-muted/30 hover:bg-muted/30">
                 <TableHead className="text-xs font-semibold uppercase tracking-wide">Entry #</TableHead>
+                <TableHead className="text-xs font-semibold uppercase tracking-wide">Status</TableHead>
                 <TableHead className="text-xs font-semibold uppercase tracking-wide">Date</TableHead>
                 <TableHead className="text-xs font-semibold uppercase tracking-wide">Reference</TableHead>
                 <TableHead className="text-xs font-semibold uppercase tracking-wide">Description</TableHead>
@@ -662,12 +671,13 @@ function HistoryPanel({
                   (s: number, l: any) => s + (l.debit || 0),
                   0
                 );
+                const st = String(entry?.status ?? "").toUpperCase();
                 return (
-                  <TableRow key={entry.id} className={entry.status === "VOID" ? "opacity-70" : undefined}>
+                  <TableRow key={entry.id} className={st === "VOID" ? "opacity-70" : undefined}>
                     <TableCell className="font-mono text-sm font-semibold">{entry.entryNumber}</TableCell>
                     <TableCell className="text-sm">
-                      <Badge variant={entry.status === "VOID" ? "destructive" : "secondary"} className="text-[10px] uppercase">
-                        {entry.status ?? "—"}
+                      <Badge variant={st === "VOID" ? "destructive" : "secondary"} className="text-[10px] uppercase">
+                        {st || "—"}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-sm">{formatDate(entry.date)}</TableCell>

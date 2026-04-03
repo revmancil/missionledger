@@ -7,6 +7,12 @@ import { nextJournalEntryNumber } from "../lib/nextJournalEntryNumber";
 
 const router = Router();
 
+function normalizeJournalEntryStatus(status: unknown): "DRAFT" | "POSTED" | "VOID" {
+  const u = String(status ?? "DRAFT").toUpperCase();
+  if (u === "POSTED" || u === "VOID" || u === "DRAFT") return u;
+  return "DRAFT";
+}
+
 async function enrichEntry(entry: any, companyId: string) {
   const lines = await db.select().from(journalEntryLines).where(eq(journalEntryLines.journalEntryId, entry.id));
 
@@ -20,6 +26,7 @@ async function enrichEntry(entry: any, companyId: string) {
 
   return {
     ...entry,
+    status: normalizeJournalEntryStatus(entry.status),
     date: entry.date instanceof Date ? entry.date.toISOString() : entry.date,
     postedAt: entry.postedAt ? (entry.postedAt instanceof Date ? entry.postedAt.toISOString() : entry.postedAt) : null,
     voidedAt: entry.voidedAt ? (entry.voidedAt instanceof Date ? entry.voidedAt.toISOString() : entry.voidedAt) : null,
