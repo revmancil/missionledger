@@ -187,13 +187,13 @@ async function selectSplitsForChunk(chunk: string[]): Promise<any[]> {
     | { kind: "drizzle"; sel: typeof splitRowWithVendor; order: ReturnType<typeof asc>[] }
     | { kind: "raw" }
   > = [
-    { kind: "drizzle", sel: splitRowWithVendor, order: [txIdAsc, sortAsc] },
-    { kind: "drizzle", sel: splitMinimal, order: [txIdAsc, idAsc] },
-    { kind: "drizzle", sel: splitRowBase, order: [txIdAsc, sortAsc] },
-    { kind: "drizzle", sel: splitNoFunctional, order: [txIdAsc, sortAsc] },
-    { kind: "drizzle", sel: splitNoMemoWithSort, order: [txIdAsc, sortAsc] },
-    { kind: "drizzle", sel: splitNoSortOrder, order: [txIdAsc, idAsc] },
-    { kind: "raw" },
+  { kind: "drizzle", sel: splitRowWithVendor, order: [txIdAsc, sortAsc] },
+  { kind: "drizzle", sel: splitRowBase, order: [txIdAsc, sortAsc] },
+  { kind: "drizzle", sel: splitNoFunctional, order: [txIdAsc, sortAsc] },
+  { kind: "drizzle", sel: splitNoMemoWithSort, order: [txIdAsc, sortAsc] },
+  { kind: "drizzle", sel: splitNoSortOrder, order: [txIdAsc, idAsc] },
+  { kind: "drizzle", sel: splitMinimal, order: [txIdAsc, idAsc] },
+  { kind: "raw" },
   ];
 
   let lastErr: unknown;

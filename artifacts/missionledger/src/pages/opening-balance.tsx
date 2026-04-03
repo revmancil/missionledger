@@ -114,9 +114,11 @@ function lineAmountCents(raw: string): number {
 }
 
 /** Stable dollars for API / display from integer cents (avoids 19.999999). */
-function centsToApiAmount(cents: number): number {
-  return Number((cents / 100).toFixed(2));
+// AFTER
+function centsToApiAmount(cents: number): string {
+  return (cents / 100).toFixed(2);
 }
+
 
 /** Controlled input string from cents — no float toFixed drift. */
 function formatCentsForInput(cents: number): string {

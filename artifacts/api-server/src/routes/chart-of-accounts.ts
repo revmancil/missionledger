@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db, chartOfAccounts } from "@workspace/db";
-import { eq, and, asc } from "drizzle-orm";
+import { eq, asc, sql } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
 import { toIsoString } from "../lib/safeIso";
 
@@ -168,6 +168,7 @@ export async function seedChartOfAccounts(companyId: string): Promise<void> {
 }
 
 // GET /chart-of-accounts
+// AFTER
 router.get("/", requireAuth, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
@@ -177,18 +178,46 @@ router.get("/", requireAuth, async (req, res) => {
       .where(eq(chartOfAccounts.companyId, companyId))
       .orderBy(asc(chartOfAccounts.sortOrder), asc(chartOfAccounts.code));
 
-    res.json(
-      all.map((a) => ({
-        ...a,
-        createdAt: toIsoString(a.createdAt),
-        updatedAt: toIsoString(a.updatedAt),
-      })),
-    );
+    // Aggregate balances from gl_entries per account
+    const balanceRows = await db.execute(sql`
+      SELECT
+        account_id,
+        SUM(CASE WHEN entry_type = 'DEBIT'  THEN amount ELSE 0 END) AS total_debits,
+        SUM(CASE WHEN entry_type = 'CREDIT' THEN amount ELSE 0 END) AS total_credits
+      FROM gl_entries
+      WHERE company_id = ${companyId}
+        AND (is_void IS NULL OR is_void = false)
+      GROUP BY account_id
+    `);
+
+    const balanceMap: Record<string, { debits: number; credits: number }> = {};
+    for (const row of (balanceRows as any).rows ?? balanceRows) {
+      balanceMap[row.account_id] = {
+        debits: parseFloat(row.total_debits ?? "0"),
+        credits: parseFloat(row.total_credits ?? "0"),
+      };
+    }
+
+    // Normal balance convention:
+    // Assets + Expenses = Debit normal (balance = debits - credits)
+    // Liabilities + Equity + Income = Credit normal (balance = credits - debits)
+    const withBalances = all.map((acct) => {
+      const b = balanceMap[acct.id] ?? { debits: 0, credits: 0 };
+      const type = (acct.coaType ?? acct.accountType ?? "").toUpperCase();
+      const isDebitNormal = type === "ASSET" || type === "EXPENSE";
+      const balance = isDebitNormal
+        ? b.debits - b.credits
+        : b.credits - b.debits;
+      return { ...acct, balance, totalDebits: b.debits, totalCredits: b.credits };
+    });
+
+    res.json(withBalances);
   } catch (error) {
-    console.error(error);
+    console.error("COA GET error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });
+
 
 // POST /chart-of-accounts
 router.post("/", requireAuth, requireAdmin, async (req, res) => {

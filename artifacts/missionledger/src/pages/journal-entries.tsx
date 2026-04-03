@@ -1,4 +1,4 @@
-import { useState, useCallback, useId } from "react";
+import { useState, useCallback, useId, useEffect } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { useGetAccounts, useGetFunds } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
@@ -88,7 +88,7 @@ export default function JournalEntriesPage() {
   const [posting, setPosting] = useState(false);
   const [postedEntry, setPostedEntry] = useState<any | null>(null);
   const [history, setHistory] = useState<any[]>([]);
-  const [showHistory, setShowHistory] = useState(false);
+  const [showHistory, setShowHistory] = useState(true);
   const [loadingHistory, setLoadingHistory] = useState(false);
 
   const totalDebits = rows.reduce((s, r) => s + (parseFloat(r.debit) || 0), 0);
@@ -206,6 +206,14 @@ export default function JournalEntriesPage() {
       setLoadingHistory(false);
     }
   };
+
+  // Auto-load history on page open
+  useEffect(() => {
+    void loadHistory();
+  }, []);
+
+  const handleToggleHistory = () => {
+
 
   const handleToggleHistory = () => {
     setShowHistory((v) => {

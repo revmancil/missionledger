@@ -283,7 +283,7 @@ async function commitStatementImportRows(
     .returning({ id: transactions.id });
 
   for (const row of inserted) {
-    generateGlEntries(row.id, companyId).catch((e) =>
+    await generateGlEntries(row.id, companyId).catch((e) =>
       console.error("[GL] statement import error:", e),
     );
   }
@@ -454,9 +454,10 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
     });
 
     // Generate double-entry GL records (fire-and-forget, non-blocking to response)
-    generateGlEntries(created.id, companyId).catch((e) =>
+    await generateGlEntries(created.id, companyId).catch((e) =>
       console.error("[GL] create error:", e)
     );
+
     // Keep bank account balance in sync
     recomputeBankBalance(created.bankAccountId, companyId).catch((e) =>
       console.error("[Balance] create sync error:", e)
@@ -773,7 +774,7 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
     });
 
     // Regenerate GL entries to reflect changes
-    generateGlEntries(updated.id, companyId).catch((e) =>
+    await generateGlEntries(updated.id, companyId).catch((e) =>
       console.error("[GL] update error:", e)
     );
     // Keep bank account balance in sync (handle bank account change)

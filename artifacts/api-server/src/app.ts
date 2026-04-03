@@ -8,7 +8,7 @@ const app: Express = express();
 
 const allowedOrigins = [
   process.env.CORS_ORIGIN,
-  "https://missionledger-api-server.vercel.app",
+  process.env.CORS_ORIGIN_2,
 ].filter(Boolean);
 
 app.use(cors({

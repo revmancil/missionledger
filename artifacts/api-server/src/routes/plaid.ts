@@ -9,6 +9,7 @@ import {
 import { db, bankAccounts, transactions } from "@workspace/db";
 import { eq, and, inArray, count } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
+import { generateGlEntries } from "../lib/gl";
 
 const router = Router();
 
@@ -179,7 +180,7 @@ router.post("/sync/:bankAccountId", requireAuth, requireAdmin, async (req, res) 
     // Insert into the transactions table (what the Bank Register reads)
     // Plaid: positive amount = debit (money out), negative = credit (money in)
     if (newTx.length > 0) {
-      await db.insert(transactions).values(
+      const inserted = await db.insert(transactions).values(
         newTx.map((t) => ({
           companyId,
           bankAccountId,
@@ -191,7 +192,14 @@ router.post("/sync/:bankAccountId", requireAuth, requireAdmin, async (req, res) 
           memo: t.name !== t.merchant_name ? t.name : null,
           plaidTransactionId: t.transaction_id,
         } as any))
-      );
+      ).returning({ id: transactions.id });
+
+      // Generate GL entries for each synced transaction
+      for (const row of inserted) {
+        await generateGlEntries(row.id, companyId).catch((err) =>
+          console.error("GL generation failed for Plaid tx", row.id, err)
+        );
+      }
     }
 
     // Fetch current balance from Plaid and update the bank account
