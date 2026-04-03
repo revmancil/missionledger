@@ -88,7 +88,7 @@ export default function JournalEntriesPage() {
   const [posting, setPosting] = useState(false);
   const [postedEntry, setPostedEntry] = useState<any | null>(null);
   const [history, setHistory] = useState<any[]>([]);
-  const [showHistory, setShowHistory] = useState(true);
+  const [showHistory, setShowHistory] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
 
   const totalDebits = rows.reduce((s, r) => s + (parseFloat(r.debit) || 0), 0);
@@ -209,9 +209,6 @@ export default function JournalEntriesPage() {
 
   // Auto-load history on page open
   useEffect(() => { void loadHistory(); }, []);
-
-  const handleToggleHistory = () => {
-
 
   const handleToggleHistory = () => {
     setShowHistory((v) => {
