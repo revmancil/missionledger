@@ -1,4 +1,4 @@
-import { useState, useCallback, useId, useEffect } from "react";
+import { useState, useCallback, useId, useEffect, Fragment } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { useGetAccounts, useGetFunds } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
@@ -641,6 +641,8 @@ function HistoryPanel({
   loading: boolean;
   onRefresh: () => void;
 }) {
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
   return (
     <div className="rounded-xl border border-border bg-card overflow-hidden">
       <div className="px-6 py-4 border-b border-border flex items-center justify-between">
@@ -685,27 +687,65 @@ function HistoryPanel({
                 );
                 const st = String(entry?.status ?? "").toUpperCase();
                 return (
-                  <TableRow key={entry.id} className={st === "VOID" ? "opacity-70" : undefined}>
-                    <TableCell className="font-mono text-sm font-semibold">{entry.entryNumber}</TableCell>
-                    <TableCell className="text-sm">
-                      <Badge variant={st === "VOID" ? "destructive" : "secondary"} className="text-[10px] uppercase">
-                        {st || "—"}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-sm">{formatDate(entry.date)}</TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {entry.referenceNumber || "—"}
-                    </TableCell>
-                    <TableCell className="text-sm max-w-[220px] truncate">{entry.description}</TableCell>
-                    <TableCell className="text-sm text-right tabular-nums font-medium">
-                      {formatCurrency(totalDebit)}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className="text-xs">
-                        {entry.lines?.length ?? 0} lines
-                      </Badge>
-                    </TableCell>
-                  </TableRow>
+                  <Fragment key={entry.id}>
+                    <TableRow
+                      onClick={() => setExpandedId(expandedId === entry.id ? null : entry.id)}
+                      className={cn(
+                        "cursor-pointer hover:bg-muted/50",
+                        st === "VOID" && "opacity-70",
+                      )}
+                    >
+                      <TableCell className="font-mono text-sm font-semibold">{entry.entryNumber}</TableCell>
+                      <TableCell className="text-sm">
+                        <Badge variant={st === "VOID" ? "destructive" : "secondary"} className="text-[10px] uppercase">
+                          {st || "—"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-sm">{formatDate(entry.date)}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {entry.referenceNumber || "—"}
+                      </TableCell>
+                      <TableCell className="text-sm max-w-[220px] truncate">{entry.description}</TableCell>
+                      <TableCell className="text-sm text-right tabular-nums font-medium">
+                        {formatCurrency(totalDebit)}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="text-xs">
+                          {entry.lines?.length ?? 0} lines
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                    {expandedId === entry.id && (
+                      <TableRow>
+                        <TableCell colSpan={7} className="bg-muted/20 p-0">
+                          <div className="p-4">
+                            <table className="w-full text-sm">
+                              <thead>
+                                <tr className="text-muted-foreground">
+                                  <th className="text-left pb-2">Account</th>
+                                  <th className="text-left pb-2">Fund</th>
+                                  <th className="text-left pb-2">Description</th>
+                                  <th className="text-right pb-2">Debit</th>
+                                  <th className="text-right pb-2">Credit</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {(entry.lines ?? []).map((line: any) => (
+                                  <tr key={line.id} className="border-t border-border/30">
+                                    <td className="py-1">{line.account?.name ?? line.accountId}</td>
+                                    <td className="py-1">{line.fund?.name ?? "—"}</td>
+                                    <td className="py-1 text-muted-foreground">{line.description ?? "—"}</td>
+                                    <td className="py-1 text-right">{line.debit > 0 ? `$${Number(line.debit).toFixed(2)}` : "—"}</td>
+                                    <td className="py-1 text-right">{line.credit > 0 ? `$${Number(line.credit).toFixed(2)}` : "—"}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </Fragment>
                 );
               })}
             </TableBody>
