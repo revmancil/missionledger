@@ -11,7 +11,13 @@ import { cn } from "@/lib/utils";
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
 async function apiFetch(path: string) {
-  const res = await fetch(`${BASE}${path}`, { credentials: "include" });
+  const token = localStorage.getItem("ml_token");
+  const res = await fetch(`${BASE}${path}`, {
+    credentials: "include",
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || "Request failed");
