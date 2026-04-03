@@ -772,7 +772,7 @@ export default function OpeningBalancePage() {
           const acct = coaMap[r.accountId];
           if (!acct) continue;
           const fid = r.fundId ?? firstFundId;
-          const amt = String(r.amount ?? "");
+          const amt = r.amount != null ? parseFloat(String(r.amount)).toFixed(2) : "";
           const memo = r.memo ?? "";
 
           if (acct.type === "ASSET" && r.entryType === "DEBIT") {
@@ -781,9 +781,10 @@ export default function OpeningBalancePage() {
             newLiab.push({ id: uid(), accountId: r.accountId, fundId: fid, amount: amt, memo });
           } else if (acct.type === "EQUITY" && r.fundId) {
             rebuiltEquityMap[r.fundId] = r.accountId;
-            const raw = Number(r.amount) || 0;
             rebuiltDirectAmounts[r.fundId] =
-              r.entryType === "CREDIT" ? String(r.amount ?? "") : String(-raw);
+              r.entryType === "CREDIT"
+                ? parseFloat(String(r.amount ?? "0")).toFixed(2)
+                : (-parseFloat(String(r.amount ?? "0"))).toFixed(2);
           }
         }
 
