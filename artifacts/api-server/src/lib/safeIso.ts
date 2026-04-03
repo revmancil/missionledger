@@ -1,4 +1,31 @@
 /**
+ * Parse `YYYY-MM-DD` (or ISO string — first 10 chars used) as a calendar date at
+ * 12:00 UTC. Avoids `new Date("2026-01-01")` (UTC midnight) shifting to the prior
+ * local calendar day in the Americas, and keeps one unambiguous instant for Postgres.
+ */
+export function parseYmdToUtcNoon(raw: unknown): { ymd: string; date: Date } | null {
+  const head = String(raw ?? "").trim().slice(0, 10);
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(head);
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+  const date = new Date(Date.UTC(y, mo - 1, d, 12, 0, 0));
+  if (date.getUTCFullYear() !== y || date.getUTCMonth() !== mo - 1 || date.getUTCDate() !== d) return null;
+  return { ymd: head, date };
+}
+
+/** Today's calendar date as YYYY-MM-DD in UTC (for as-of ≤ today checks on the server). */
+export function utcYmdToday(): string {
+  const n = new Date();
+  const y = n.getUTCFullYear();
+  const mo = String(n.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(n.getUTCDate()).padStart(2, "0");
+  return `${y}-${mo}-${d}`;
+}
+
+/**
  * Coerce DB/driver values (Date, ISO string, number) to a Date or null.
  * Never throws — avoids TypeError when code assumes Date but pg returns a string.
  */

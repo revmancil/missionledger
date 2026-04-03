@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { format } from "date-fns";
+import { format, parse } from "date-fns";
 import {
   CheckCircle2, AlertTriangle, RefreshCw, Lock, RotateCcw,
   Info, Plus, Trash2, Layers, Calendar, X, ArrowLeftRight,
@@ -114,6 +114,12 @@ function moneyToCents(d: number): number {
 }
 
 const uid = () => crypto.randomUUID();
+
+/** HTML date value `YYYY-MM-DD` → display label in the user's local calendar (not UTC midnight). */
+function formatYmdLocalLong(ymd: string): string {
+  const d = parse(ymd, "yyyy-MM-dd", new Date());
+  return format(d, "MMMM d, yyyy");
+}
 
 // Auto-pick a default equity account for a fund based on its type
 function defaultEquityAccount(fundType: string | undefined, equityCoa: CoaAccount[]): string {
@@ -505,7 +511,7 @@ function ConfirmModal({
         </DialogHeader>
         <div className="space-y-4 py-1">
           <div className="flex flex-wrap gap-4 text-sm">
-            <div><span className="text-muted-foreground">Date:</span> <strong>{asOfDate ? format(new Date(asOfDate), "MMMM d, yyyy") : "—"}</strong></div>
+            <div><span className="text-muted-foreground">Date:</span> <strong>{asOfDate ? formatYmdLocalLong(asOfDate) : "—"}</strong></div>
             <div><span className="text-muted-foreground">Method:</span> <strong>{method === "CASH" ? "Cash Basis" : "Accrual Basis"}</strong></div>
             <div><span className="text-muted-foreground">Lines:</span> <strong>{submitRows.length}</strong></div>
           </div>

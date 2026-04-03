@@ -2,6 +2,20 @@ import { Router } from "express";
 import { db, companies, chartOfAccounts, bankAccounts, funds, journalEntries, journalEntryLines, glEntries, transactions } from "@workspace/db";
 import { eq, and, asc, desc, inArray, sql } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
+import { parseYmdToUtcNoon, utcYmdToday } from "../lib/safeIso";
+
+function moneyToCents(n: number): number {
+  return Math.round(Number(n) * 100 + Number.EPSILON);
+}
+
+/** Drizzle `execute` may return `{ rows }` or an array-like row list depending on version/driver. */
+function firstSqlRow(result: unknown): Record<string, unknown> | undefined {
+  if (result == null) return undefined;
+  const any = result as { rows?: unknown[]; length?: number; [n: number]: unknown };
+  if (Array.isArray(any) && any.length > 0) return any[0] as Record<string, unknown>;
+  if (Array.isArray(any.rows) && any.rows.length > 0) return any.rows[0] as Record<string, unknown>;
+  return undefined;
+}
 
 const router = Router();
 
@@ -176,10 +190,12 @@ router.post("/finalize", requireAuth, requireAdmin, async (req, res) => {
 
     if (!date) return res.status(400).json({ error: "As-of date is required." });
 
-    const asOf = new Date(date);
-    const today = new Date();
-    today.setHours(23, 59, 59, 999);
-    if (asOf > today) return res.status(400).json({ error: "As-of date cannot be in the future." });
+    const parsed = parseYmdToUtcNoon(date);
+    if (!parsed) return res.status(400).json({ error: "As-of date must be YYYY-MM-DD." });
+    const { ymd: asOfYmd, date: asOf } = parsed;
+    if (asOfYmd > utcYmdToday()) {
+      return res.status(400).json({ error: "As-of date cannot be in the future." });
+    }
 
     if (!Array.isArray(rows) || rows.length < 2) {
       return res.status(400).json({ error: "At least 2 rows are required." });
@@ -196,12 +212,20 @@ router.post("/finalize", requireAuth, requireAdmin, async (req, res) => {
       if (!["DEBIT", "CREDIT"].includes(r.entryType)) return res.status(400).json({ error: "Invalid entry type on one or more rows." });
     }
 
-    const totalDebits = activeRows.reduce((s: number, r: any) => s + (r.entryType === "DEBIT" ? Number(r.amount) : 0), 0);
-    const totalCredits = activeRows.reduce((s: number, r: any) => s + (r.entryType === "CREDIT" ? Number(r.amount) : 0), 0);
+    let debitCents = 0;
+    let creditCents = 0;
+    for (const r of activeRows) {
+      const c = moneyToCents(Number(r.amount));
+      if (r.entryType === "DEBIT") debitCents += c;
+      else creditCents += c;
+    }
+    const totalDebits = debitCents / 100;
+    const totalCredits = creditCents / 100;
 
-    if (Math.abs(totalDebits - totalCredits) > 0.01) {
+    if (debitCents !== creditCents) {
+      const diff = Math.abs(debitCents - creditCents) / 100;
       return res.status(400).json({
-        error: `Entry is not balanced. Debits: $${totalDebits.toFixed(2)}, Credits: $${totalCredits.toFixed(2)}. Difference: $${Math.abs(totalDebits - totalCredits).toFixed(2)}.`,
+        error: `Entry is not balanced. Debits: $${totalDebits.toFixed(2)}, Credits: $${totalCredits.toFixed(2)}. Difference: $${diff.toFixed(2)}.`,
       });
     }
 
@@ -322,7 +346,8 @@ router.post("/finalize", requireAuth, requireAdmin, async (req, res) => {
         FROM gl_entries
         WHERE account_id = ${ba.glAccountId} AND company_id = ${companyId} AND is_void = false
       `);
-      const newBalance = parseFloat((balResult.rows[0] as any)?.balance ?? "0") || 0;
+      const row0 = firstSqlRow(balResult);
+      const newBalance = parseFloat(String((row0 as any)?.balance ?? "0")) || 0;
       await db
         .update(bankAccounts)
         .set({ currentBalance: newBalance, updatedAt: new Date() })
@@ -392,7 +417,11 @@ router.post("/finalize", requireAuth, requireAdmin, async (req, res) => {
     });
   } catch (err) {
     console.error("Opening balance finalize error:", err);
-    res.status(500).json({ error: "Internal server error" });
+    const details = err instanceof Error ? err.message : String(err);
+    res.status(500).json({
+      error: "Internal server error",
+      ...(process.env.NODE_ENV === "development" ? { details } : {}),
+    });
   }
 });
 
@@ -606,7 +635,8 @@ router.post("/sync", requireAuth, requireAdmin, async (req, res) => {
         FROM gl_entries
         WHERE account_id = ${ba.glAccountId} AND company_id = ${companyId} AND is_void = false
       `);
-      const newBalance = parseFloat((balResult.rows[0] as any)?.balance ?? "0") || 0;
+      const row0 = firstSqlRow(balResult);
+      const newBalance = parseFloat(String((row0 as any)?.balance ?? "0")) || 0;
       await db
         .update(bankAccounts)
         .set({ currentBalance: newBalance, updatedAt: new Date() })
