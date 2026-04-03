@@ -3,7 +3,7 @@ import {
   db, transactions, transactionSplits, chartOfAccounts,
   bankAccounts, funds, vendors, companies, journalEntryLines,
 } from "@workspace/db";
-import { eq, and, asc, inArray, sql, ne } from "drizzle-orm";
+import { eq, and, inArray, sql, ne } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
 import { generateGlEntries, voidGlEntries } from "../lib/gl";
 import { logAudit, snap } from "../lib/audit";
@@ -493,9 +493,7 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
     });
 
     const lookups = await getLookups(companyId);
-    const splits = isSplit
-      ? await db.select().from(transactionSplits).where(eq(transactionSplits.transactionId, created.id)).orderBy(transactionSplits.sortOrder)
-      : [];
+    const splits = isSplit ? await loadSplitRowsByTransactionIds([created.id]) : [];
 
     res.status(201).json(serializeTx(created, splits, lookups));
   } catch (err) {
@@ -671,11 +669,7 @@ router.get("/:id/splits", requireAuth, async (req, res) => {
     }
 
     // Otherwise return regular transaction splits
-    const splits = await db
-      .select()
-      .from(transactionSplits)
-      .where(eq(transactionSplits.transactionId, tx.id))
-      .orderBy(asc(transactionSplits.sortOrder));
+    const splits = await loadSplitRowsByTransactionIds([tx.id]);
 
     return res.json({
       transactionId: tx.id,
@@ -824,9 +818,7 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
     });
 
     const lookups = await getLookups(companyId);
-    const splits = isSplit
-      ? await db.select().from(transactionSplits).where(eq(transactionSplits.transactionId, updated.id)).orderBy(transactionSplits.sortOrder)
-      : [];
+    const splits = isSplit ? await loadSplitRowsByTransactionIds([updated.id]) : [];
 
     res.json(serializeTx(updated, splits, lookups));
   } catch (err) {
@@ -928,11 +920,7 @@ router.patch("/:id/status", requireAuth, requireAdmin, async (req, res) => {
     }
 
     const lookups = await getLookups(companyId);
-    const splits = await db
-      .select()
-      .from(transactionSplits)
-      .where(eq(transactionSplits.transactionId, updated.id))
-      .orderBy(transactionSplits.sortOrder);
+    const splits = await loadSplitRowsByTransactionIds([updated.id]);
 
     res.json(serializeTx(updated, splits, lookups));
   } catch (err) {
