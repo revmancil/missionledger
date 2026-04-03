@@ -9,6 +9,13 @@ function moneyToCents(n: number): number {
   return Math.round(Number(n) * 100 + Number.EPSILON);
 }
 
+/** Case/whitespace-tolerant match between request accountId and bank_accounts.gl_account_id (both text). */
+function normCoaKey(id: unknown): string | null {
+  if (id == null) return null;
+  const s = String(id).trim();
+  return s ? s.toLowerCase() : null;
+}
+
 function exposeErrorDetails(): boolean {
   return (
     process.env.NODE_ENV === "development" ||
@@ -230,7 +237,24 @@ router.post("/finalize", requireAuth, requireAdmin, async (req, res) => {
     }
 
     // Fetch account metadata for denormalization
-    const accountIds = [...new Set(activeRows.map((r: any) => r.accountId as string))];
+    const accountIds = [...new Set(activeRows.map((r: any) => String(r.accountId ?? "").trim()).filter(Boolean))];
+    const accountIdNormSet = new Set(
+      activeRows.map((r: any) => normCoaKey(r.accountId)).filter((x): x is string => x != null),
+    );
+
+    const allActiveBanks = await db
+      .select()
+      .from(bankAccounts)
+      .where(and(eq(bankAccounts.companyId, companyId), eq(bankAccounts.isActive, true)));
+    const linkedBanks = allActiveBanks.filter((ba) => {
+      const g = normCoaKey(ba.glAccountId);
+      return g != null && accountIdNormSet.has(g);
+    });
+    const banksNotInEntry = allActiveBanks.filter((ba) => {
+      const g = normCoaKey(ba.glAccountId);
+      return g != null && !accountIdNormSet.has(g);
+    });
+
     const accountsInEntry = accountIds.length
       ? await db.select().from(chartOfAccounts).where(inArray(chartOfAccounts.id, accountIds))
       : [];
@@ -338,11 +362,7 @@ router.post("/finalize", requireAuth, requireAdmin, async (req, res) => {
     }
 
     // ── Bug 1: Sync bank account balances from GL entries ──────────────────────
-    // Find all bank accounts linked to any account in this entry
-    const linkedBanks = await db
-      .select()
-      .from(bankAccounts)
-      .where(and(eq(bankAccounts.companyId, companyId), inArray(bankAccounts.glAccountId as any, accountIds)));
+    // linkedBanks was resolved case-insensitively against entry lines (see above).
 
     for (const ba of linkedBanks) {
       if (!ba.glAccountId) continue;
@@ -374,11 +394,15 @@ router.post("/finalize", requireAuth, requireAdmin, async (req, res) => {
         );
     }
 
-    // Build glAccountId → bankAccountId lookup for fast matching
-    const glToBankId = Object.fromEntries(linkedBanks.map((ba) => [ba.glAccountId!, ba.id]));
+    // Build normalized gl key → bankAccountId (matches row.accountId case-insensitively)
+    const glToBankId: Record<string, string> = {};
+    for (const ba of linkedBanks) {
+      const g = normCoaKey(ba.glAccountId);
+      if (g) glToBankId[g] = ba.id;
+    }
 
     for (const row of activeRows) {
-      const bankAccountId = glToBankId[row.accountId];
+      const bankAccountId = glToBankId[normCoaKey(row.accountId) ?? ""];
       if (!bankAccountId) continue; // only create transactions for bank account rows
       // DR to asset account = DEPOSIT in the register (CREDIT type)
       // CR to asset account = WITHDRAWAL from the register (DEBIT type)
@@ -410,14 +434,6 @@ router.post("/finalize", requireAuth, requireAdmin, async (req, res) => {
         updatedAt: new Date(),
       })
       .where(eq(companies.id, companyId));
-
-    const activeBanks = await db
-      .select()
-      .from(bankAccounts)
-      .where(and(eq(bankAccounts.companyId, companyId), eq(bankAccounts.isActive, true)));
-    const banksNotInEntry = activeBanks.filter(
-      (ba) => ba.glAccountId != null && !accountIds.includes(ba.glAccountId as string),
-    );
 
     res.status(201).json({
       success: true,
@@ -570,7 +586,8 @@ router.post("/recalculate", requireAuth, requireAdmin, async (req, res) => {
 
       const glToBankId: Record<string, string> = {};
       for (const ba of linkedBanks) {
-        if (ba.glAccountId) glToBankId[ba.glAccountId] = ba.id;
+        const g = normCoaKey(ba.glAccountId);
+        if (g) glToBankId[g] = ba.id;
       }
 
       // Void any existing OB transactions for this company (regardless of journalEntryId)
@@ -584,7 +601,7 @@ router.post("/recalculate", requireAuth, requireAdmin, async (req, res) => {
 
       // Create fresh OB transactions with journalEntryId properly set
       for (const entry of obGlEntries) {
-        const bankAccountId = glToBankId[entry.accountId];
+        const bankAccountId = glToBankId[normCoaKey(entry.accountId) ?? ""];
         if (!bankAccountId) continue;
 
         // Flip: bank register shows the bank's perspective (DEBIT GL = bank deposit)
@@ -652,11 +669,17 @@ router.post("/sync", requireAuth, requireAdmin, async (req, res) => {
     }
 
     // ── Step 1: Recompute and update bank account balances ─────────────────
-    const uniqueAccountIds = [...new Set(jeGlEntries.map((g) => g.accountId))];
-    const linkedBanks = await db
+    const jeAccountNormSet = new Set(
+      jeGlEntries.map((g) => normCoaKey(g.accountId)).filter((x): x is string => x != null),
+    );
+    const allBanksSync = await db
       .select()
       .from(bankAccounts)
-      .where(and(eq(bankAccounts.companyId, companyId), inArray(bankAccounts.glAccountId as any, uniqueAccountIds)));
+      .where(eq(bankAccounts.companyId, companyId));
+    const linkedBanks = allBanksSync.filter((ba) => {
+      const g = normCoaKey(ba.glAccountId);
+      return g != null && jeAccountNormSet.has(g);
+    });
 
     const bankUpdates: Array<{ name: string; newBalance: number }> = [];
 
@@ -686,7 +709,11 @@ router.post("/sync", requireAuth, requireAdmin, async (req, res) => {
       .set({ isVoid: true, status: "VOID", updatedAt: new Date() })
       .where(and(eq(transactions.companyId, companyId), eq(transactions.journalEntryId as any, jeId)));
 
-    const glToBankId = Object.fromEntries(linkedBanks.map((ba) => [ba.glAccountId!, ba.id]));
+    const glToBankIdSync: Record<string, string> = {};
+    for (const ba of linkedBanks) {
+      const g = normCoaKey(ba.glAccountId);
+      if (g) glToBankIdSync[g] = ba.id;
+    }
 
     // Fetch the JE to get its entryNumber and date
     const [je] = await db
@@ -697,7 +724,7 @@ router.post("/sync", requireAuth, requireAdmin, async (req, res) => {
     const txCreated: string[] = [];
 
     for (const entry of jeGlEntries) {
-      const bankAccountId = glToBankId[entry.accountId];
+      const bankAccountId = glToBankIdSync[normCoaKey(entry.accountId) ?? ""];
       if (!bankAccountId) continue;
 
       const txType: "CREDIT" | "DEBIT" = entry.entryType === "DEBIT" ? "CREDIT" : "DEBIT";

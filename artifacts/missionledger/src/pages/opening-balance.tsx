@@ -78,7 +78,10 @@ const fmt = (n: number) =>
     maximumFractionDigits: 2,
   }).format(n);
 
-/** Parse user input to integer cents (no binary float drift when summing many funds). */
+/**
+ * Parse user input to integer cents (rounds at the cent; supports any number of decimal digits).
+ * Avoids truncating e.g. 100.456 to 100.45 and avoids binary float until the final round.
+ */
 function parseAmountCents(raw: string | undefined | null): number {
   if (raw == null) return 0;
   const s = String(raw).trim().replace(/,/g, "");
@@ -86,11 +89,18 @@ function parseAmountCents(raw: string | undefined | null): number {
   const neg = s.startsWith("-");
   const u = s.replace(/^[-+]/, "");
   const dot = u.indexOf(".");
-  const intPart = (dot === -1 ? u : u.slice(0, dot)).replace(/\D/g, "") || "0";
+  const intDigits = (dot === -1 ? u : u.slice(0, dot)).replace(/\D/g, "");
+  const intPart = intDigits === "" ? 0 : parseInt(intDigits, 10);
   const fracRaw = (dot === -1 ? "" : u.slice(dot + 1)).replace(/\D/g, "");
-  const frac = (fracRaw + "00").slice(0, 2).padEnd(2, "0");
-  const n = parseInt(intPart, 10) * 100 + parseInt(frac.slice(0, 2), 10);
-  return neg ? -n : n;
+  if (!fracRaw) {
+    const cents = intPart * 100;
+    return neg ? -cents : cents;
+  }
+  const fracNum = parseInt(fracRaw, 10) || 0;
+  const denom = 10 ** fracRaw.length;
+  const totalDollars = intPart + fracNum / denom;
+  const cents = Math.round(totalDollars * 100 + Number.EPSILON);
+  return neg ? -cents : cents;
 }
 
 /** Dollars from cents — single division. */
@@ -106,6 +116,16 @@ function lineAmountCents(raw: string): number {
 /** Stable dollars for API / display from integer cents (avoids 19.999999). */
 function centsToApiAmount(cents: number): number {
   return Number((cents / 100).toFixed(2));
+}
+
+/** Controlled input string from cents — no float toFixed drift. */
+function formatCentsForInput(cents: number): string {
+  if (cents === 0) return "0.00";
+  const neg = cents < 0;
+  const a = Math.abs(cents);
+  const d = Math.floor(a / 100);
+  const c = a % 100;
+  return `${neg ? "-" : ""}${d}.${String(c).padStart(2, "0")}`;
 }
 
 /** Reconstruct cents from a dollar number we produced from integer cents (for confirm modal totals). */
@@ -607,14 +627,16 @@ function LedgerRowInput({
       />
       <FundSelect funds={funds} value={row.fundId} onChange={(id) => onUpdate({ fundId: id })} />
       <Input
-        type="number" min="0" step="0.01"
+        type="text"
+        inputMode="decimal"
+        autoComplete="off"
         value={row.amount}
         onChange={(e) => onUpdate({ amount: e.target.value })}
         onBlur={(e) => {
           const raw = e.target.value.trim();
           if (raw === "") return;
           const c = lineAmountCents(raw);
-          onUpdate({ amount: centsToApiAmount(c).toFixed(2) });
+          onUpdate({ amount: formatCentsForInput(c) });
         }}
         placeholder="0.00"
         className="h-9 text-right font-mono text-sm"
@@ -1340,7 +1362,7 @@ export default function OpeningBalancePage() {
                   directStr !== undefined
                     ? directStr
                     : netCents !== 0
-                      ? centsToApiAmount(netCents).toFixed(2)
+                      ? formatCentsForInput(netCents)
                       : "";
                 return (
                   <div key={fund.id} className="grid gap-3 px-5 py-3 border-b border-gray-100 items-center" style={{ gridTemplateColumns: "1.4fr 1.6fr 1fr" }}>
@@ -1376,10 +1398,9 @@ export default function OpeningBalancePage() {
                     <div className="relative">
                       <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-gray-400 pointer-events-none select-none">$</span>
                       <input
-                        type="number"
+                        type="text"
                         inputMode="decimal"
-                        min="0"
-                        step="0.01"
+                        autoComplete="off"
                         placeholder="0.00"
                         value={displayStr}
                         onChange={(e) => setDirectFundAmounts((prev) => ({ ...prev, [fund.id]: e.target.value }))}
@@ -1389,7 +1410,7 @@ export default function OpeningBalancePage() {
                           const c = parseAmountCents(raw);
                           setDirectFundAmounts((prev) => ({
                             ...prev,
-                            [fund.id]: centsToApiAmount(c).toFixed(2),
+                            [fund.id]: formatCentsForInput(c),
                           }));
                         }}
                         className={cn(
