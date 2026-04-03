@@ -208,9 +208,7 @@ export default function JournalEntriesPage() {
   };
 
   // Auto-load history on page open
-  useEffect(() => {
-    void loadHistory();
-  }, []);
+  useEffect(() => { void loadHistory(); }, []);
 
   const handleToggleHistory = () => {
 
