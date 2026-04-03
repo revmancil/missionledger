@@ -49,6 +49,12 @@ ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS reference_number TEXT;
 ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS functional_type TEXT;
 ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS transaction_fingerprint TEXT;
 
+-- ── transaction_splits (bank register / split lines) ────────────────────────
+ALTER TABLE public.transaction_splits ADD COLUMN IF NOT EXISTS vendor_id TEXT;
+ALTER TABLE public.transaction_splits ADD COLUMN IF NOT EXISTS memo TEXT;
+ALTER TABLE public.transaction_splits ADD COLUMN IF NOT EXISTS functional_type TEXT;
+ALTER TABLE public.transaction_splits ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0;
+
 -- ── gl_entries (required for /api/transactions GL + 990-readiness) ───────────
 ALTER TABLE gl_entries ADD COLUMN IF NOT EXISTS transaction_id TEXT;
 ALTER TABLE gl_entries ADD COLUMN IF NOT EXISTS journal_entry_id TEXT;
