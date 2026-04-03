@@ -15,7 +15,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel,
@@ -26,6 +26,7 @@ import { cn } from "@/lib/utils";
 import { useFinancialSync } from "@/lib/financial-sync";
 import { authJsonFetch, logApiFailure, readJsonSafe } from "@/lib/auth-fetch";
 import { apiUrl } from "@/lib/api-base";
+import { useAuth } from "@/hooks/use-auth";
 
 /** Path must start with `/api/…` (or full http URL). Uses VITE_API_BASE_URL when the API is on another host. */
 function apiFetch(path: string, init?: RequestInit) {
@@ -510,6 +511,9 @@ function AddAccountModal({
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function BankRegisterPage() {
   const { refetch: globalRefetch } = useFinancialSync();
+  const { user, isLoading: authLoading } = useAuth();
+  const canImportStatements =
+    !!user && (user.role === "ADMIN" || user.role === "MASTER_ADMIN");
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
   const [coaList, setCoaList] = useState<ChartAccount[]>([]);
   const [fundList, setFundList] = useState<Fund[]>([]);
@@ -538,9 +542,11 @@ export default function BankRegisterPage() {
   const [jeModal, setJeModal] = useState<{ open: boolean; data: any | null; loading: boolean }>({
     open: false, data: null, loading: false,
   });
+  const [transactionsLoadError, setTransactionsLoadError] = useState<string | null>(null);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
+    setTransactionsLoadError(null);
     try {
       const [banksR, coaR, fundsR, vendorsR, txR] = await Promise.all([
         apiFetch("/api/bank-accounts"),
@@ -581,6 +587,7 @@ export default function BankRegisterPage() {
 
       if (txR.ok) {
         const txData = await txR.json();
+        setTransactionsLoadError(null);
         if (Array.isArray(txData)) {
           setTxList(txData);
         } else {
@@ -595,7 +602,9 @@ export default function BankRegisterPage() {
           (typeof o?.message === "string" && o.message.trim()) ||
           (typeof o?.error === "string" && o.error.trim()) ||
           "";
-        loadFailures.push(`Transactions: ${summarizeErrorBody(errBody, txR.status)}`);
+        const txSummary = summarizeErrorBody(errBody, txR.status);
+        setTransactionsLoadError(txSummary);
+        loadFailures.push(`Transactions: ${txSummary}`);
         if (txR.status === 402 || o?.error === "SUBSCRIPTION_REQUIRED") {
           toast.error(fromApi || "Subscription required", {
             description: "Open Billing to renew or start a subscription.",
@@ -624,6 +633,9 @@ export default function BankRegisterPage() {
       }
     } catch (e) {
       console.error("Bank register loadAll:", e);
+      setTransactionsLoadError(
+        "Network error — check VPN, CORS, and that the app points at the correct API (VITE_API_BASE_URL).",
+      );
       toast.error("Network error loading the bank register. Check VPN, CORS, and that the API URL is set.");
     } finally {
       setLoading(false);
@@ -962,6 +974,10 @@ export default function BankRegisterPage() {
   }
 
   function openImportCsv() {
+    if (!authLoading && !canImportStatements) {
+      toast.error("Only organization admins can import bank statements.");
+      return;
+    }
     if (bankAccounts.length === 0) {
       toast.error("Add a bank account first.");
       return;
@@ -999,6 +1015,31 @@ export default function BankRegisterPage() {
             </div>
           )}
 
+          {transactionsLoadError && (
+            <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-900">
+              <div className="flex gap-2">
+                <AlertCircle className="h-4 w-4 shrink-0 text-red-600 mt-0.5" />
+                <div className="min-w-0">
+                  <p className="font-medium">Transactions could not be loaded</p>
+                  <p className="mt-1 text-red-800/95 break-words">{transactionsLoadError}</p>
+                  <p className="mt-2 text-xs text-red-800/85">
+                    If this keeps happening after Refresh, the API host may need a successful deploy or database migration. Check the API service logs on your host.
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="mt-2 h-7 border-red-300 text-red-900 hover:bg-red-100"
+                    onClick={() => loadAll()}
+                    disabled={loading}
+                  >
+                    Retry
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 sm:items-center">
             <div className="flex items-center gap-2 shrink-0">
               <Wallet className="h-4 w-4 text-muted-foreground shrink-0" />
@@ -1030,14 +1071,21 @@ export default function BankRegisterPage() {
                 </button>
               ))}
             </div>
-            <div className="ml-auto flex items-center gap-2">
+            <div className="ml-auto flex flex-wrap items-center justify-end gap-x-2 gap-y-1">
+              <span className="text-[11px] text-muted-foreground leading-tight text-right max-w-[11rem] hidden sm:block">
+                Import → choose <strong className="font-medium text-foreground/80">PDF statement</strong> tab for PDFs
+              </span>
               <Button
                 size="sm"
                 variant="outline"
                 className="h-7 text-xs border-slate-200 hover:bg-slate-50"
                 onClick={openImportCsv}
-                disabled={loading}
-                title="Upload a bank CSV export"
+                disabled={loading || (!authLoading && !canImportStatements)}
+                title={
+                  !authLoading && !canImportStatements
+                    ? "Only organization admins can import statements"
+                    : "Import a CSV export or a text-based PDF (open dialog, then PDF statement tab)"
+                }
               >
                 <Upload className="h-3 w-3 mr-1" />
                 Import
@@ -1059,6 +1107,9 @@ export default function BankRegisterPage() {
                 <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
               </button>
             </div>
+            <p className="text-[11px] text-muted-foreground sm:hidden w-full text-right">
+              Tap Import, then the PDF statement tab for PDF uploads.
+            </p>
           </div>
 
           {selectedBankObj && (
@@ -1879,6 +1930,9 @@ export default function BankRegisterPage() {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Import bank statement</DialogTitle>
+            <DialogDescription>
+              Use your bank’s CSV download here, or open the <strong>PDF statement</strong> tab to upload a PDF with selectable text (not a scan).
+            </DialogDescription>
           </DialogHeader>
           <div className="flex rounded-lg border border-input p-0.5 gap-0.5 bg-muted/40">
             <button
@@ -1889,7 +1943,7 @@ export default function BankRegisterPage() {
               )}
               onClick={() => setImportKind("csv")}
             >
-              CSV export
+              CSV
             </button>
             <button
               type="button"
@@ -1899,7 +1953,7 @@ export default function BankRegisterPage() {
               )}
               onClick={() => setImportKind("pdf")}
             >
-              PDF (text)
+              PDF statement
             </button>
           </div>
           {importKind === "csv" ? (

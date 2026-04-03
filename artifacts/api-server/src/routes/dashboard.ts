@@ -1,10 +1,11 @@
 import { Router } from "express";
 import {
   db, donations, expenses, bankTransactions, bankAccounts,
-  chartOfAccounts, transactions, transactionSplits, budgets, budgetLines,
+  chartOfAccounts, transactionSplits, budgets, budgetLines,
 } from "@workspace/db";
-import { eq, and, gte, lte, desc } from "drizzle-orm";
+import { eq, and, gte, lte } from "drizzle-orm";
 import { requireAuth } from "../lib/auth";
+import { listTransactionRowsForCompany } from "../lib/transactionList";
 
 const router = Router();
 
@@ -42,23 +43,7 @@ router.get("/", requireAuth, async (req, res) => {
       db.select({ id: chartOfAccounts.id, code: chartOfAccounts.code, name: chartOfAccounts.name, isActive: chartOfAccounts.isActive, type: chartOfAccounts.type })
         .from(chartOfAccounts)
         .where(eq(chartOfAccounts.companyId, companyId)),
-      db.select({
-        id: transactions.id,
-        date: transactions.date,
-        payee: transactions.payee,
-        amount: transactions.amount,
-        type: transactions.type,
-        status: transactions.status,
-        isSplit: transactions.isSplit,
-        memo: transactions.memo,
-        chartAccountId: transactions.chartAccountId,
-        isVoid: transactions.isVoid,
-        bankAccountId: transactions.bankAccountId,
-        fundId: transactions.fundId,
-        createdAt: transactions.createdAt,
-      }).from(transactions)
-        .where(eq(transactions.companyId, companyId))
-        .orderBy(desc(transactions.date), desc(transactions.createdAt)),
+      listTransactionRowsForCompany(companyId),
       db.select({ transactionId: transactionSplits.transactionId, chartAccountId: transactionSplits.chartAccountId, amount: transactionSplits.amount })
         .from(transactionSplits),
       db.select({ amount: donations.amount }).from(donations)

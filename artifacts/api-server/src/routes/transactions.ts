@@ -3,7 +3,7 @@ import {
   db, transactions, transactionSplits, chartOfAccounts,
   bankAccounts, funds, vendors, companies, journalEntryLines,
 } from "@workspace/db";
-import { eq, and, desc, asc, inArray, sql, ne } from "drizzle-orm";
+import { eq, and, asc, inArray, sql, ne } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
 import { generateGlEntries, voidGlEntries } from "../lib/gl";
 import { logAudit, snap } from "../lib/audit";
@@ -16,6 +16,7 @@ import {
 import { parseTransactionsFromPdfText } from "../lib/statementPdf";
 import { toIsoStringOrNull, asDate } from "../lib/safeIso";
 import { stringifyJsonForApi } from "../lib/jsonSafe";
+import { listTransactionRowsForCompany, loadSplitRowsByTransactionIds } from "../lib/transactionList";
 
 /** Recompute a bank account's currentBalance from all its non-void transactions. */
 async function recomputeBankBalance(bankAccountId: string | null | undefined, companyId: string): Promise<void> {
@@ -171,23 +172,6 @@ function serializeTx(
         : null,
     })),
   };
-}
-
-const SPLIT_QUERY_CHUNK = 500;
-
-async function loadSplitsByTransactionIds(txIds: string[]): Promise<any[]> {
-  if (txIds.length === 0) return [];
-  const out: any[] = [];
-  for (let i = 0; i < txIds.length; i += SPLIT_QUERY_CHUNK) {
-    const chunk = txIds.slice(i, i + SPLIT_QUERY_CHUNK);
-    const rows = await db
-      .select()
-      .from(transactionSplits)
-      .where(inArray(transactionSplits.transactionId, chunk))
-      .orderBy(asc(transactionSplits.transactionId), asc(transactionSplits.sortOrder));
-    out.push(...rows);
-  }
-  return out;
 }
 
 async function upsertSplits(
@@ -356,17 +340,13 @@ router.get("/", requireAuth, async (req, res) => {
     }
     const { bankAccountId, status } = req.query;
 
-    let all = await db
-      .select()
-      .from(transactions)
-      .where(eq(transactions.companyId, companyId))
-      .orderBy(desc(transactions.date), desc(transactions.createdAt));
+    let all = await listTransactionRowsForCompany(companyId);
 
     if (bankAccountId) all = all.filter((t) => t.bankAccountId === bankAccountId);
     if (status) all = all.filter((t) => t.status === status);
 
     const txIds = all.map((t) => t.id);
-    const allSplits = await loadSplitsByTransactionIds(txIds);
+    const allSplits = await loadSplitRowsByTransactionIds(txIds);
 
     const splitsByTx = allSplits.reduce<Record<string, any[]>>((acc, s) => {
       (acc[s.transactionId] ??= []).push(s);
