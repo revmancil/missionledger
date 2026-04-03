@@ -71,7 +71,47 @@ interface LiabilityRow {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const fmt = (n: number) =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
+  new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(n);
+
+/** Parse user input to integer cents (no binary float drift when summing many funds). */
+function parseAmountCents(raw: string | undefined | null): number {
+  if (raw == null) return 0;
+  const s = String(raw).trim().replace(/,/g, "");
+  if (!s) return 0;
+  const neg = s.startsWith("-");
+  const u = s.replace(/^[-+]/, "");
+  const dot = u.indexOf(".");
+  const intPart = (dot === -1 ? u : u.slice(0, dot)).replace(/\D/g, "") || "0";
+  const fracRaw = (dot === -1 ? "" : u.slice(dot + 1)).replace(/\D/g, "");
+  const frac = (fracRaw + "00").slice(0, 2).padEnd(2, "0");
+  const n = parseInt(intPart, 10) * 100 + parseInt(frac.slice(0, 2), 10);
+  return neg ? -n : n;
+}
+
+/** Dollars from cents — single division. */
+function centsToMoney(cents: number): number {
+  return cents / 100;
+}
+
+/** Asset/Liability lines: amount is always a positive magnitude (absolute value). */
+function lineAmountCents(raw: string): number {
+  return Math.abs(parseAmountCents(raw));
+}
+
+/** Stable dollars for API / display from integer cents (avoids 19.999999). */
+function centsToApiAmount(cents: number): number {
+  return Number((cents / 100).toFixed(2));
+}
+
+/** Reconstruct cents from a dollar number we produced from integer cents (for confirm modal totals). */
+function moneyToCents(d: number): number {
+  return Math.round(d * 100 + Number.EPSILON);
+}
 
 const uid = () => crypto.randomUUID();
 
@@ -448,8 +488,12 @@ function ConfirmModal({
 }) {
   const acctMap = Object.fromEntries(allCoa.map((a) => [a.id, a]));
   const fundMap = Object.fromEntries(funds.map((f) => [f.id, f]));
-  const totalDR = submitRows.filter((r) => r.entryType === "DEBIT").reduce((s, r) => s + r.amount, 0);
-  const totalCR = submitRows.filter((r) => r.entryType === "CREDIT").reduce((s, r) => s + r.amount, 0);
+  const totalDRCents = submitRows
+    .filter((r) => r.entryType === "DEBIT")
+    .reduce((s, r) => s + moneyToCents(r.amount), 0);
+  const totalCRCents = submitRows
+    .filter((r) => r.entryType === "CREDIT")
+    .reduce((s, r) => s + moneyToCents(r.amount), 0);
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
@@ -505,8 +549,8 @@ function ConfirmModal({
               <tfoot>
                 <tr className="border-t-2 border-gray-200 bg-gray-50 font-bold">
                   <td className="px-4 py-2.5 text-sm" colSpan={2}>Total</td>
-                  <td className="px-4 py-2.5 text-right tabular-nums text-blue-700">{fmt(totalDR)}</td>
-                  <td className="px-4 py-2.5 text-right tabular-nums text-emerald-700">{fmt(totalCR)}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums text-blue-700">{fmt(centsToMoney(totalDRCents))}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums text-emerald-700">{fmt(centsToMoney(totalCRCents))}</td>
                 </tr>
               </tfoot>
             </table>
@@ -560,6 +604,12 @@ function LedgerRowInput({
         type="number" min="0" step="0.01"
         value={row.amount}
         onChange={(e) => onUpdate({ amount: e.target.value })}
+        onBlur={(e) => {
+          const raw = e.target.value.trim();
+          if (raw === "") return;
+          const c = lineAmountCents(raw);
+          onUpdate({ amount: centsToApiAmount(c).toFixed(2) });
+        }}
         placeholder="0.00"
         className="h-9 text-right font-mono text-sm"
       />
@@ -751,88 +801,103 @@ export default function OpeningBalancePage() {
   const updateLiabilityRow = (id: string, patch: Partial<LiabilityRow>) =>
     setLiabilityRows((p) => p.map((r) => r.id === id ? { ...r, ...patch } : r));
 
-  // ── Computed totals ───────────────────────────────────────────────────────────
-  const totalAssets = useMemo(
-    () => assetRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0),
+  // ── Computed totals (integer cents until display/API) ─────────────────────────
+  const totalAssetsCents = useMemo(
+    () => assetRows.reduce((s, r) => s + lineAmountCents(r.amount), 0),
     [assetRows]
   );
-  const totalLiabilities = useMemo(
-    () => liabilityRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0),
+  const totalLiabilitiesCents = useMemo(
+    () => liabilityRows.reduce((s, r) => s + lineAmountCents(r.amount), 0),
     [liabilityRows]
   );
-  const totalNetAssets = totalAssets - totalLiabilities;
+  const totalAssets = centsToMoney(totalAssetsCents);
+  const totalLiabilities = centsToMoney(totalLiabilitiesCents);
+  const totalNetAssets = centsToMoney(totalAssetsCents - totalLiabilitiesCents);
 
-  // ── Per-fund net assets ───────────────────────────────────────────────────────
-  const fundNetMap = useMemo(() => {
+  // ── Per-fund net assets (cents) ───────────────────────────────────────────────
+  const fundNetCentsMap = useMemo(() => {
     const map: Record<string, number> = {};
     for (const r of assetRows) {
-      const amt = parseFloat(r.amount) || 0;
-      if (amt > 0 && r.fundId) map[r.fundId] = (map[r.fundId] || 0) + amt;
+      const c = lineAmountCents(r.amount);
+      if (c > 0 && r.fundId) map[r.fundId] = (map[r.fundId] || 0) + c;
     }
     for (const r of liabilityRows) {
-      const amt = parseFloat(r.amount) || 0;
-      if (amt > 0 && r.fundId) map[r.fundId] = (map[r.fundId] || 0) - amt;
+      const c = lineAmountCents(r.amount);
+      if (c > 0 && r.fundId) map[r.fundId] = (map[r.fundId] || 0) - c;
     }
     return map;
   }, [assetRows, liabilityRows]);
 
   // All funds that appear in any row (have a non-zero balance)
-  const activeFundIds = useMemo(() => Object.keys(fundNetMap), [fundNetMap]);
+  const activeFundIds = useMemo(() => Object.keys(fundNetCentsMap), [fundNetCentsMap]);
 
   // ── Equity totals by account (Section 3 data) ────────────────────────────────
-  const equityTotals = useMemo(() => {
-    const netForFund = (fundId: string) => {
+  const { equityTotals, totalEquity } = useMemo(() => {
+    const netCentsForFund = (fundId: string) => {
       const directStr = directFundAmounts[fundId];
-      if (directStr !== undefined) return parseFloat(directStr) || 0;
-      return fundNetMap[fundId] ?? 0;
+      if (directStr !== undefined) return parseAmountCents(directStr);
+      return fundNetCentsMap[fundId] ?? 0;
     };
-    const map: Record<string, { total: number; fundNames: string[] }> = {};
-    // Walk ALL funds (not just those with rows) so Section 3 shows as soon as equity is assigned
+    const map: Record<string, { totalCents: number; fundNames: string[] }> = {};
     for (const f of funds) {
       const eqAcctId = fundEquityMap[f.id];
       if (!eqAcctId) continue;
-      const net = netForFund(f.id);
-      if (!map[eqAcctId]) map[eqAcctId] = { total: 0, fundNames: [] };
-      map[eqAcctId].total += net;
+      const netC = netCentsForFund(f.id);
+      if (!map[eqAcctId]) map[eqAcctId] = { totalCents: 0, fundNames: [] };
+      map[eqAcctId].totalCents += netC;
       map[eqAcctId].fundNames.push(f.name);
     }
-    return Object.entries(map).map(([equityAccountId, { total, fundNames }]) => ({
-      equityAccountId,
-      total,
-      fundNames,
-    })).sort((a, b) => {
-      const codeA = equityCoa.find((e) => e.id === a.equityAccountId)?.code ?? "";
-      const codeB = equityCoa.find((e) => e.id === b.equityAccountId)?.code ?? "";
-      return codeA.localeCompare(codeB, undefined, { numeric: true });
-    });
-  }, [funds, fundEquityMap, fundNetMap, equityCoa, directFundAmounts]);
-
-  const totalEquity = equityTotals.reduce((s, e) => s + e.total, 0);
+    const sorted = Object.entries(map)
+      .map(([equityAccountId, { totalCents, fundNames }]) => ({
+        equityAccountId,
+        totalCents,
+        total: centsToMoney(totalCents),
+        fundNames,
+      }))
+      .sort((a, b) => {
+        const codeA = equityCoa.find((e) => e.id === a.equityAccountId)?.code ?? "";
+        const codeB = equityCoa.find((e) => e.id === b.equityAccountId)?.code ?? "";
+        return codeA.localeCompare(codeB, undefined, { numeric: true });
+      });
+    const totalEquityCents = sorted.reduce((s, e) => s + e.totalCents, 0);
+    return {
+      equityTotals: sorted.map(({ equityAccountId, total, fundNames }) => ({
+        equityAccountId,
+        total,
+        fundNames,
+      })),
+      totalEquity: centsToMoney(totalEquityCents),
+    };
+  }, [funds, fundEquityMap, fundNetCentsMap, equityCoa, directFundAmounts]);
 
   // ── Fund Balances (Section 4 data) ───────────────────────────────────────────
   // Show ALL active funds. Amount = directly typed value if set, else auto-computed from asset/liability rows.
   const fundBalances = useMemo(() => {
     return funds.map((f) => {
       const directStr = directFundAmounts[f.id];
-      const netAmount = directStr !== undefined
-        ? (parseFloat(directStr) || 0)
-        : (fundNetMap[f.id] ?? 0);
-      return { fund: f, netAmount, equityAccountId: fundEquityMap[f.id] ?? "" };
+      const netCents =
+        directStr !== undefined ? parseAmountCents(directStr) : (fundNetCentsMap[f.id] ?? 0);
+      const netAmount = centsToMoney(netCents);
+      return { fund: f, netCents, netAmount, equityAccountId: fundEquityMap[f.id] ?? "" };
     });
-  }, [funds, fundNetMap, fundEquityMap, directFundAmounts]);
+  }, [funds, fundNetCentsMap, fundEquityMap, directFundAmounts]);
 
-  const totalFundBalances = fundBalances.reduce((s, fb) => s + fb.netAmount, 0);
+  const totalFundBalancesCents = useMemo(
+    () => fundBalances.reduce((s, fb) => s + fb.netCents, 0),
+    [fundBalances]
+  );
+  const totalFundBalances = centsToMoney(totalFundBalancesCents);
 
   // ── Validation ────────────────────────────────────────────────────────────────
   const futureDateError  = asOfDate > format(new Date(), "yyyy-MM-dd");
-  const activeAssets     = assetRows.filter((r) => parseFloat(r.amount) > 0);
-  const activeLiabs      = liabilityRows.filter((r) => parseFloat(r.amount) > 0);
+  const activeAssets     = assetRows.filter((r) => lineAmountCents(r.amount) > 0);
+  const activeLiabs      = liabilityRows.filter((r) => lineAmountCents(r.amount) > 0);
   const missingAssetAcct = activeAssets.some((r) => !r.accountId);
   const missingAssetFund = activeAssets.some((r) => !r.fundId);
   const missingLiabAcct  = activeLiabs.some((r) => !r.accountId);
   const missingLiabFund  = activeLiabs.some((r) => !r.fundId);
-  const missingEquity    = fundBalances.some((fb) => Math.abs(fb.netAmount) > 0.001 && !fb.equityAccountId);
-  const hasData          = totalAssets > 0 || totalFundBalances > 0;
+  const missingEquity    = fundBalances.some((fb) => fb.netCents !== 0 && !fb.equityAccountId);
+  const hasData          = totalAssetsCents !== 0 || totalFundBalancesCents !== 0;
 
   const canPost = hasData && !futureDateError
     && !missingAssetAcct && !missingAssetFund
@@ -844,25 +909,36 @@ export default function OpeningBalancePage() {
     const rows: Array<{ accountId: string; fundId: string; amount: number; entryType: EntryType; memo: string | null }> = [];
 
     for (const r of assetRows) {
-      const amt = parseFloat(r.amount) || 0;
-      if (amt > 0 && r.accountId && r.fundId)
-        rows.push({ accountId: r.accountId, fundId: r.fundId, amount: amt, entryType: "DEBIT", memo: r.memo || null });
+      const c = lineAmountCents(r.amount);
+      if (c > 0 && r.accountId && r.fundId)
+        rows.push({
+          accountId: r.accountId,
+          fundId: r.fundId,
+          amount: centsToApiAmount(c),
+          entryType: "DEBIT",
+          memo: r.memo || null,
+        });
     }
 
     for (const r of liabilityRows) {
-      const amt = parseFloat(r.amount) || 0;
-      if (amt > 0 && r.accountId && r.fundId)
-        rows.push({ accountId: r.accountId, fundId: r.fundId, amount: amt, entryType: "CREDIT", memo: r.memo || null });
+      const c = lineAmountCents(r.amount);
+      if (c > 0 && r.accountId && r.fundId)
+        rows.push({
+          accountId: r.accountId,
+          fundId: r.fundId,
+          amount: centsToApiAmount(c),
+          entryType: "CREDIT",
+          memo: r.memo || null,
+        });
     }
 
-    // Auto-equity rows: one per fund per equity account assignment
     for (const fb of fundBalances) {
-      if (Math.abs(fb.netAmount) > 0.001 && fb.equityAccountId) {
+      if (fb.netCents !== 0 && fb.equityAccountId) {
         rows.push({
           accountId: fb.equityAccountId,
           fundId: fb.fund.id,
-          amount: Math.abs(fb.netAmount),
-          entryType: fb.netAmount >= 0 ? "CREDIT" : "DEBIT",
+          amount: centsToApiAmount(Math.abs(fb.netCents)),
+          entryType: fb.netCents >= 0 ? "CREDIT" : "DEBIT",
           memo: `Opening Net Assets — ${fb.fund.name}`,
         });
       }
@@ -1224,9 +1300,14 @@ export default function OpeningBalancePage() {
                 <span className="text-right">Opening Balance</span>
               </div>
 
-              {fundBalances.map(({ fund, netAmount, equityAccountId }) => {
+              {fundBalances.map(({ fund, netAmount, netCents, equityAccountId }) => {
                 const directStr = directFundAmounts[fund.id];
-                const displayStr = directStr !== undefined ? directStr : (netAmount !== 0 ? String(netAmount) : "");
+                const displayStr =
+                  directStr !== undefined
+                    ? directStr
+                    : netCents !== 0
+                      ? centsToApiAmount(netCents).toFixed(2)
+                      : "";
                 return (
                   <div key={fund.id} className="grid gap-3 px-5 py-3 border-b border-gray-100 items-center" style={{ gridTemplateColumns: "1.4fr 1.6fr 1fr" }}>
                     {/* Fund name + type badge */}
@@ -1269,8 +1350,13 @@ export default function OpeningBalancePage() {
                         value={displayStr}
                         onChange={(e) => setDirectFundAmounts((prev) => ({ ...prev, [fund.id]: e.target.value }))}
                         onBlur={(e) => {
-                          const v = parseFloat(e.target.value);
-                          if (!isNaN(v)) setDirectFundAmounts((prev) => ({ ...prev, [fund.id]: String(v) }));
+                          const raw = e.target.value.trim();
+                          if (raw === "") return;
+                          const c = parseAmountCents(raw);
+                          setDirectFundAmounts((prev) => ({
+                            ...prev,
+                            [fund.id]: centsToApiAmount(c).toFixed(2),
+                          }));
                         }}
                         className={cn(
                           "w-full h-10 pl-6 pr-2 text-right text-sm font-semibold border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 tabular-nums",
