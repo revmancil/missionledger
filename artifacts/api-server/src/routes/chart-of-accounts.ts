@@ -6,6 +6,48 @@ import { toIsoString } from "../lib/safeIso";
 
 const router = Router();
 
+async function coaRow(companyId: string, id: string) {
+  const [row] = await db
+    .select()
+    .from(chartOfAccounts)
+    .where(and(eq(chartOfAccounts.id, id), eq(chartOfAccounts.companyId, companyId)));
+  return row;
+}
+
+/** Walk parent chain up from `startId`; return true if `targetId` is reached (target is an ancestor of start). */
+async function reachesAncestor(companyId: string, startId: string, targetId: string): Promise<boolean> {
+  let cur: string | null = startId;
+  const seen = new Set<string>();
+  while (cur) {
+    if (cur === targetId) return true;
+    if (seen.has(cur)) break;
+    seen.add(cur);
+    const [row] = await db
+      .select({ parentId: chartOfAccounts.parentId })
+      .from(chartOfAccounts)
+      .where(and(eq(chartOfAccounts.id, cur), eq(chartOfAccounts.companyId, companyId)));
+    cur = row?.parentId ?? null;
+  }
+  return false;
+}
+
+/** Validate parent exists, same type, and does not create a cycle when childId is the account being edited. */
+async function validateParentChoice(
+  companyId: string,
+  childType: string,
+  parentId: string | null,
+  childId?: string,
+): Promise<string | null> {
+  if (!parentId) return null;
+  const parent = await coaRow(companyId, parentId);
+  if (!parent) return "Parent account not found.";
+  if (parent.type !== childType) return "Parent must be the same account type (e.g. assets under assets).";
+  if (childId && (await reachesAncestor(companyId, parentId, childId))) {
+    return "That parent is under this account — choose a higher-level parent to avoid a circular hierarchy.";
+  }
+  return null;
+}
+
 // Standard 4000/8000-series pre-populated on seeding
 export const DEFAULT_COA: Array<{
   code: string;
@@ -14,11 +56,13 @@ export const DEFAULT_COA: Array<{
   description?: string;
   isSystem?: boolean;
   sortOrder?: number;
+  /** Set after insert — links to parent account code (same company). */
+  parentCode?: string;
 }> = [
   // ── ASSET (1000s) ─────────────────────────────────
   { code: "1000", name: "Cash & Bank Accounts",       type: "ASSET",   isSystem: true, sortOrder: 10 },
-  { code: "1010", name: "Checking Account",            type: "ASSET",   isSystem: true, sortOrder: 11 },
-  { code: "1020", name: "Savings Account",             type: "ASSET",   isSystem: true, sortOrder: 12 },
+  { code: "1010", name: "Checking Account",            type: "ASSET",   isSystem: true, sortOrder: 11, parentCode: "1000" },
+  { code: "1020", name: "Savings Account",             type: "ASSET",   isSystem: true, sortOrder: 12, parentCode: "1000" },
   { code: "1100", name: "Accounts Receivable",         type: "ASSET",   isSystem: true, sortOrder: 20 },
   { code: "1200", name: "Pledges Receivable",          type: "ASSET",   isSystem: true, sortOrder: 30 },
   { code: "1500", name: "Property & Equipment",        type: "ASSET",   isSystem: true, sortOrder: 40 },
@@ -91,17 +135,35 @@ export async function seedChartOfAccounts(companyId: string): Promise<void> {
 
   if (existing.length > 0) return; // already seeded
 
+  const codeToId: Record<string, string> = {};
   for (const acct of DEFAULT_COA) {
-    await db.insert(chartOfAccounts).values({
-      companyId,
-      code: acct.code,
-      name: acct.name,
-      type: acct.type,
-      description: acct.description ?? null,
-      isSystem: acct.isSystem ?? true,
-      isActive: true,
-      sortOrder: acct.sortOrder ?? 0,
-    });
+    const [created] = await db
+      .insert(chartOfAccounts)
+      .values({
+        companyId,
+        code: acct.code,
+        name: acct.name,
+        type: acct.type,
+        description: acct.description ?? null,
+        isSystem: acct.isSystem ?? true,
+        isActive: true,
+        sortOrder: acct.sortOrder ?? 0,
+        parentId: null,
+      })
+      .returning();
+    codeToId[acct.code] = created.id;
+  }
+
+  for (const acct of DEFAULT_COA) {
+    if (!acct.parentCode) continue;
+    const id = codeToId[acct.code];
+    const pid = codeToId[acct.parentCode];
+    if (id && pid) {
+      await db
+        .update(chartOfAccounts)
+        .set({ parentId: pid })
+        .where(eq(chartOfAccounts.id, id));
+    }
   }
 }
 
@@ -143,6 +205,11 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
       .limit(1);
     if (dup.length) return res.status(400).json({ error: "Account code already exists" });
 
+    const parentIdNorm =
+      parentId === null || parentId === undefined || parentId === "" ? null : String(parentId);
+    const parentErr = await validateParentChoice(companyId, type as string, parentIdNorm);
+    if (parentErr) return res.status(400).json({ error: parentErr });
+
     const [created] = await db
       .insert(chartOfAccounts)
       .values({
@@ -153,7 +220,7 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
         description: description ?? null,
         isSystem: false,
         isActive: true,
-        parentId: parentId ?? null,
+        parentId: parentIdNorm,
         sortOrder: sortOrder ?? 0,
       })
       .returning();
@@ -173,23 +240,66 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
 router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
-    const { name, description, isActive, parentId, sortOrder } = req.body ?? {};
+    const body = req.body ?? {};
+
+    const existing = await coaRow(companyId, req.params.id);
+    if (!existing) return res.status(404).json({ error: "Not found" });
+
+    const set: Record<string, unknown> = { updatedAt: new Date() };
+
+    if (typeof body.name === "string") {
+      const n = body.name.trim();
+      if (!n) return res.status(400).json({ error: "Name cannot be empty." });
+      set.name = n;
+    }
+
+    if (body.description !== undefined) {
+      set.description =
+        body.description === null || body.description === "" ? null : String(body.description);
+    }
+
+    if (typeof body.isActive === "boolean") set.isActive = body.isActive;
+
+    if (body.sortOrder !== undefined) {
+      const n = Number(body.sortOrder);
+      set.sortOrder = Number.isFinite(n) ? Math.trunc(n) : 0;
+    }
+
+    if (body.parentId !== undefined) {
+      const parentIdNorm =
+        body.parentId === null || body.parentId === "" ? null : String(body.parentId);
+      const perr = await validateParentChoice(companyId, existing.type, parentIdNorm, existing.id);
+      if (perr) return res.status(400).json({ error: perr });
+      set.parentId = parentIdNorm;
+    }
+
+    if (body.code !== undefined && !existing.isSystem) {
+      const code = String(body.code).trim();
+      if (!code) return res.status(400).json({ error: "Account code cannot be empty." });
+      const dup = await db
+        .select({ id: chartOfAccounts.id })
+        .from(chartOfAccounts)
+        .where(and(eq(chartOfAccounts.companyId, companyId), eq(chartOfAccounts.code, code)));
+      if (dup.some((d) => d.id !== existing.id)) {
+        return res.status(400).json({ error: "Account code already exists" });
+      }
+      set.code = code;
+    }
+
+    const keys = Object.keys(set).filter((k) => k !== "updatedAt");
+    if (keys.length === 0) {
+      return res.json({
+        ...existing,
+        createdAt: toIsoString(existing.createdAt),
+        updatedAt: toIsoString(existing.updatedAt),
+      });
+    }
 
     const [updated] = await db
       .update(chartOfAccounts)
-      .set({
-        name,
-        description: description ?? null,
-        isActive,
-        parentId: parentId ?? null,
-        sortOrder: sortOrder ?? undefined,
-        updatedAt: new Date(),
-      })
+      .set(set as any)
       .where(
-        and(
-          eq(chartOfAccounts.id, req.params.id),
-          eq(chartOfAccounts.companyId, companyId)
-        )
+        and(eq(chartOfAccounts.id, req.params.id), eq(chartOfAccounts.companyId, companyId)),
       )
       .returning();
 
@@ -200,6 +310,7 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
       updatedAt: toIsoString(updated.updatedAt),
     });
   } catch (error) {
+    console.error("chart-of-accounts PUT:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -220,6 +331,22 @@ router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
     if (!acct) return res.status(404).json({ error: "Not found" });
     if (acct.isSystem)
       return res.status(400).json({ error: "System accounts cannot be deleted" });
+
+    const [child] = await db
+      .select({ id: chartOfAccounts.id })
+      .from(chartOfAccounts)
+      .where(
+        and(
+          eq(chartOfAccounts.companyId, companyId),
+          eq(chartOfAccounts.parentId, req.params.id),
+        ),
+      )
+      .limit(1);
+    if (child) {
+      return res.status(400).json({
+        error: "This account has sub-accounts. Reassign or delete them first.",
+      });
+    }
 
     await db
       .delete(chartOfAccounts)

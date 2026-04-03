@@ -323,7 +323,7 @@ function EquityCombobox({
             <div className="px-3 py-4 text-center space-y-1">
               <p className="text-sm text-muted-foreground">No equity accounts in your Chart of Accounts.</p>
               <a
-                href={`${BASE}chart-of-accounts`}
+                href={`${BASE}accounts`}
                 className="text-sm font-semibold text-emerald-700 hover:underline"
                 onMouseDown={(e) => e.stopPropagation()}
               >
