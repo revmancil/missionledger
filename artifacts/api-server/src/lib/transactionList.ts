@@ -6,16 +6,42 @@
 import { db, transactions, transactionSplits } from "@workspace/db";
 import { eq, desc, asc, inArray } from "drizzle-orm";
 
-function isPostgresUndefinedColumn(err: unknown): boolean {
-  const e = err as { code?: string; message?: string };
-  if (e?.code === "42703") return true;
-  const m = String(e?.message ?? "");
-  return /column .* does not exist/i.test(m);
+/** Drizzle often throws one message ("Failed query: select …") while Postgres 42703 lives on `cause`. */
+function errorChainText(err: unknown): string {
+  const parts: string[] = [];
+  let e: unknown = err;
+  for (let i = 0; i < 10 && e; i++) {
+    if (e && typeof e === "object") {
+      const o = e as Record<string, unknown>;
+      if (o.code != null) parts.push(`code:${o.code}`);
+      if (typeof o.detail === "string") parts.push(o.detail);
+    }
+    if (e instanceof Error) parts.push(e.message);
+    else parts.push(String(e));
+    e = (e as { cause?: unknown })?.cause;
+  }
+  return parts.join("\n");
 }
 
-function isMissingVendorId(err: unknown): boolean {
-  if (!isPostgresUndefinedColumn(err)) return false;
-  return /vendor_id/i.test(String((err as Error)?.message ?? ""));
+/** True if this failure is almost certainly "vendor_id column missing" for `transactions`. */
+function shouldRetryTransactionsWithoutVendorId(err: unknown): boolean {
+  const t = errorChainText(err);
+  if (!/vendor_id/i.test(t)) return false;
+  if (/42703/.test(t)) return true;
+  if (/does not exist/i.test(t)) return true;
+  // Drizzle: full SQL in message but not always the Postgres wording
+  if (/Failed query:/i.test(t) && /"transactions"/i.test(t) && !/transaction_splits/i.test(t)) return true;
+  return false;
+}
+
+/** True if this failure is almost certainly "vendor_id column missing" on `transaction_splits`. */
+function shouldRetrySplitsWithoutVendorId(err: unknown): boolean {
+  const t = errorChainText(err);
+  if (!/vendor_id/i.test(t)) return false;
+  if (/42703/.test(t) && /transaction_splits/i.test(t)) return true;
+  if (/does not exist/i.test(t) && /vendor_id/i.test(t)) return true;
+  if (/Failed query:/i.test(t) && /transaction_splits/i.test(t)) return true;
+  return false;
 }
 
 /** Core transaction columns (no vendor_id) — safe for older schemas. */
@@ -59,7 +85,7 @@ export async function listTransactionRowsForCompany(companyId: string) {
       .where(where)
       .orderBy(...orderBy);
   } catch (e) {
-    if (!isMissingVendorId(e)) throw e;
+    if (!shouldRetryTransactionsWithoutVendorId(e)) throw e;
     const rows = await db
       .select(transactionRowBase)
       .from(transactions)
@@ -101,7 +127,7 @@ export async function loadSplitRowsByTransactionIds(txIds: string[]): Promise<an
         .orderBy(asc(transactionSplits.transactionId), asc(transactionSplits.sortOrder));
       out.push(...rows);
     } catch (e) {
-      if (!isMissingVendorId(e)) throw e;
+      if (!shouldRetrySplitsWithoutVendorId(e)) throw e;
       const rows = await db
         .select(splitRowBase)
         .from(transactionSplits)
