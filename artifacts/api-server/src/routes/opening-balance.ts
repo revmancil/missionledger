@@ -8,13 +8,28 @@ function moneyToCents(n: number): number {
   return Math.round(Number(n) * 100 + Number.EPSILON);
 }
 
-/** Drizzle `execute` may return `{ rows }` or an array-like row list depending on version/driver. */
+/** Drizzle `execute` may return `{ rows }`, a plain array, or an iterable row list depending on version/driver. */
 function firstSqlRow(result: unknown): Record<string, unknown> | undefined {
   if (result == null) return undefined;
   const any = result as { rows?: unknown[]; length?: number; [n: number]: unknown };
-  if (Array.isArray(any) && any.length > 0) return any[0] as Record<string, unknown>;
   if (Array.isArray(any.rows) && any.rows.length > 0) return any.rows[0] as Record<string, unknown>;
+  if (Array.isArray(result) && result.length > 0) return result[0] as Record<string, unknown>;
+  if (typeof (result as Iterable<unknown>)[Symbol.iterator] === "function") {
+    const it = (result as Iterable<Record<string, unknown>>)[Symbol.iterator]();
+    const first = it.next();
+    if (!first.done && first.value && typeof first.value === "object") {
+      return first.value as Record<string, unknown>;
+    }
+  }
   return undefined;
+}
+
+function exposeErrorDetails(): boolean {
+  return (
+    process.env.NODE_ENV === "development" ||
+    process.env.ML_EXPOSE_ERROR_DETAILS === "1" ||
+    process.env.ML_EXPOSE_ERROR_DETAILS === "true"
+  );
 }
 
 const router = Router();
@@ -271,7 +286,9 @@ router.post("/finalize", requireAuth, requireAdmin, async (req, res) => {
 
     // Void existing OB entry (journal entry + its GL entries)
     const [company] = await db.select().from(companies).where(eq(companies.id, companyId));
-    if (company?.openingBalanceEntryId) {
+    if (!company) return res.status(404).json({ error: "Company not found" });
+
+    if (company.openingBalanceEntryId) {
       const oldJeId = company.openingBalanceEntryId;
       await db
         .update(journalEntries)
@@ -298,6 +315,10 @@ router.post("/finalize", requireAuth, requireAdmin, async (req, res) => {
         postedAt: new Date(),
       })
       .returning();
+
+    if (!je?.id) {
+      throw new Error("Journal entry insert did not return a row.");
+    }
 
     // Insert JE lines and GL entries
     for (const row of activeRows) {
@@ -418,9 +439,17 @@ router.post("/finalize", requireAuth, requireAdmin, async (req, res) => {
   } catch (err) {
     console.error("Opening balance finalize error:", err);
     const details = err instanceof Error ? err.message : String(err);
+    const pg =
+      err && typeof err === "object" && "code" in err
+        ? String((err as { code?: unknown }).code ?? "")
+        : "";
     res.status(500).json({
       error: "Internal server error",
-      ...(process.env.NODE_ENV === "development" ? { details } : {}),
+      ...(exposeErrorDetails()
+        ? { details: pg ? `${details} (PostgreSQL ${pg})` : details }
+        : {
+            hint: "To see the underlying error in API responses, set ML_EXPOSE_ERROR_DETAILS=1 on the server and redeploy.",
+          }),
     });
   }
 });

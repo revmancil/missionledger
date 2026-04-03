@@ -4,6 +4,31 @@ import { X } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 
+/** Radix assigns descriptionId; shadcn `DialogDescription` is a forwardRef wrapper, not `DialogPrimitive.Description` ===. */
+function isDialogDescriptionElement(el: React.ReactElement): boolean {
+  if (el.type === DialogPrimitive.Description) return true
+  const t = el.type as { displayName?: string }
+  return t?.displayName === DialogPrimitive.Description.displayName
+}
+
+function treeContainsDialogDescription(node: React.ReactNode): boolean {
+  let found = false
+  const walk = (n: React.ReactNode) => {
+    if (found) return
+    React.Children.forEach(n, (c) => {
+      if (!React.isValidElement(c)) return
+      if (isDialogDescriptionElement(c)) {
+        found = true
+        return
+      }
+      const ch = (c.props as { children?: React.ReactNode })?.children
+      if (ch != null) walk(ch)
+    })
+  }
+  walk(node)
+  return found
+}
+
 const Dialog = DialogPrimitive.Root
 
 const DialogTrigger = DialogPrimitive.Trigger
@@ -41,6 +66,11 @@ const DialogContent = React.forwardRef<
       )}
       {...props}
     >
+      {!treeContainsDialogDescription(children) && (
+        <DialogPrimitive.Description className="sr-only">
+          Dialog content
+        </DialogPrimitive.Description>
+      )}
       {children}
       <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">
         <X className="h-4 w-4" />

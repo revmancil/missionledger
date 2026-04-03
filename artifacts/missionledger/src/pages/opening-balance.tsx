@@ -448,8 +448,8 @@ function AddAccountModal({
         </DialogHeader>
         <div className="space-y-4 py-1">
           {error && (
-            <div className="flex items-center gap-2 p-2.5 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700">
-              <AlertTriangle className="h-4 w-4 shrink-0" /> {error}
+            <div className="flex items-start gap-2 p-2.5 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700 whitespace-pre-line">
+              <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" /> {error}
             </div>
           )}
           <div className="grid grid-cols-[1fr_2fr] gap-3">
@@ -516,8 +516,8 @@ function ConfirmModal({
             <div><span className="text-muted-foreground">Lines:</span> <strong>{submitRows.length}</strong></div>
           </div>
           {error && (
-            <div className="flex items-center gap-2 p-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700">
-              <AlertTriangle className="h-4 w-4 shrink-0" /> {error}
+            <div className="flex items-start gap-2 p-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700 whitespace-pre-line">
+              <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" /> {error}
             </div>
           )}
           <div className="rounded-xl border border-gray-200 overflow-hidden">
@@ -963,7 +963,15 @@ export default function OpeningBalancePage() {
         body: JSON.stringify({ date: asOfDate, accountingMethod: method, rows: finalSubmitRows }),
       });
       const data = await res.json();
-      if (!res.ok) { setError(data.error ?? "Failed to save opening balance"); return; }
+      if (!res.ok) {
+        const base = data.error ?? "Failed to save opening balance";
+        const detail =
+          typeof data.details === "string" && data.details.trim() ? ` — ${data.details.trim()}` : "";
+        const hint =
+          typeof data.hint === "string" && data.hint.trim() ? `\n\n${data.hint.trim()}` : "";
+        setError(base + detail + hint);
+        return;
+      }
       setCreatedEntry(data);
       setShowConfirm(false);
       setPhase("done");
