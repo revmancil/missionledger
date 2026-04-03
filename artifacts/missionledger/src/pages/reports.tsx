@@ -314,7 +314,7 @@ export default function ReportsPage() {
 
     const { doc, startY, W } = makePdf(
       "Financial Statements",
-      `Period: ${new Date(applied.startDate).toLocaleDateString()} – ${new Date(applied.endDate).toLocaleDateString()}`
+      `Period: ${formatDate(applied.startDate)} – ${formatDate(applied.endDate)}`
     );
 
     let y = startY;
@@ -328,7 +328,7 @@ export default function ReportsPage() {
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
     doc.setTextColor(100, 100, 100);
-    doc.text(`${new Date(applied.startDate).toLocaleDateString()} – ${new Date(applied.endDate).toLocaleDateString()}`, 40, y + 8);
+    doc.text(`${formatDate(applied.startDate)} – ${formatDate(applied.endDate)}`, 40, y + 8);
     doc.setTextColor(0, 0, 0);
     y += 16;
 
@@ -573,7 +573,7 @@ export default function ReportsPage() {
     if (!accts.length) return;
     const { doc, startY } = makePdf(
       "General Ledger",
-      `${new Date(applied.startDate).toLocaleDateString()} – ${new Date(applied.endDate).toLocaleDateString()}${fundFilter ? "  |  Filtered by fund" : ""}`
+      `${formatDate(applied.startDate)} – ${formatDate(applied.endDate)}${fundFilter ? "  |  Filtered by fund" : ""}`
     );
     let y = startY;
     for (const acct of accts) {
@@ -630,7 +630,7 @@ export default function ReportsPage() {
     if (!groups.length) return;
     const { doc, startY } = makePdf(
       "General Journal",
-      `${new Date(applied.startDate).toLocaleDateString()} – ${new Date(applied.endDate).toLocaleDateString()}`
+      `${formatDate(applied.startDate)} – ${formatDate(applied.endDate)}`
     );
     let y = startY;
     for (const grp of groups) {
@@ -686,7 +686,7 @@ export default function ReportsPage() {
     if (!rows.length) return;
     const { doc, startY } = makePdf(
       "Transaction Register",
-      `${new Date(applied.startDate).toLocaleDateString()} – ${new Date(applied.endDate).toLocaleDateString()}  |  ${rows.length} records`
+      `${formatDate(applied.startDate)} – ${formatDate(applied.endDate)}  |  ${rows.length} records`
     );
     const total = rows.reduce((s, r) => s + r.amount, 0);
     autoTable(doc, {

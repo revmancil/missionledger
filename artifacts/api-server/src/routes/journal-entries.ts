@@ -3,23 +3,9 @@ import { db, journalEntries, journalEntryLines, accounts, chartOfAccounts, glEnt
 import { eq, and, desc } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
 import { logAudit, snap } from "../lib/audit";
+import { nextJournalEntryNumber } from "../lib/nextJournalEntryNumber";
 
 const router = Router();
-
-async function generateEntryNumber(companyId: string): Promise<string> {
-  const entries = await db.select({ entryNumber: journalEntries.entryNumber })
-    .from(journalEntries)
-    .where(eq(journalEntries.companyId, companyId))
-    .orderBy(desc(journalEntries.createdAt))
-    .limit(1);
-
-  let nextNumber = 1;
-  if (entries.length) {
-    const match = entries[0].entryNumber.match(/JE-(\d+)/);
-    if (match) nextNumber = parseInt(match[1]) + 1;
-  }
-  return `JE-${String(nextNumber).padStart(6, "0")}`;
-}
 
 async function enrichEntry(entry: any, companyId: string) {
   const lines = await db.select().from(journalEntryLines).where(eq(journalEntryLines.journalEntryId, entry.id));
@@ -86,7 +72,7 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
       return res.status(400).json({ error: "Debits must equal credits" });
     }
 
-    const entryNumber = await generateEntryNumber(companyId);
+    const entryNumber = await nextJournalEntryNumber(companyId);
 
     const [entry] = await db.insert(journalEntries).values({
       companyId,

@@ -1,10 +1,11 @@
 import { Router } from "express";
 import { db, companies, chartOfAccounts, bankAccounts, funds, journalEntries, journalEntryLines, glEntries, transactions } from "@workspace/db";
-import { eq, and, asc, desc, inArray, sql } from "drizzle-orm";
+import { eq, and, asc, inArray, sql } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
 import { parseYmdToUtcNoon, utcYmdToday } from "../lib/safeIso";
 import { firstSqlRow, sqlRows } from "../lib/sqlRows";
 import { voidGlEntries } from "../lib/gl";
+import { nextJournalEntryNumber } from "../lib/nextJournalEntryNumber";
 
 function moneyToCents(n: number): number {
   return Math.round(Number(n) * 100 + Number.EPSILON);
@@ -300,19 +301,7 @@ router.post("/finalize", requireAuth, requireAdmin, async (req, res) => {
       : [];
     const fundMap = Object.fromEntries(fundsInEntry.map((f) => [f.id, f]));
 
-    // Generate entry number
-    const [lastEntry] = await db
-      .select({ entryNumber: journalEntries.entryNumber })
-      .from(journalEntries)
-      .where(eq(journalEntries.companyId, companyId))
-      .orderBy(desc(journalEntries.createdAt))
-      .limit(1);
-    let nextNum = 1;
-    if (lastEntry?.entryNumber) {
-      const m = lastEntry.entryNumber.match(/JE-(\d+)/);
-      if (m) nextNum = parseInt(m[1]) + 1;
-    }
-    const entryNumber = `JE-${String(nextNum).padStart(6, "0")}`;
+    const entryNumber = await nextJournalEntryNumber(companyId);
 
     // ── Pre-flight: propagate void status from any historically-voided JEs whose
     // GL entries were not properly voided (e.g. from an older code path).

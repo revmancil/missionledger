@@ -26,6 +26,24 @@ export function utcYmdToday(): string {
 }
 
 /**
+ * Inclusive UTC calendar-day bounds for `YYYY-MM-DD`.
+ * Use for report ranges so `2026-01-01` is not parsed as UTC midnight (which shifts to the prior local day in the Americas).
+ */
+export function parseYmdToUtcDayBounds(raw: unknown): { from: Date; to: Date; ymd: string } | null {
+  const head = String(raw ?? "").trim().slice(0, 10);
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(head);
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+  const from = new Date(Date.UTC(y, mo - 1, d, 0, 0, 0, 0));
+  const to = new Date(Date.UTC(y, mo - 1, d, 23, 59, 59, 999));
+  if (from.getUTCFullYear() !== y || from.getUTCMonth() !== mo - 1 || from.getUTCDate() !== d) return null;
+  return { from, to, ymd: head };
+}
+
+/**
  * Coerce DB/driver values (Date, ISO string, number) to a Date or null.
  * Never throws — avoids TypeError when code assumes Date but pg returns a string.
  */

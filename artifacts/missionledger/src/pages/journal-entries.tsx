@@ -193,7 +193,8 @@ export default function JournalEntriesPage() {
       const res = await api(`${BASE}api/journal-entries`);
       if (res.ok) {
         const data = await res.json();
-        setHistory(data.filter((e: any) => e.status === "POSTED"));
+        // Include VOID so replaced opening-balance entries (same # shown on confirm) are visible
+        setHistory(data.filter((e: any) => e.status === "POSTED" || e.status === "VOID"));
       }
     } catch {
     } finally {
@@ -625,7 +626,7 @@ function HistoryPanel({
       <div className="px-6 py-4 border-b border-border flex items-center justify-between">
         <div className="flex items-center gap-2">
           <History className="w-4 h-4 text-muted-foreground" />
-          <h3 className="text-sm font-semibold text-foreground">Posted Entries</h3>
+          <h3 className="text-sm font-semibold text-foreground">Journal history</h3>
           <Badge variant="secondary" className="text-xs">{history.length}</Badge>
         </div>
         <Button variant="ghost" size="sm" onClick={onRefresh} disabled={loading} className="text-xs gap-1.5">
@@ -637,9 +638,9 @@ function HistoryPanel({
         <div className="py-8 text-center text-muted-foreground text-sm">Loading…</div>
       ) : history.length === 0 ? (
         <div className="py-8 text-center text-muted-foreground text-sm space-y-2 px-4">
-          <p>No posted journal entries in the list yet.</p>
+          <p>No journal entries in the list yet.</p>
           <p className="text-xs max-w-sm mx-auto">
-            Opening balances post as &quot;Opening Balance Entry&quot; from the Opening Balances page. Choose Refresh above if you just posted one.
+            Opening balances post as &quot;Opening Balance Entry&quot; from the Opening Balances page. Re-posting voids the prior entry (it stays in history as Void). Choose Refresh if you just posted.
           </p>
         </div>
       ) : (
@@ -662,8 +663,13 @@ function HistoryPanel({
                   0
                 );
                 return (
-                  <TableRow key={entry.id}>
+                  <TableRow key={entry.id} className={entry.status === "VOID" ? "opacity-70" : undefined}>
                     <TableCell className="font-mono text-sm font-semibold">{entry.entryNumber}</TableCell>
+                    <TableCell className="text-sm">
+                      <Badge variant={entry.status === "VOID" ? "destructive" : "secondary"} className="text-[10px] uppercase">
+                        {entry.status ?? "—"}
+                      </Badge>
+                    </TableCell>
                     <TableCell className="text-sm">{formatDate(entry.date)}</TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {entry.referenceNumber || "—"}

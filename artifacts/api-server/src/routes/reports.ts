@@ -3,8 +3,35 @@ import { db, accounts, chartOfAccounts, journalEntries, journalEntryLines, donat
 import { eq, and, gte, lte, inArray, sql, isNotNull, isNull, ne } from "drizzle-orm";
 import { requireAuth } from "../lib/auth";
 import { sqlRows } from "../lib/sqlRows";
+import { parseYmdToUtcDayBounds, utcYmdToday } from "../lib/safeIso";
 
 const router = Router();
+
+type ReportRangeOk = { ok: true; start: Date; end: Date; startYmd: string; endYmd: string };
+type ReportRangeErr = { ok: false; error: string };
+
+/** UTC calendar-day bounds for report queries; echoes YYYY-MM-DD for API clients (no local-date drift). */
+function parseReportRange(startDate: unknown, endDate: unknown): ReportRangeOk | ReportRangeErr {
+  const y = new Date().getUTCFullYear();
+  const hasS = startDate != null && String(startDate).trim() !== "";
+  const hasE = endDate != null && String(endDate).trim() !== "";
+  const sParsed = hasS ? parseYmdToUtcDayBounds(startDate) : null;
+  const eParsed = hasE ? parseYmdToUtcDayBounds(endDate) : null;
+  if (hasS && !sParsed) return { ok: false, error: "Invalid startDate (use YYYY-MM-DD)." };
+  if (hasE && !eParsed) return { ok: false, error: "Invalid endDate (use YYYY-MM-DD)." };
+  const sb = sParsed ?? parseYmdToUtcDayBounds(`${y}-01-01`);
+  const eb = eParsed ?? parseYmdToUtcDayBounds(utcYmdToday());
+  if (!sb || !eb) return { ok: false, error: "Invalid report date range." };
+  if (sb.from.getTime() > eb.to.getTime()) return { ok: false, error: "startDate must be on or before endDate." };
+  return { ok: true, start: sb.from, end: eb.to, startYmd: sb.ymd, endYmd: eb.ymd };
+}
+
+function parseAsOfDay(asOfDate: unknown): { ok: true; end: Date; ymd: string } | { ok: false; error: string } {
+  const has = asOfDate != null && String(asOfDate).trim() !== "";
+  const b = has ? parseYmdToUtcDayBounds(asOfDate) : parseYmdToUtcDayBounds(utcYmdToday());
+  if (!b) return { ok: false, error: "Invalid asOfDate (use YYYY-MM-DD)." };
+  return { ok: true, end: b.to, ymd: b.ymd };
+}
 
 // GET /reports/profit-loss  — Statement of Activities from GL entries
 router.get("/profit-loss", requireAuth, async (req, res) => {
@@ -12,10 +39,10 @@ router.get("/profit-loss", requireAuth, async (req, res) => {
     const { companyId } = (req as any).user;
     const { startDate, endDate } = req.query;
 
-    const start = startDate ? new Date(startDate as string) : new Date(new Date().getFullYear(), 0, 1);
-    const end   = endDate   ? new Date(endDate   as string) : new Date();
-    const endOfDay = new Date(end);
-    endOfDay.setHours(23, 59, 59, 999);
+    const range = parseReportRange(startDate, endDate);
+    if (!range.ok) return res.status(400).json({ error: range.error });
+    const start = range.start;
+    const endOfDay = range.end;
 
     const glRows = await db.execute(sql`
       SELECT
@@ -60,8 +87,8 @@ router.get("/profit-loss", requireAuth, async (req, res) => {
     const totalExpenses = expenseRows.reduce((s, r) => s + r.amount, 0);
 
     res.json({
-      startDate: start.toISOString(),
-      endDate:   endOfDay.toISOString(),
+      startDate: range.startYmd,
+      endDate:   range.endYmd,
       revenue:   revenueRows,
       expenses:  expenseRows,
       totalRevenue,
@@ -80,9 +107,9 @@ router.get("/balance-sheet", requireAuth, async (req, res) => {
     const { companyId } = (req as any).user;
     const { asOfDate } = req.query;
 
-    const asOf = asOfDate ? new Date(asOfDate as string) : new Date();
-    const asOfEnd = new Date(asOf);
-    asOfEnd.setHours(23, 59, 59, 999);
+    const asOfParsed = parseAsOfDay(asOfDate);
+    if (!asOfParsed.ok) return res.status(400).json({ error: asOfParsed.error });
+    const asOfEnd = asOfParsed.end;
 
     // ── 1. Asset & Liability rows (no fund split needed) ──────────────────────
     // LEFT JOIN journal_entries and filter je.status != 'VOID' to exclude any
@@ -278,7 +305,7 @@ router.get("/balance-sheet", requireAuth, async (req, res) => {
     const unpostedActivity = Math.round((totalAssets - (totalLiabilities + totalNetAssets)) * 100) / 100;
 
     res.json({
-      asOfDate: asOfEnd.toISOString(),
+      asOfDate: asOfParsed.ymd,
       assets,
       liabilities,
       totalAssets,
@@ -310,8 +337,10 @@ router.get("/cash-flow", requireAuth, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
     const { startDate, endDate } = req.query;
-    const start = startDate ? new Date(startDate as string) : new Date(new Date().getFullYear(), 0, 1);
-    const end = endDate ? new Date(endDate as string) : new Date();
+    const range = parseReportRange(startDate, endDate);
+    if (!range.ok) return res.status(400).json({ error: range.error });
+    const start = range.start;
+    const end = range.end;
 
     const allDonations = await db.select().from(donations).where(eq(donations.companyId, companyId));
     const allExpenses = await db.select().from(expenses).where(eq(expenses.companyId, companyId));
@@ -323,8 +352,8 @@ router.get("/cash-flow", requireAuth, async (req, res) => {
     const totalExpenses = filteredExpenses.reduce((s, e) => s + (e.amount || 0), 0);
 
     res.json({
-      startDate: start.toISOString(),
-      endDate: end.toISOString(),
+      startDate: range.startYmd,
+      endDate: range.endYmd,
       operating: [
         { accountId: "op-1", accountCode: "4000", accountName: "Donations Received", amount: totalRevenue, children: [] },
         { accountId: "op-2", accountCode: "5000", accountName: "Operating Expenses", amount: -totalExpenses, children: [] },
@@ -393,8 +422,10 @@ router.get("/general-ledger", requireAuth, async (req, res) => {
     const { companyId } = (req as any).user;
     const { startDate, endDate, fundId: filterFundId } = req.query;
 
-    const start = startDate ? new Date(startDate as string) : new Date(new Date().getFullYear(), 0, 1);
-    const end = endDate ? new Date(endDate as string) : new Date();
+    const range = parseReportRange(startDate, endDate);
+    if (!range.ok) return res.status(400).json({ error: range.error });
+    const start = range.start;
+    const end = range.end;
 
     const glRaw = await db.execute(sql`
       SELECT
@@ -451,8 +482,8 @@ router.get("/general-ledger", requireAuth, async (req, res) => {
     }
 
     res.json({
-      startDate: start.toISOString(),
-      endDate: end.toISOString(),
+      startDate: range.startYmd,
+      endDate: range.endYmd,
       entries,
       fundBalances: Object.values(fundBalances),
       totalEntries: entries.length,
@@ -469,10 +500,10 @@ router.get("/gl-by-account", requireAuth, async (req, res) => {
     const { companyId } = (req as any).user;
     const { startDate, endDate, fundId: filterFundId } = req.query;
 
-    const start = startDate ? new Date(startDate as string) : new Date(new Date().getFullYear(), 0, 1);
-    const end   = endDate   ? new Date(endDate   as string) : new Date();
-    const endOfDay = new Date(end);
-    endOfDay.setHours(23, 59, 59, 999);
+    const range = parseReportRange(startDate, endDate);
+    if (!range.ok) return res.status(400).json({ error: range.error });
+    const start = range.start;
+    const endOfDay = range.end;
 
     const fundFilter = filterFundId && filterFundId !== ""
       ? sql`AND g.fund_id = ${filterFundId as string}`
@@ -599,8 +630,8 @@ router.get("/gl-by-account", requireAuth, async (req, res) => {
       .sort((a, b) => a.sortOrder - b.sortOrder || a.accountCode.localeCompare(b.accountCode));
 
     res.json({
-      startDate: start.toISOString(),
-      endDate: endOfDay.toISOString(),
+      startDate: range.startYmd,
+      endDate: range.endYmd,
       accounts: glAccounts,
     });
   } catch (error) {
@@ -615,10 +646,10 @@ router.get("/general-journal", requireAuth, async (req, res) => {
     const { companyId } = (req as any).user;
     const { startDate, endDate, fundId: filterFundId } = req.query;
 
-    const start = startDate ? new Date(startDate as string) : new Date(new Date().getFullYear(), 0, 1);
-    const end   = endDate   ? new Date(endDate   as string) : new Date();
-    const endOfDay = new Date(end);
-    endOfDay.setHours(23, 59, 59, 999);
+    const range = parseReportRange(startDate, endDate);
+    if (!range.ok) return res.status(400).json({ error: range.error });
+    const start = range.start;
+    const endOfDay = range.end;
 
     const fundFilter = filterFundId && filterFundId !== ""
       ? sql`AND g.fund_id = ${filterFundId as string}`
@@ -687,8 +718,8 @@ router.get("/general-journal", requireAuth, async (req, res) => {
     }
 
     res.json({
-      startDate: start.toISOString(),
-      endDate: endOfDay.toISOString(),
+      startDate: range.startYmd,
+      endDate: range.endYmd,
       groups: groupOrder.map(k => groups[k]),
       totalGroups: groupOrder.length,
     });
@@ -704,10 +735,10 @@ router.get("/transaction-register", requireAuth, async (req, res) => {
     const { companyId } = (req as any).user;
     const { startDate, endDate, search, minAmount, maxAmount, fundId: filterFundId } = req.query;
 
-    const start = startDate ? new Date(startDate as string) : new Date(new Date().getFullYear(), 0, 1);
-    const end   = endDate   ? new Date(endDate   as string) : new Date();
-    const endOfDay = new Date(end);
-    endOfDay.setHours(23, 59, 59, 999);
+    const range = parseReportRange(startDate, endDate);
+    if (!range.ok) return res.status(400).json({ error: range.error });
+    const start = range.start;
+    const endOfDay = range.end;
 
     const fundFilter = filterFundId && filterFundId !== ""
       ? sql`AND g.fund_id = ${filterFundId as string}`
@@ -773,8 +804,8 @@ router.get("/transaction-register", requireAuth, async (req, res) => {
     if (maxAmount) txns = txns.filter(t => t.amount <= parseFloat(maxAmount as string));
 
     res.json({
-      startDate: start.toISOString(),
-      endDate: endOfDay.toISOString(),
+      startDate: range.startYmd,
+      endDate: range.endYmd,
       transactions: txns,
       total: txns.length,
     });
@@ -830,9 +861,10 @@ router.get("/990-readiness", requireAuth, async (req, res) => {
     const { companyId } = (req as any).user;
     const { startDate, endDate } = req.query;
 
-    const start = startDate ? new Date(startDate as string) : new Date(new Date().getFullYear(), 0, 1);
-    const end   = endDate   ? new Date(endDate   as string) : new Date();
-    const endOfDay = new Date(end); endOfDay.setHours(23, 59, 59, 999);
+    const range = parseReportRange(startDate, endDate);
+    if (!range.ok) return res.status(400).json({ error: range.error });
+    const start = range.start;
+    const endOfDay = range.end;
 
     // All EXPENSE-side GL entries in the period (exclude bank/asset entries for the same tx)
     const expenseRows = await db.execute(sql`
@@ -885,7 +917,7 @@ router.get("/990-readiness", requireAuth, async (req, res) => {
       tagged,
       untagged: untagged.length,
       untaggedItems: untagged,
-      period: { startDate: start.toISOString(), endDate: endOfDay.toISOString() },
+      period: { startDate: range.startYmd, endDate: range.endYmd },
     });
   } catch (err) {
     console.error("990 readiness error:", err);
@@ -901,9 +933,10 @@ router.get("/990-preparer", requireAuth, async (req, res) => {
     const { companyId } = (req as any).user;
     const { startDate, endDate } = req.query;
 
-    const start = startDate ? new Date(startDate as string) : new Date(new Date().getFullYear(), 0, 1);
-    const end   = endDate   ? new Date(endDate   as string) : new Date();
-    const endOfDay = new Date(end); endOfDay.setHours(23, 59, 59, 999);
+    const range = parseReportRange(startDate, endDate);
+    if (!range.ok) return res.status(400).json({ error: range.error });
+    const start = range.start;
+    const endOfDay = range.end;
 
     // ── Expense rows with functional breakdown ──────────────────────────────
     const expenseRows = await db.execute(sql`
@@ -992,7 +1025,7 @@ router.get("/990-preparer", requireAuth, async (req, res) => {
     const passesPublicSupportTest = publicSupportPct >= 33.33;
 
     res.json({
-      period: { startDate: start.toISOString(), endDate: endOfDay.toISOString() },
+      period: { startDate: range.startYmd, endDate: range.endYmd },
       irsLines,
       totals: {
         grandTotal,
@@ -1026,9 +1059,10 @@ router.get("/990-export", requireAuth, async (req, res) => {
     const { companyId } = (req as any).user;
     const { startDate, endDate } = req.query;
 
-    const start = startDate ? new Date(startDate as string) : new Date(new Date().getFullYear(), 0, 1);
-    const end   = endDate   ? new Date(endDate   as string) : new Date();
-    const endOfDay = new Date(end); endOfDay.setHours(23, 59, 59, 999);
+    const range = parseReportRange(startDate, endDate);
+    if (!range.ok) return res.status(400).json({ error: range.error });
+    const start = range.start;
+    const endOfDay = range.end;
 
     const exportRaw = await db.execute(sql`
       SELECT
@@ -1090,7 +1124,7 @@ router.get("/990-export", requireAuth, async (req, res) => {
     }
 
     const csv = lines.join("\r\n");
-    const year = start.getFullYear();
+    const year = parseInt(range.startYmd.slice(0, 4), 10) || new Date().getUTCFullYear();
     res.setHeader("Content-Type", "text/csv");
     res.setHeader("Content-Disposition", `attachment; filename="990-export-${year}.csv"`);
     res.send(csv);
