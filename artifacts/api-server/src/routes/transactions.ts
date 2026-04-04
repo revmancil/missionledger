@@ -441,6 +441,7 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
           const s = rawSplits[i];
           await trx.insert(transactionSplits).values({
             transactionId: row.id,
+            companyId,
             chartAccountId: s.chartAccountId ?? null,
             vendorId: s.vendorId ?? null,
             amount: s.amount,
@@ -761,6 +762,7 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
           const s = rawSplits[i];
           await trx.insert(transactionSplits).values({
             transactionId: row.id,
+            companyId,
             chartAccountId: s.chartAccountId ?? null,
             vendorId: s.vendorId ?? null,
             amount: s.amount,
