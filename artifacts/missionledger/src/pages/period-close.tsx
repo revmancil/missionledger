@@ -17,8 +17,14 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
 const BASE = import.meta.env.BASE_URL;
-const api = (url: string, init?: RequestInit) =>
-  fetch(url, { credentials: "include", ...init });
+const api = (url: string, init?: RequestInit) => {
+  const token = localStorage.getItem("ml_token");
+  return fetch(url, {
+    credentials: "include",
+    ...init,
+    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(init?.headers ?? {}) },
+  });
+};
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 interface HealthCheck {

@@ -18,7 +18,12 @@ import { cn } from "@/lib/utils";
 
 const BASE = import.meta.env.BASE_URL;
 function api(url: string, init?: RequestInit) {
-  return fetch(url, { credentials: "include", ...init });
+  const token = localStorage.getItem("ml_token");
+  return fetch(url, {
+    credentials: "include",
+    ...init,
+    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(init?.headers ?? {}) },
+  });
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────

@@ -11,6 +11,47 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { apiUrl } from "@/lib/api-base";
 
+const BASE = import.meta.env.BASE_URL;
+
+function getAuthHeaders(): HeadersInit {
+  const token = localStorage.getItem("ml_token");
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+function apiGet(path: string) {
+  return fetch(`${BASE}${path}`, {
+    credentials: "include",
+    headers: getAuthHeaders(),
+  }).then((r) => (r.ok ? r.json() : r.json().then((e: any) => Promise.reject(e.error))));
+}
+
+function apiPost(path: string, init?: RequestInit) {
+  return fetch(`${BASE}${path}`, {
+    method: "POST",
+    credentials: "include",
+    ...init,
+    headers: { ...getAuthHeaders(), ...(init?.headers ?? {}) },
+  }).then((r) => (r.ok ? r.json() : r.json().then((e: any) => Promise.reject(e.error))));
+}
+
+function apiPut(path: string, init?: RequestInit) {
+  return fetch(`${BASE}${path}`, {
+    method: "PUT",
+    credentials: "include",
+    ...init,
+    headers: { ...getAuthHeaders(), ...(init?.headers ?? {}) },
+  }).then((r) => (r.ok ? r.json() : r.json().then((e: any) => Promise.reject(e.error))));
+}
+
+function apiDelete(path: string, init?: RequestInit) {
+  return fetch(`${BASE}${path}`, {
+    method: "DELETE",
+    credentials: "include",
+    ...init,
+    headers: { ...getAuthHeaders(), ...(init?.headers ?? {}) },
+  }).then((r) => (r.ok ? r.json() : r.json().then((e: any) => Promise.reject(e.error))));
+}
+
 // ── Fund type helpers ─────────────────────────────────────────────────────────
 const FUND_TYPE_LABELS: Record<string, string> = {
   UNRESTRICTED:     "Unrestricted",
@@ -33,10 +74,7 @@ function useFetch<T>(url: string | null) {
   useEffect(() => {
     if (!url) return;
     setIsLoading(true);
-    const token = typeof window !== "undefined" ? localStorage.getItem("ml_token") : null;
-    const headers: Record<string, string> = {};
-    if (token) headers.Authorization = `Bearer ${token}`;
-    fetch(url, { credentials: "include", headers })
+    fetch(url, { credentials: "include", headers: { ...getAuthHeaders() } })
       .then(async (r) => {
         if (!r.ok) throw new Error(String(r.status));
         return r.json() as Promise<T>;
@@ -229,10 +267,9 @@ export default function ReportsPage() {
   const handleExportCpa = useCallback(async () => {
     const year = applied.startDate.slice(0, 4);
     const url = apiUrl(`/api/reports/990-export?year=${year}`);
-    const token = localStorage.getItem("ml_token");
     const res = await fetch(url, {
       credentials: "include",
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      headers: { ...getAuthHeaders() },
     });
     if (!res.ok) return;
     const blob = await res.blob();
