@@ -1,7 +1,7 @@
 import { Router, type Request } from "express";
 import {
   db, transactions, transactionSplits, chartOfAccounts,
-  bankAccounts, funds, vendors, companies, journalEntryLines,
+  bankAccounts, funds, vendors, companies, journalEntryLines, donations,
 } from "@workspace/db";
 import { eq, and, inArray, sql, ne } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
@@ -371,6 +371,7 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
       amount, type, status,
       chartAccountId, memo, checkNumber, referenceNumber,
       fundId, splits: rawSplits, functionalType, donorName,
+      donorLines: rawDonorLines, showDonorSplit,
     } = req.body ?? {};
 
     if (!date || !payee || amount === undefined)
@@ -686,6 +687,7 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
       date, payee, vendorId, amount, type, status,
       chartAccountId, memo, checkNumber, referenceNumber,
       fundId, bankAccountId, splits: rawSplits, functionalType, donorName,
+      donorLines: rawDonorLines, showDonorSplit,
     } = req.body ?? {};
 
     const [existing] = await db
@@ -779,6 +781,29 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
     await generateGlEntries(updated.id, companyId).catch((e) =>
       console.error("[GL] update error:", e)
     );
+
+    const donorLines = rawDonorLines ?? [];
+    if (showDonorSplit && Array.isArray(donorLines) && donorLines.length > 0) {
+      await db
+        .delete(donations)
+        .where(and(eq(donations.companyId, companyId), eq(donations.transactionId, updated.id)));
+      for (const d of donorLines) {
+        if (!d?.donorName || d.amount === undefined || d.amount === "") continue;
+        const amt = parseFloat(String(d.amount));
+        if (Number.isNaN(amt)) continue;
+        await db.insert(donations).values({
+          companyId,
+          donorName: String(d.donorName),
+          amount: amt,
+          date: updated.date,
+          fundId: d.fundId || null,
+          notes: d.memo ? String(d.memo) : null,
+          transactionId: updated.id,
+          type: "CASH",
+        });
+      }
+    }
+
     // Keep bank account balance in sync (handle bank account change)
     recomputeBankBalance(updated.bankAccountId, companyId).catch((e) =>
       console.error("[Balance] update sync error:", e)

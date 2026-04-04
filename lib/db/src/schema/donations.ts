@@ -13,6 +13,7 @@ export const donations = pgTable("donations", {
   date: timestamp("date").notNull(),
   type: donationTypeEnum("type").notNull().default("CASH"),
   fundId: text("fund_id"),
+  transactionId: text("transaction_id"),
   accountId: text("account_id"),
   cashAccountId: text("cash_account_id"),
   journalEntryId: text("journal_entry_id"),

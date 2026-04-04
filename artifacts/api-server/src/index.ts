@@ -297,6 +297,11 @@ async function ensureSchema() {
   await pool.query(`SET search_path TO public, pg_catalog`);
 
   await ensureAlter(
+    "donations.transaction_id",
+    `ALTER TABLE donations ADD COLUMN IF NOT EXISTS transaction_id TEXT`,
+  );
+
+  await ensureAlter(
     "bank_transactions.plaid_transaction_id",
     `ALTER TABLE bank_transactions ADD COLUMN IF NOT EXISTS plaid_transaction_id TEXT`,
   );

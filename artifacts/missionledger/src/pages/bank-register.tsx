@@ -109,6 +109,17 @@ function newSplitLine(): SplitLine {
   return { id: crypto.randomUUID(), chartAccountId: "", vendorId: "", amount: "", memo: "", functionalType: "" };
 }
 
+type DonorLine = {
+  id: string;
+  donorName: string;
+  amount: string;
+  fundId: string;
+  memo: string;
+};
+function newDonorLine(): DonorLine {
+  return { id: crypto.randomUUID(), donorName: "", amount: "", fundId: "", memo: "" };
+}
+
 const emptyForm = {
   date: format(new Date(), "yyyy-MM-dd"),
   payee: "", vendorId: "", amount: "",
@@ -116,10 +127,11 @@ const emptyForm = {
   status: "UNCLEARED" as "UNCLEARED" | "CLEARED",
   chartAccountId: "", fundId: "", bankAccountId: "",
   memo: "", checkNumber: "", referenceNumber: "",
-  donorName: "",
   isSplit: false,
   functionalType: "",
   splits: [newSplitLine()],
+  donorLines: [] as DonorLine[],
+  showDonorSplit: false,
 };
 
 function StatusBadge({ status }: { status: string }) {
@@ -697,6 +709,8 @@ export default function BankRegisterPage() {
       ...emptyForm,
       bankAccountId: selectedBank !== "ALL" ? selectedBank : (bankAccounts[0]?.id ?? ""),
       splits: [newSplitLine()],
+      donorLines: [],
+      showDonorSplit: false,
     });
     setShowForm(true);
   }
@@ -763,7 +777,6 @@ export default function BankRegisterPage() {
       memo: tx.memo ?? "",
       checkNumber: tx.checkNumber ?? "",
       referenceNumber: tx.referenceNumber ?? "",
-      donorName: (tx as any).donorName ?? "",
       isSplit: tx.isSplit,
       functionalType: (tx as any).functionalType ?? "",
       splits: tx.isSplit && tx.splits.length > 0
@@ -776,8 +789,25 @@ export default function BankRegisterPage() {
             functionalType: (s as any).functionalType ?? "",
           }))
         : [newSplitLine()],
+      donorLines: (tx as any).donorName
+        ? [{
+            ...newDonorLine(),
+            donorName: String((tx as any).donorName),
+            amount: String(tx.amount),
+            fundId: tx.fund?.id ?? "",
+          }]
+        : [newDonorLine()],
+      showDonorSplit: !!(tx as any).donorName,
     });
     setShowForm(true);
+  }
+
+  function updateDonorLine(idx: number, field: keyof DonorLine, val: string) {
+    setForm((f) => {
+      const next = [...f.donorLines];
+      next[idx] = { ...next[idx], [field]: val };
+      return { ...f, donorLines: next };
+    });
   }
 
   function updateSplit(idx: number, field: keyof SplitLine, val: string) {
@@ -815,7 +845,10 @@ export default function BankRegisterPage() {
         referenceNumber: form.referenceNumber || null,
         memo: form.memo || null,
         isSplit: form.isSplit,
-        donorName: form.donorName || null,
+        donorName:
+          form.type === "CREDIT"
+            ? (form.donorLines[0]?.donorName?.trim() || null)
+            : null,
         functionalType: form.isSplit ? null : (form.functionalType || null),
         splits: form.isSplit
           ? form.splits.map((s, i) => ({
@@ -827,6 +860,16 @@ export default function BankRegisterPage() {
               sortOrder: i,
             }))
           : [],
+        donorLines:
+          form.type === "CREDIT"
+            ? form.donorLines.map((d) => ({
+                donorName: d.donorName,
+                amount: d.amount,
+                fundId: d.fundId || null,
+                memo: d.memo || null,
+              }))
+            : [],
+        showDonorSplit: form.type === "CREDIT" && form.showDonorSplit,
       };
 
       const url = editTx ? `/api/transactions/${editTx.id}` : "/api/transactions";
@@ -1470,19 +1513,113 @@ export default function BankRegisterPage() {
               </div>
             </div>
 
-            {/* Donor Name (shown only for credit/income transactions) */}
+            {/* Donor batch (deposits only) — same placement as former single donor name */}
             {form.type === "CREDIT" && (
-              <div className="flex items-start gap-2 rounded-md border border-emerald-200 bg-emerald-50/60 px-3 py-2.5">
-                <div className="flex-1">
-                  <Label className="text-xs text-emerald-800 font-semibold">Donor Name <span className="font-normal text-emerald-600">(optional)</span></Label>
-                  <Input
-                    className="mt-1 bg-white border-emerald-200 focus-visible:ring-emerald-300"
-                    placeholder="e.g. Jane Smith or Smith Family Foundation"
-                    value={form.donorName}
-                    onChange={(e) => setForm({ ...form, donorName: e.target.value })}
-                  />
-                  <p className="text-[10px] text-emerald-700 mt-1">Tagging a donor links this gift to the Donor Giving tracker.</p>
+              <div className="rounded-md border border-emerald-200 bg-emerald-50/60 px-3 py-2.5">
+                <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 mb-2">
+                  <div className="flex-1 min-w-0">
+                    <Label className="text-xs text-emerald-800 font-semibold">
+                      Donor batch <span className="font-normal text-emerald-600">(optional)</span>
+                    </Label>
+                    <p className="text-[10px] text-emerald-700 mt-0.5">
+                      Tag donors and funds; totals should match the deposit. Links to the Donor Giving tracker.
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="shrink-0 border-emerald-300 text-emerald-900 hover:bg-emerald-100/80"
+                    onClick={() => setForm((f) => ({
+                      ...f,
+                      showDonorSplit: !f.showDonorSplit,
+                      donorLines: f.donorLines.length ? f.donorLines : [newDonorLine()],
+                    }))}
+                  >
+                    {form.showDonorSplit ? "Hide donors" : "Batch donors"}
+                  </Button>
                 </div>
+
+                {form.showDonorSplit && (
+                  <div className="space-y-2 pt-1 border-t border-emerald-200/80">
+                    {form.donorLines.map((donor, idx) => (
+                      <div key={donor.id} className="grid grid-cols-12 gap-2 items-center">
+                        <div className="col-span-12 sm:col-span-4">
+                          <Input
+                            className="bg-white border-emerald-200"
+                            placeholder="Donor name"
+                            value={donor.donorName}
+                            onChange={(e) => updateDonorLine(idx, "donorName", e.target.value)}
+                          />
+                        </div>
+                        <div className="col-span-4 sm:col-span-2">
+                          <Input
+                            className="bg-white border-emerald-200"
+                            placeholder="Amount"
+                            type="number"
+                            value={donor.amount}
+                            onChange={(e) => updateDonorLine(idx, "amount", e.target.value)}
+                          />
+                        </div>
+                        <div className="col-span-8 sm:col-span-3">
+                          <select
+                            className="w-full border border-emerald-200 rounded-md px-2 py-2 text-sm bg-white"
+                            value={donor.fundId}
+                            onChange={(e) => updateDonorLine(idx, "fundId", e.target.value)}
+                          >
+                            <option value="">No Fund</option>
+                            {fundList.map((f) => (
+                              <option key={f.id} value={f.id}>{fundLabel(f)}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="col-span-8 sm:col-span-2">
+                          <Input
+                            className="bg-white border-emerald-200"
+                            placeholder="Memo"
+                            value={donor.memo}
+                            onChange={(e) => updateDonorLine(idx, "memo", e.target.value)}
+                          />
+                        </div>
+                        <div className="col-span-4 sm:col-span-1 flex gap-1 justify-end sm:justify-start">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-emerald-900"
+                            onClick={() => setForm((f) => ({ ...f, donorLines: [...f.donorLines, newDonorLine()] }))}
+                          >
+                            <Plus className="h-3.5 w-3.5" />
+                          </Button>
+                          {form.donorLines.length > 1 && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-destructive"
+                              onClick={() => setForm((f) => ({ ...f, donorLines: f.donorLines.filter((_, i) => i !== idx) }))}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+
+                    {(() => {
+                      const donorTotal = form.donorLines.reduce((s, d) => s + (parseFloat(d.amount) || 0), 0);
+                      const txAmount = parseFloat(form.amount) || 0;
+                      const diff = Math.abs(donorTotal - txAmount);
+                      return diff > 0.01 ? (
+                        <p className="text-xs text-amber-700">
+                          Donor total ${donorTotal.toFixed(2)} does not match transaction amount ${txAmount.toFixed(2)}
+                        </p>
+                      ) : donorTotal > 0 ? (
+                        <p className="text-xs text-emerald-800 font-medium">✓ Donor total matches transaction amount</p>
+                      ) : null;
+                    })()}
+                  </div>
+                )}
               </div>
             )}
 
