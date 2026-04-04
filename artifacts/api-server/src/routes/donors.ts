@@ -30,6 +30,12 @@ router.get("/", requireAuth, async (req, res) => {
         AND donor_name <> ''
         AND is_void = false
         AND transaction_type = 'CREDIT'
+        /* Deposits with batch donor rows use `donations` only; skip tx row to avoid full amount on one donor */
+        AND NOT EXISTS (
+          SELECT 1 FROM donations d_batch
+          WHERE d_batch.transaction_id = transactions.id
+            AND d_batch.company_id = transactions.company_id
+        )
         ${yearFilter}
       GROUP BY donor_name
 
@@ -109,6 +115,11 @@ router.get("/:name/history", requireAuth, async (req, res) => {
         AND LOWER(TRIM(t.donor_name)) = LOWER(TRIM($2))
         AND t.is_void = false
         AND t.transaction_type = 'CREDIT'
+        AND NOT EXISTS (
+          SELECT 1 FROM donations d_batch
+          WHERE d_batch.transaction_id = t.id
+            AND d_batch.company_id = t.company_id
+        )
         ${yearFilter}
 
       UNION ALL

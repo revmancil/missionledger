@@ -845,8 +845,10 @@ export default function BankRegisterPage() {
         referenceNumber: form.referenceNumber || null,
         memo: form.memo || null,
         isSplit: form.isSplit,
+        // Batch donor gifts are stored on `donations` only; never set transaction.donor_name
+        // or the full deposit appears under the first donor in donor history.
         donorName:
-          form.type === "CREDIT"
+          form.type === "CREDIT" && !form.showDonorSplit
             ? (form.donorLines[0]?.donorName?.trim() || null)
             : null,
         functionalType: form.isSplit ? null : (form.functionalType || null),
