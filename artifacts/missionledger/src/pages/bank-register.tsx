@@ -232,7 +232,7 @@ function CoaSelect({
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return coaList;
+    if (!q) return [...coaList];
     return coaList.filter(
       (a) => a.code.toLowerCase().includes(q) || a.name.toLowerCase().includes(q)
     );
@@ -781,9 +781,11 @@ export default function BankRegisterPage() {
   }
 
   function updateSplit(idx: number, field: keyof SplitLine, val: string) {
-    const next = [...form.splits];
-    next[idx] = { ...next[idx], [field]: val };
-    setForm((f) => ({ ...f, splits: next }));
+    setForm((f) => {
+      const next = [...f.splits];
+      next[idx] = { ...next[idx], [field]: val };
+      return { ...f, splits: next };
+    });
   }
 
   function addSplitRow() {
