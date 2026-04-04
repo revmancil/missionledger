@@ -399,7 +399,7 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
     }
 
     // ── Duplicate detection ────────────────────────────────────────────────────
-    const txDate = new Date(date);
+    const txDate = new Date(`${String(date).slice(0, 10)}T12:00:00.000Z`);
     const fingerprint = buildFingerprint(parseFloat(amount), txDate, payee);
     const dup = await findDuplicate(companyId, fingerprint);
     if (dup) {
@@ -696,7 +696,7 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
 
     // Period-close protection
     const closedUntil = await getClosedUntil(companyId);
-    const effectiveDate = date ? new Date(date) : existing.date;
+    const effectiveDate = date ? new Date(`${String(date).slice(0, 10)}T12:00:00.000Z`) : existing.date;
     if (isInClosedPeriod(existing.date, closedUntil) || isInClosedPeriod(effectiveDate, closedUntil)) {
       return res.status(403).json({
         error: `This period is locked through ${closedUntilLabel(closedUntil)}. Reopen the period to edit this transaction.`,
@@ -718,7 +718,7 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
 
     // ── Fingerprint update + duplicate check ────────────────────────────────
     const effectiveAmount = amount !== undefined ? parseFloat(amount) : existing.amount;
-    const effectiveDateVal = date ? new Date(date) : existing.date;
+    const effectiveDateVal = date ? new Date(`${String(date).slice(0, 10)}T12:00:00.000Z`) : existing.date;
     const effectivePayee   = payee ?? existing.payee;
     const newFingerprint = buildFingerprint(effectiveAmount, effectiveDateVal, effectivePayee);
     const dup = await findDuplicate(companyId, newFingerprint, req.params.id);
@@ -735,7 +735,7 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
       const [row] = await trx
         .update(transactions)
         .set({
-          date: date ? new Date(date) : undefined,
+          date: date ? new Date(`${String(date).slice(0, 10)}T12:00:00.000Z`) : undefined,
           payee: payee ?? undefined,
           vendorId: vendorId ?? null,
           amount: amount !== undefined ? parseFloat(amount) : undefined,
