@@ -10,7 +10,7 @@ export const reconciliations = pgTable("reconciliations", {
   bankAccountId: text("bank_account_id").notNull(),
   statementDate: timestamp("statement_date").notNull(),
   statementBalance: numeric("statement_balance", { precision: 15, scale: 2, mode: "number" }).notNull().$type<number>(),
-  openingBalance: numeric("opening_balance", { precision: 15, scale: 2, mode: "number" }).notNull().default("0").$type<number>(),
+  openingBalance: numeric("opening_balance", { precision: 15, scale: 2, mode: "number" }).notNull().default(0).$type<number>(),
   clearedBalance: numeric("cleared_balance", { precision: 15, scale: 2, mode: "number" }).$type<number>(),
   difference: numeric("difference", { precision: 15, scale: 2, mode: "number" }).$type<number>(),
   status: reconciliationStatusEnum("status").notNull().default("IN_PROGRESS"),
