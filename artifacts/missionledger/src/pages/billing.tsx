@@ -53,6 +53,11 @@ function formatAmount(amount: number, currency: string, minimumFractionDigits = 
   }).format(amount / 100);
 }
 
+function authHeaders(): Record<string, string> {
+  const token = localStorage.getItem("ml_token");
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 export default function BillingPage() {
   const { user } = useAuth();
   const [plans, setPlans] = useState<Plan[]>([]);
@@ -65,7 +70,7 @@ export default function BillingPage() {
   const [billingInterval, setBillingInterval] = useState<"month" | "year">("month");
 
   useEffect(() => {
-    fetch("/api/stripe/plans", { credentials: "include" })
+    fetch("/api/stripe/plans", { credentials: "include", headers: authHeaders() })
       .then((r) => r.json())
       .then((json) => {
         const data: Plan[] = json.data || [];
@@ -83,7 +88,7 @@ export default function BillingPage() {
       .catch(() => setStripeConfigured(false))
       .finally(() => setLoadingPlans(false));
 
-    fetch("/api/stripe/subscription", { credentials: "include" })
+    fetch("/api/stripe/subscription", { credentials: "include", headers: authHeaders() })
       .then((r) => r.json())
       .then((info) => {
         setSubscriptionInfo(info);
@@ -91,7 +96,7 @@ export default function BillingPage() {
         if (params.get("success") === "1") {
           window.history.replaceState({}, "", window.location.pathname);
           toast.success("Subscription activated! Welcome aboard.");
-          fetch("/api/stripe/notify-subscribed", { method: "POST", credentials: "include" }).catch(() => {});
+          fetch("/api/stripe/notify-subscribed", { method: "POST", credentials: "include", headers: authHeaders() }).catch(() => {});
         }
       })
       .catch(() => {})
@@ -104,7 +109,7 @@ export default function BillingPage() {
       const res = await fetch("/api/stripe/checkout", {
         method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({ priceId }),
       });
       const json = await res.json();
@@ -123,6 +128,7 @@ export default function BillingPage() {
       const res = await fetch("/api/stripe/portal", {
         method: "POST",
         credentials: "include",
+        headers: authHeaders(),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Failed to open portal");
