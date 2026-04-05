@@ -586,6 +586,8 @@ export default function AdminCommandCenter() {
       ]);
       setStats(s);
       setOrgs(o);
+      // Keep selectedOrg in sync so the open drawer reflects fresh data
+      setSelectedOrg(prev => prev ? (o.find((x: OrgRow) => x.id === prev.id) ?? prev) : null);
     } catch (e: any) {
       console.error("Failed to load admin data:", e.message);
     } finally { setLoading(false); }
