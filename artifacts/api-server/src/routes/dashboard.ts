@@ -1,6 +1,6 @@
 import { Router } from "express";
 import {
-  db, donations, expenses, bankTransactions, bankAccounts,
+  db, pool, donations, expenses, bankTransactions, bankAccounts,
   chartOfAccounts, transactionSplits, budgets, budgetLines,
 } from "@workspace/db";
 import { eq, and, gte, lte } from "drizzle-orm";
@@ -158,6 +158,57 @@ router.get("/", requireAuth, async (req, res) => {
       expenses: Math.round(trendMap[k].expenses * 100) / 100,
     }));
 
+    // ── GL monthly trend — last 6 months (same buckets as monthlyTrend) ───────
+    const glTrend: Record<string, { month: string; income: number; expenses: number }> = {};
+    for (const k of trendKeys) {
+      glTrend[k] = { month: monthLabel(k), income: 0, expenses: 0 };
+    }
+
+    const glResult = await pool.query<{
+      month_key: string;
+      account_type: string;
+      entry_type: string;
+      total: string;
+    }>(
+      `
+      SELECT
+        TO_CHAR(ge.date, 'YYYY-MM') AS month_key,
+        coa.coa_type AS account_type,
+        ge.entry_type::text AS entry_type,
+        SUM(ge.amount) AS total
+      FROM gl_entries ge
+      JOIN chart_of_accounts coa ON coa.id = ge.account_id
+      WHERE ge.company_id = $1
+        AND (ge.is_void IS NULL OR ge.is_void = false)
+        AND TO_CHAR(ge.date, 'YYYY-MM') = ANY($2::text[])
+      GROUP BY TO_CHAR(ge.date, 'YYYY-MM'), coa.coa_type, ge.entry_type
+      `,
+      [companyId, trendKeys],
+    );
+
+    for (const row of glResult.rows) {
+      const bucket = glTrend[row.month_key];
+      if (!bucket) continue;
+      const amount = Number(row.total ?? 0);
+      const type = String(row.account_type ?? "").toUpperCase();
+      const entry = String(row.entry_type ?? "").toUpperCase();
+      if (type === "INCOME") {
+        bucket.income += entry === "CREDIT" ? amount : -amount;
+      }
+      if (type === "EXPENSE") {
+        bucket.expenses += entry === "DEBIT" ? amount : -amount;
+      }
+    }
+
+    const glMonthlyTrend = trendKeys.map((k) => {
+      const b = glTrend[k];
+      return {
+        month: b.month,
+        income: Math.max(0, Math.round(b.income * 100) / 100),
+        expenses: Math.max(0, Math.round(b.expenses * 100) / 100),
+      };
+    });
+
     // ── Budget Tracker — top 5 expense accounts ───────────────────────────────
     // Build actual spend by chartAccountId (YTD)
     const ytdStart = new Date(thisYear, 0, 1);
@@ -234,6 +285,7 @@ router.get("/", requireAuth, async (req, res) => {
       budgetProgress: { used: budgetUsed, total: budgetTotal, percent: budgetPercent },
       spendingByCategory,
       monthlyTrend,
+      glMonthlyTrend,
       budgetTracker: top5Accounts,
       recentTransactions,
       // Legacy

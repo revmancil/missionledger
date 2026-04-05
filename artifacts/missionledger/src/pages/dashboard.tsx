@@ -27,6 +27,7 @@ interface DashData {
   budgetProgress: { used: number; total: number; percent: number };
   spendingByCategory: Array<{ name: string; code: string; amount: number }>;
   monthlyTrend: Array<{ month: string; income: number; expenses: number }>;
+  glMonthlyTrend?: Array<{ month: string; income: number; expenses: number }>;
   budgetTracker: Array<{ name: string; code: string; budgeted: number; actual: number; percent: number; overBudget: boolean }>;
   recentTransactions: Array<{
     id: string; date: string; payee: string; amount: number;
@@ -342,37 +343,71 @@ export default function Dashboard() {
       {/* ── Charts Row ─────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">
 
-        {/* Income vs Expenses Bar Chart — spans 3 cols */}
-        <div className="lg:col-span-3 bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="font-semibold text-[hsl(210,60%,25%)]">Income vs. Expenses</h3>
-              <p className="text-xs text-muted-foreground mt-0.5">Last 6 months · from Bank Register</p>
+        {/* Cash Flow + GL Income vs Expenses — left column */}
+        <div className="lg:col-span-3 flex flex-col gap-5">
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="font-semibold text-[hsl(210,60%,25%)]">Cash Flow</h3>
+                <p className="text-xs text-muted-foreground mt-0.5">Last 6 months · Bank Register</p>
+              </div>
             </div>
+            {data.monthlyTrend.every((m) => m.income === 0 && m.expenses === 0) ? (
+              <div className="flex items-center justify-center h-52 text-muted-foreground text-sm italic">
+                No transaction data yet — add transactions in the Bank Register.
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={data.monthlyTrend} barCategoryGap="30%">
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                  <XAxis dataKey="month" tick={{ fontSize: 12, fill: "#888" }} axisLine={false} tickLine={false} />
+                  <YAxis
+                    tickFormatter={(v) => `$${v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v}`}
+                    tick={{ fontSize: 11, fill: "#888" }} axisLine={false} tickLine={false}
+                  />
+                  <Tooltip content={<BarTooltip />} />
+                  <Legend
+                    formatter={(v) => <span className="text-xs capitalize text-gray-600">{v}</span>}
+                    iconType="circle" iconSize={8}
+                  />
+                  <Bar dataKey="income" name="Cash In" fill="hsl(174,60%,40%)" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="expenses" name="Cash Out" fill="hsl(210,60%,35%)" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
           </div>
-          {data.monthlyTrend.every((m) => m.income === 0 && m.expenses === 0) ? (
-            <div className="flex items-center justify-center h-52 text-muted-foreground text-sm italic">
-              No transaction data yet — add transactions in the Bank Register.
+
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="font-semibold text-[hsl(210,60%,25%)]">Income vs. Expenses</h3>
+                <p className="text-xs text-muted-foreground mt-0.5">Last 6 months · General Ledger</p>
+              </div>
             </div>
-          ) : (
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={data.monthlyTrend} barCategoryGap="30%">
-                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                <XAxis dataKey="month" tick={{ fontSize: 12, fill: "#888" }} axisLine={false} tickLine={false} />
-                <YAxis
-                  tickFormatter={(v) => `$${v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v}`}
-                  tick={{ fontSize: 11, fill: "#888" }} axisLine={false} tickLine={false}
-                />
-                <Tooltip content={<BarTooltip />} />
-                <Legend
-                  formatter={(v) => <span className="text-xs capitalize text-gray-600">{v}</span>}
-                  iconType="circle" iconSize={8}
-                />
-                <Bar dataKey="income" name="Income" fill="hsl(174,60%,40%)" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="expenses" name="Expenses" fill="hsl(210,60%,35%)" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          )}
+            {(data.glMonthlyTrend ?? []).every((m: { income: number; expenses: number }) => m.income === 0 && m.expenses === 0) ? (
+              <div className="flex items-center justify-center h-52 text-muted-foreground text-sm italic">
+                No GL data yet — post journal entries or transactions to see this chart.
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={data.glMonthlyTrend ?? []} barCategoryGap="30%">
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                  <XAxis dataKey="month" tick={{ fontSize: 12, fill: "#888" }} axisLine={false} tickLine={false} />
+                  <YAxis
+                    tickFormatter={(v) => `$${v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v}`}
+                    tick={{ fontSize: 11, fill: "#888" }} axisLine={false} tickLine={false}
+                  />
+                  <Tooltip content={<BarTooltip />} />
+                  <Legend
+                    formatter={(v) => <span className="text-xs capitalize text-gray-600">{v}</span>}
+                    iconType="circle" iconSize={8}
+                  />
+                  <Bar dataKey="income" name="Income" fill="hsl(174,60%,40%)" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="expenses" name="Expenses" fill="hsl(210,60%,35%)" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </div>
         </div>
 
         {/* Spending by Category Donut — spans 2 cols */}
