@@ -26,7 +26,8 @@ router.post("/webhook", async (req, res) => {
     const donorName = [payload.firstName, payload.lastName].filter(Boolean).join(" ") || payload.email || "Anonymous";
     const amount = parseFloat(payload.amount ?? payload.totalAmount ?? "0");
     const donorEmail = payload.email ?? null;
-    const date = payload.createdAt ? new Date(payload.createdAt) : new Date();
+    const parsedDate = payload.createdAt ? new Date(payload.createdAt) : null;
+    const date = parsedDate && !isNaN(parsedDate.getTime()) ? parsedDate : new Date();
     const notes = payload.fundDesignation || payload.message || null;
 
     if (amount <= 0) return res.status(400).json({ error: "Invalid amount" });
