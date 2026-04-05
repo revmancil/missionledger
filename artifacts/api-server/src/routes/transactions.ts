@@ -160,6 +160,7 @@ function serializeTx(
 
 async function upsertSplits(
   transactionId: string,
+  companyId: string,
   rawSplits: Array<{ chartAccountId?: string | null; vendorId?: string | null; amount: number; memo?: string | null; functionalType?: string | null; sortOrder?: number }>
 ) {
   await db.delete(transactionSplits).where(eq(transactionSplits.transactionId, transactionId));
@@ -168,6 +169,7 @@ async function upsertSplits(
     const s = rawSplits[i];
     await db.insert(transactionSplits).values({
       transactionId,
+      companyId,
       chartAccountId: s.chartAccountId ?? null,
       vendorId: s.vendorId ?? null,
       amount: s.amount,
