@@ -30,7 +30,7 @@ router.get("/", requireAuth, async (req, res) => {
         AND donor_name <> ''
         AND is_void = false
         AND transaction_type = 'CREDIT'
-        /* Deposits with batch donor rows use `donations` only; skip tx row to avoid full amount on one donor */
+        /* Deposits with batch donor rows use 'donations' only; skip tx row to avoid full amount on one donor */
         AND NOT EXISTS (
           SELECT 1 FROM donations d_batch
           WHERE d_batch.transaction_id = transactions.id
