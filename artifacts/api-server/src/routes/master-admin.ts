@@ -192,7 +192,8 @@ router.patch("/organizations/:id", async (req, res) => {
       updates.push(`is_comped = $${values.length + 1}`);
       values.push(isComped);
       // Comped orgs get ACTIVE subscription status; removing comp reverts to TRIAL
-      updates.push(`subscription_status = $${values.length + 1}`);
+      // Must cast to enum explicitly in raw SQL
+      updates.push(`subscription_status = $${values.length + 1}::subscription_status`);
       values.push(isComped ? "ACTIVE" : "TRIAL");
     }
     if (compedNote !== undefined) {
