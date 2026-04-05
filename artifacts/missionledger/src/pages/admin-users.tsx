@@ -2,8 +2,10 @@ import { useEffect, useState } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { authJsonFetch, readJsonSafe } from "@/lib/auth-fetch";
+import { apiUrl } from "@/lib/api-base";
 
 type UiRole = "PRIMARY_ADMIN" | "ADMIN" | "USER" | "BOARD";
 
@@ -20,11 +22,25 @@ type ManagedUser = {
 
 const ROLE_OPTIONS: UiRole[] = ["PRIMARY_ADMIN", "ADMIN", "USER", "BOARD"];
 
+type CompanyFormState = {
+  name: string;
+  dba: string | null;
+  ein: string;
+  address: string | null;
+  phone: string | null;
+  email: string | null;
+  companyCode: string;
+  donationsEnabled: boolean;
+  zeffyFormUrl: string;
+};
+
 export default function AdminUsersPage() {
   const [companyInfo, setCompanyInfo] = useState<{ companyId: string; companyCode: string; companyName: string; isPrimaryAdmin?: boolean } | null>(null);
+  const [companyForm, setCompanyForm] = useState<CompanyFormState | null>(null);
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [companySaving, setCompanySaving] = useState(false);
   const [form, setForm] = useState({ name: "", userId: "", email: "", password: "", role: "USER" as UiRole });
 
   async function load() {
@@ -129,6 +145,117 @@ export default function AdminUsersPage() {
             </div>
           ) : <p className="text-sm text-muted-foreground">Loading...</p>}
         </div>
+
+        {companyForm && (
+          <div className="border rounded-xl p-5 space-y-4 bg-card">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="font-semibold text-base">Online Donations</h3>
+                <p className="text-sm text-muted-foreground">Accept donations online through Zeffy (free for nonprofits)</p>
+              </div>
+              <Switch
+                checked={companyForm.donationsEnabled ?? false}
+                onCheckedChange={(val) => {
+                  setCompanyForm((f) => {
+                    if (!f) return f;
+                    if (val && !f.zeffyFormUrl) {
+                      window.open("https://zeffy.com", "_blank");
+                    }
+                    return { ...f, donationsEnabled: val };
+                  });
+                }}
+              />
+            </div>
+
+            {companyForm.donationsEnabled && (
+              <div className="space-y-3 pt-2 border-t">
+                <div>
+                  <label className="text-sm font-medium">Zeffy Form URL</label>
+                  <p className="text-xs text-muted-foreground mb-1">
+                    Paste your Zeffy donation form URL here.{" "}
+                    <a
+                      href="https://zeffy.com"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline text-primary"
+                    >
+                      Create one at zeffy.com →
+                    </a>
+                  </p>
+                  <Input
+                    placeholder="https://www.zeffy.com/donation-form/your-form-id"
+                    value={companyForm.zeffyFormUrl ?? ""}
+                    onChange={(e) => setCompanyForm((f) => (f ? { ...f, zeffyFormUrl: e.target.value } : f))}
+                  />
+                </div>
+
+                <div className="bg-muted/40 rounded-lg p-3 space-y-1">
+                  <p className="text-xs font-medium">Your public giving page:</p>
+                  <div className="flex items-center gap-2">
+                    <code className="text-xs bg-white border rounded px-2 py-1 flex-1 truncate">
+                      {typeof window !== "undefined"
+                        ? `${window.location.origin}${import.meta.env.BASE_URL.replace(/\/$/, "")}/give?org=${companyForm.companyCode}`
+                        : ""}
+                    </code>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="shrink-0"
+                      type="button"
+                      onClick={() =>
+                        navigator.clipboard.writeText(
+                          `${window.location.origin}${import.meta.env.BASE_URL.replace(/\/$/, "")}/give?org=${companyForm.companyCode}`,
+                        )
+                      }
+                    >
+                      Copy
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="shrink-0"
+                      type="button"
+                      onClick={() =>
+                        window.open(
+                          `${window.location.origin}${import.meta.env.BASE_URL.replace(/\/$/, "")}/give?org=${encodeURIComponent(companyForm.companyCode)}`,
+                          "_blank",
+                        )
+                      }
+                    >
+                      Preview
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground pt-1">
+                    Zeffy webhook URL (add in Zeffy → Settings → Integrations):
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <code className="text-xs bg-white border rounded px-2 py-1 flex-1 truncate">
+                      {`${apiUrl("/api/zeffy/webhook")}?org=${encodeURIComponent(companyForm.companyCode)}`}
+                    </code>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="shrink-0"
+                      type="button"
+                      onClick={() =>
+                        navigator.clipboard.writeText(
+                          `${apiUrl("/api/zeffy/webhook")}?org=${encodeURIComponent(companyForm.companyCode)}`,
+                        )
+                      }
+                    >
+                      Copy
+                    </Button>
+                  </div>
+                </div>
+
+              </div>
+            )}
+
+            <Button type="button" onClick={saveCompanySettings} disabled={companySaving} className="mt-2">
+              {companySaving ? "Saving…" : "Save donation settings"}
+            </Button>
+          </div>
+        )}
 
         <div className="rounded-xl border border-border bg-card p-4 space-y-3">
           <h3 className="font-semibold">Add User</h3>

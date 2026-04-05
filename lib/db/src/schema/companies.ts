@@ -27,6 +27,8 @@ export const companies = pgTable("companies", {
   openingBalanceDate: timestamp("opening_balance_date"),
   closedUntil: timestamp("closed_until"),
   fiscalYearEndMonth: text("fiscal_year_end_month").notNull().default("12"),
+  donationsEnabled: boolean("donations_enabled").notNull().default(false),
+  zeffyFormUrl: text("zeffy_form_url"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

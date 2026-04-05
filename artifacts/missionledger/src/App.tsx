@@ -39,6 +39,7 @@ import AdminGlobalCoaPage from "@/pages/admin/global-coa";
 import AdminAuditLogsPage from "@/pages/admin/audit-logs";
 import BudgetPage from "@/pages/budget";
 import AdminUsersPage from "@/pages/admin-users";
+import GivePage from "@/pages/give";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -107,6 +108,7 @@ function Router() {
       <Route path="/reset-password" component={ResetPasswordPage} />
       <Route path="/terms" component={TermsPage} />
       <Route path="/privacy" component={PrivacyPage} />
+      <Route path="/give" component={GivePage} />
 
       <Route path="/dashboard"><SubscriptionGatedRoute component={DashboardPage} /></Route>
       <Route path="/funds"><SubscriptionGatedRoute component={FundsPage} /></Route>

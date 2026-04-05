@@ -19,7 +19,7 @@ router.get("/", requireAuth, async (req, res) => {
 router.put("/", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
-    const { name, dba, ein, address, phone, email } = req.body ?? {};
+    const { name, dba, ein, address, phone, email, donationsEnabled, zeffyFormUrl } = req.body ?? {};
 
     const [updated] = await db.update(companies).set({
       name,
@@ -28,6 +28,8 @@ router.put("/", requireAuth, requireAdmin, async (req, res) => {
       address: address || null,
       phone: phone || null,
       email: email || null,
+      donationsEnabled: donationsEnabled !== undefined ? Boolean(donationsEnabled) : undefined,
+      zeffyFormUrl: zeffyFormUrl !== undefined ? (zeffyFormUrl || null) : undefined,
       updatedAt: new Date(),
     }).where(eq(companies.id, companyId)).returning();
 

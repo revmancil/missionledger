@@ -481,6 +481,11 @@ async function ensureSchema() {
   );
   await ensureAlter("companies.closed_until", `ALTER TABLE companies ADD COLUMN IF NOT EXISTS closed_until TIMESTAMP`);
   await ensureAlter(
+    "companies.donations_enabled",
+    `ALTER TABLE companies ADD COLUMN IF NOT EXISTS donations_enabled BOOLEAN NOT NULL DEFAULT FALSE`,
+  );
+  await ensureAlter("companies.zeffy_form_url", `ALTER TABLE companies ADD COLUMN IF NOT EXISTS zeffy_form_url TEXT`);
+  await ensureAlter(
     "companies.opening_balance_entry_id",
     `ALTER TABLE companies ADD COLUMN IF NOT EXISTS opening_balance_entry_id TEXT`,
   );
