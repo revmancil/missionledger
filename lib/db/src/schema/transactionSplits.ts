@@ -5,6 +5,7 @@ import { z } from "zod/v4";
 export const transactionSplits = pgTable("transaction_splits", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   transactionId: text("transaction_id").notNull(),
+  companyId: text("company_id").notNull(),
   chartAccountId: text("chart_account_id"),
   vendorId: text("vendor_id"),
   amount: numeric("amount", { precision: 15, scale: 2, mode: "number" }).notNull().$type<number>(),
