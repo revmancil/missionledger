@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "wouter";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -46,9 +47,10 @@ export default function AdminUsersPage() {
   async function load() {
     setLoading(true);
     try {
-      const [meRes, usersRes] = await Promise.all([
+      const [meRes, usersRes, companyRes] = await Promise.all([
         authJsonFetch("api/users/me"),
         authJsonFetch("api/users"),
+        authJsonFetch("api/companies"),
       ]);
       const me = await readJsonSafe<any>(meRes);
       if (!meRes.ok) throw new Error(me?.error ?? "Failed to load company profile");
@@ -61,10 +63,56 @@ export default function AdminUsersPage() {
         isPrimaryAdmin: !!me?.isPrimaryAdmin,
       });
       setUsers(Array.isArray(list) ? list : []);
+
+      if (companyRes.ok) {
+        const c = await readJsonSafe<any>(companyRes);
+        setCompanyForm({
+          name: c?.name ?? "",
+          dba: c?.dba ?? null,
+          ein: c?.ein ?? "",
+          address: c?.address ?? null,
+          phone: c?.phone ?? null,
+          email: c?.email ?? null,
+          companyCode: c?.companyCode ?? "",
+          donationsEnabled: !!c?.donationsEnabled,
+          zeffyFormUrl: c?.zeffyFormUrl ?? "",
+        });
+      } else {
+        setCompanyForm(null);
+      }
     } catch (err: any) {
       toast.error(err.message || "Failed to load user admin data");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function saveCompanySettings() {
+    if (!companyForm) return;
+    setCompanySaving(true);
+    try {
+      const res = await authJsonFetch("api/companies", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: companyForm.name,
+          dba: companyForm.dba,
+          ein: companyForm.ein,
+          address: companyForm.address,
+          phone: companyForm.phone,
+          email: companyForm.email,
+          donationsEnabled: companyForm.donationsEnabled,
+          zeffyFormUrl: companyForm.zeffyFormUrl.trim() || null,
+        }),
+      });
+      const data = await readJsonSafe<any>(res);
+      if (!res.ok) throw new Error(data?.error ?? "Failed to save company settings");
+      toast.success("Donation settings saved.");
+      await load();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to save company settings");
+    } finally {
+      setCompanySaving(false);
     }
   }
 
@@ -136,7 +184,12 @@ export default function AdminUsersPage() {
     <AppLayout title="Admin Users">
       <div className="space-y-6 max-w-5xl">
         <div className="rounded-xl border border-border bg-card p-4">
-          <h2 className="text-lg font-semibold">Company Information</h2>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <h2 className="text-lg font-semibold">Company Information</h2>
+            <Button asChild variant="outline" size="sm" className="shrink-0 w-fit">
+              <Link href="/donor-giving">Donor Giving</Link>
+            </Button>
+          </div>
           {companyInfo ? (
             <div className="mt-2 grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
               <div><span className="text-muted-foreground">Company Name:</span> {companyInfo.companyName}</div>
