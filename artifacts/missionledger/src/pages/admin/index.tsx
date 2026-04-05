@@ -60,7 +60,7 @@ type Stats = {
 };
 
 // ── Status badge ───────────────────────────────────────────────────────────────
-function StatusBadge({ status, subscriptionStatus }: { status: OrgStatus; subscriptionStatus: string }) {
+function StatusBadge({ status, subscriptionStatus, isComped }: { status: OrgStatus; subscriptionStatus: string; isComped?: boolean }) {
   if (status === "SUSPENDED") return (
     <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full bg-red-900/60 text-red-400 border border-red-800">
       <Ban className="h-3 w-3" /> Suspended
@@ -69,6 +69,11 @@ function StatusBadge({ status, subscriptionStatus }: { status: OrgStatus; subscr
   if (status === "MAINTENANCE") return (
     <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full bg-amber-900/60 text-amber-400 border border-amber-800">
       <Wrench className="h-3 w-3" /> Maintenance
+    </span>
+  );
+  if (isComped) return (
+    <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full bg-purple-900/60 text-purple-400 border border-purple-800">
+      <Gift className="h-3 w-3" /> Comped
     </span>
   );
   const subColors: Record<string, string> = {
@@ -313,7 +318,7 @@ function OrgDetailDrawer({ org, onClose, onRefresh }: { org: OrgRow; onClose: ()
           <div className="grid grid-cols-2 gap-3">
             <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
               <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-1">Status</p>
-              <StatusBadge status={org.status} subscriptionStatus={org.subscriptionStatus} />
+              <StatusBadge status={org.status} subscriptionStatus={org.subscriptionStatus} isComped={org.isComped} />
             </div>
             <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
               <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-1">Subscription</p>
@@ -890,7 +895,7 @@ export default function AdminCommandCenter() {
                       <code className="text-xs font-mono bg-slate-800 px-2 py-0.5 rounded text-slate-400">{org.companyCode}</code>
                     </td>
                     <td className="px-3 py-3">
-                      <StatusBadge status={org.status} subscriptionStatus={org.subscriptionStatus} />
+                      <StatusBadge status={org.status} subscriptionStatus={org.subscriptionStatus} isComped={org.isComped} />
                     </td>
                     <td className="px-3 py-3 text-center">
                       <div className="flex items-center justify-center">
