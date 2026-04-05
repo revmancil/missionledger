@@ -8,6 +8,7 @@ const router = Router();
 router.post("/webhook", async (req, res) => {
   try {
     const payload = req.body;
+    console.log("Zeffy payload received:", JSON.stringify(payload));
 
     // Zeffy webhook payload structure
     const companyCode = req.query.org as string;
