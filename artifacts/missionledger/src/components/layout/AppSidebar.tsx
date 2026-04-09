@@ -135,7 +135,7 @@ export function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
           <img
             src={`${import.meta.env.BASE_URL}images/logo.png`}
             alt="MissionLedger"
-            className="h-10 w-auto object-contain"
+            className="h-14 w-auto object-contain"
           />
         </div>
         <button
