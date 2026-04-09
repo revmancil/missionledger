@@ -9,6 +9,7 @@ const app: Express = express();
 const allowedOrigins = [
   process.env.CORS_ORIGIN,
   process.env.CORS_ORIGIN_2,
+  process.env.CORS_ORIGIN_3,
 ].filter(Boolean);
 
 app.use(cors({
