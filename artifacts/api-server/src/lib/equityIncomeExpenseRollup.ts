@@ -11,7 +11,7 @@ export function equityNetAssetBucketKey(acct: {
   if (c === "3100") return "3100";
   if (c === "3200") return "3200";
   if (c === "3300") return "3300";
-  const so = acct.sortOrder ?? 0;
+  const so = Number(acct.sortOrder ?? 0);
   if (so === 211) return "3100";
   if (so === 212) return "3200";
   if (so === 213) return "3300";
@@ -41,7 +41,7 @@ export async function operationalNetByEquityAccountCode(
     LEFT JOIN journal_entries je ON je.id = g.journal_entry_id AND je.status <> 'VOID'
     WHERE g.company_id = ${companyId}
       AND g.is_void = false
-      AND c.coa_type IN ('INCOME', 'EXPENSE')
+      AND c.coa_type::text IN ('INCOME', 'EXPENSE')
       AND (g.journal_entry_id IS NULL OR je.id IS NOT NULL)
     GROUP BY c.coa_type::text, COALESCE(f.fund_type::text, 'UNRESTRICTED')
   `);

@@ -41,6 +41,8 @@ async function parseJsonError(res: Response): Promise<never> {
 export function useChartOfAccounts() {
   return useQuery({
     queryKey: CHART_OF_ACCOUNTS_QUERY_KEY,
+    staleTime: 0,
+    refetchOnMount: "always",
     queryFn: async (): Promise<ChartCoaAccount[]> => {
       const res = await fetch(apiUrl("/api/chart-of-accounts"), {
         credentials: "include",

@@ -1,5 +1,7 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { authJsonFetch } from "@/lib/auth-fetch";
+import { CHART_OF_ACCOUNTS_QUERY_KEY } from "@/hooks/use-chart-of-accounts";
 
 export interface FundBalance {
   id: string;
@@ -40,6 +42,7 @@ const FinancialSyncContext = createContext<FinancialSyncContextValue>({
 });
 
 export function FinancialSyncProvider({ children }: { children: React.ReactNode }) {
+  const queryClient = useQueryClient();
   const [summary, setSummary] = useState<FinancialSummary | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [version, setVersion] = useState(0);
@@ -68,8 +71,9 @@ export function FinancialSyncProvider({ children }: { children: React.ReactNode 
   }, [version, fetchSummary]);
 
   const refetch = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: CHART_OF_ACCOUNTS_QUERY_KEY });
     setVersion((v) => v + 1);
-  }, []);
+  }, [queryClient]);
 
   return (
     <FinancialSyncContext.Provider value={{ summary, isLoading, version, refetch }}>
