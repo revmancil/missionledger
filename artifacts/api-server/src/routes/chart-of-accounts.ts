@@ -4,7 +4,10 @@ import { eq, asc, sql, and } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
 import { toIsoString } from "../lib/safeIso";
 import { sqlRows } from "../lib/sqlRows";
-import { operationalNetByEquityAccountCode } from "../lib/equityIncomeExpenseRollup";
+import {
+  equityNetAssetBucketKey,
+  operationalNetByEquityAccountCode,
+} from "../lib/equityIncomeExpenseRollup";
 
 const router = Router();
 
@@ -199,17 +202,15 @@ router.get("/", requireAuth, async (req, res) => {
       };
     }
 
-    // Net-asset equity lines (3100/3200/3300): add fund-tagged P&L (INCOME/EXPENSE)
-    // so balances match Statement of Financial Position, not just direct GL to equity.
+    // Net-asset equity lines: add fund-tagged P&L (INCOME/EXPENSE) so balances match
+    // Statement of Financial Position. Match by code 3100/3200/3300 or seed sortOrder 211–213.
     const equityOperational = await operationalNetByEquityAccountCode(companyId);
-    const NET_ASSET_EQUITY_CODES = new Set(["3100", "3200", "3300"]);
 
     // Normal balance convention:
     // Assets + Expenses = Debit normal (balance = debits - credits)
     // Liabilities + Equity + Income = Credit normal (balance = credits - debits)
-    const withBalances = all.map((acct) => {
+    const withBalancesFirst = all.map((acct) => {
       const b = balanceMap[acct.id] ?? { debits: 0, credits: 0 };
-      // Drizzle maps coa_type column to property `type` (not coaType / accountType)
       const type = String(acct.type ?? "").toUpperCase();
       const isDebitNormal = type === "ASSET" || type === "EXPENSE";
       let balance = isDebitNormal
@@ -217,10 +218,16 @@ router.get("/", requireAuth, async (req, res) => {
         : b.credits - b.debits;
 
       let fundActivityInNetAssets: number | undefined;
-      if (type === "EQUITY" && NET_ASSET_EQUITY_CODES.has(String(acct.code))) {
-        const add = equityOperational[String(acct.code)] ?? 0;
-        balance += add;
-        fundActivityInNetAssets = add;
+      if (type === "EQUITY") {
+        const bucket = equityNetAssetBucketKey({
+          code: String(acct.code ?? ""),
+          sortOrder: acct.sortOrder ?? null,
+        });
+        if (bucket) {
+          const add = equityOperational[bucket] ?? 0;
+          balance += add;
+          fundActivityInNetAssets = add;
+        }
       }
 
       return {
@@ -229,6 +236,53 @@ router.get("/", requireAuth, async (req, res) => {
         totalDebits: b.debits,
         totalCredits: b.credits,
         ...(fundActivityInNetAssets !== undefined ? { fundActivityInNetAssets } : {}),
+      };
+    });
+
+    type DetailKey = "3100" | "3200" | "3300";
+    const detailRollup: Partial<Record<DetailKey, { balance: number; fundActivity: number }>> = {};
+    for (const row of withBalancesFirst) {
+      if (String(row.type ?? "").toUpperCase() !== "EQUITY") continue;
+      const bucket = equityNetAssetBucketKey({
+        code: String(row.code ?? ""),
+        sortOrder: row.sortOrder ?? null,
+      });
+      if (!bucket) continue;
+      detailRollup[bucket] = {
+        balance: row.balance,
+        fundActivity: row.fundActivityInNetAssets ?? 0,
+      };
+    }
+    const hasDetailNetAssetLine = !!(
+      detailRollup["3100"] ||
+      detailRollup["3200"] ||
+      detailRollup["3300"]
+    );
+
+    const withBalances = withBalancesFirst.map((row) => {
+      if (String(row.type ?? "").toUpperCase() !== "EQUITY") return row;
+      if (String(row.code ?? "").trim() !== "3000") return row;
+
+      if (hasDetailNetAssetLine) {
+        const sumB = (["3100", "3200", "3300"] as const).reduce(
+          (s, k) => s + (detailRollup[k]?.balance ?? 0),
+          0,
+        );
+        const sumF = (["3100", "3200", "3300"] as const).reduce(
+          (s, k) => s + (detailRollup[k]?.fundActivity ?? 0),
+          0,
+        );
+        return { ...row, balance: sumB, fundActivityInNetAssets: sumF };
+      }
+
+      const totalOp =
+        (equityOperational["3100"] ?? 0) +
+        (equityOperational["3200"] ?? 0) +
+        (equityOperational["3300"] ?? 0);
+      return {
+        ...row,
+        balance: row.balance + totalOp,
+        fundActivityInNetAssets: totalOp,
       };
     });
 
@@ -474,12 +528,25 @@ router.get("/:id/ledger", requireAuth, async (req, res) => {
       fundActivityInNetAssets: number;
       statementNetAssets: number;
     } | undefined;
-    if (
+    const eqBucket = equityNetAssetBucketKey({
+      code: String(account.code ?? ""),
+      sortOrder: account.sortOrder ?? null,
+    });
+    if (String(account.type ?? "").toUpperCase() === "EQUITY" && eqBucket) {
+      const roll = await operationalNetByEquityAccountCode(companyId);
+      const fundActivity = roll[eqBucket] ?? 0;
+      equityReporting = {
+        glSubledgerBalance,
+        fundActivityInNetAssets: fundActivity,
+        statementNetAssets: glSubledgerBalance + fundActivity,
+      };
+    } else if (
       String(account.type ?? "").toUpperCase() === "EQUITY" &&
-      ["3100", "3200", "3300"].includes(String(account.code))
+      String(account.code ?? "").trim() === "3000"
     ) {
       const roll = await operationalNetByEquityAccountCode(companyId);
-      const fundActivity = roll[String(account.code)] ?? 0;
+      const fundActivity =
+        (roll["3100"] ?? 0) + (roll["3200"] ?? 0) + (roll["3300"] ?? 0);
       equityReporting = {
         glSubledgerBalance,
         fundActivityInNetAssets: fundActivity,
