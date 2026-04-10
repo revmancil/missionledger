@@ -23,7 +23,15 @@ const formatDate = (d: string) =>
 export default function AccountLedger() {
   const { id } = useParams<{ id: string }>();
   const [, setLocation] = useLocation();
-  const [data, setData] = useState<{ account: any; entries: any[] } | null>(null);
+  const [data, setData] = useState<{
+    account: any;
+    entries: any[];
+    equityReporting?: {
+      glSubledgerBalance: number;
+      fundActivityInNetAssets: number;
+      statementNetAssets: number;
+    };
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -59,7 +67,7 @@ export default function AccountLedger() {
   }
   if (!data) return null;
 
-  const { account, entries } = data;
+  const { account, entries, equityReporting } = data;
   const finalBalance = entries.length > 0 ? entries[entries.length - 1].runningBalance : 0;
 
   return (
@@ -78,7 +86,25 @@ export default function AccountLedger() {
           <p className="text-muted-foreground text-sm">
             General Ledger Subledger &nbsp;·&nbsp;
             <span className="font-medium text-foreground">{fmt(finalBalance)}</span> ending balance
+            {equityReporting && (
+              <>
+                {" "}
+                <span className="text-muted-foreground">(GL on this account only)</span>
+              </>
+            )}
           </p>
+          {equityReporting && (
+            <div className="mt-3 rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm space-y-1">
+              <p>
+                <span className="text-muted-foreground">Fund activity (P&amp;L by fund):</span>{" "}
+                <span className="font-mono font-medium">{fmt(equityReporting.fundActivityInNetAssets)}</span>
+              </p>
+              <p>
+                <span className="text-muted-foreground">Net assets (opening equity + fund P&amp;L):</span>{" "}
+                <span className="font-mono font-semibold text-foreground">{fmt(equityReporting.statementNetAssets)}</span>
+              </p>
+            </div>
+          )}
         </div>
 
         {entries.length === 0 ? (

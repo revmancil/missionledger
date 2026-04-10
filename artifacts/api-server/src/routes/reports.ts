@@ -136,7 +136,7 @@ router.get("/balance-sheet", requireAuth, async (req, res) => {
       WHERE c.company_id = ${companyId}
         AND c.is_active = true
         AND c.coa_type IN ('ASSET', 'LIABILITY')
-        AND (g.id IS NULL OR je.id IS NOT NULL)
+        AND (g.id IS NULL OR g.journal_entry_id IS NULL OR je.id IS NOT NULL)
       GROUP BY c.id, c.code, c.name, c.coa_type, c.sort_order
       ORDER BY c.sort_order, c.code
     `);
@@ -219,7 +219,7 @@ router.get("/balance-sheet", requireAuth, async (req, res) => {
       WHERE c.company_id = ${companyId}
         AND c.is_active = true
         AND c.coa_type IN ('EQUITY', 'INCOME', 'EXPENSE')
-        AND (g.id IS NULL OR je.id IS NOT NULL)
+        AND (g.id IS NULL OR g.journal_entry_id IS NULL OR je.id IS NOT NULL)
       GROUP BY c.id, c.code, c.name, c.coa_type, c.sort_order, f.fund_type, f.name
       ORDER BY c.sort_order, c.code
     `);

@@ -4,6 +4,7 @@ import { eq, asc, sql, and } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
 import { toIsoString } from "../lib/safeIso";
 import { sqlRows } from "../lib/sqlRows";
+import { operationalNetByEquityAccountCode } from "../lib/equityIncomeExpenseRollup";
 
 const router = Router();
 
@@ -198,6 +199,11 @@ router.get("/", requireAuth, async (req, res) => {
       };
     }
 
+    // Net-asset equity lines (3100/3200/3300): add fund-tagged P&L (INCOME/EXPENSE)
+    // so balances match Statement of Financial Position, not just direct GL to equity.
+    const equityOperational = await operationalNetByEquityAccountCode(companyId);
+    const NET_ASSET_EQUITY_CODES = new Set(["3100", "3200", "3300"]);
+
     // Normal balance convention:
     // Assets + Expenses = Debit normal (balance = debits - credits)
     // Liabilities + Equity + Income = Credit normal (balance = credits - debits)
@@ -206,10 +212,24 @@ router.get("/", requireAuth, async (req, res) => {
       // Drizzle maps coa_type column to property `type` (not coaType / accountType)
       const type = String(acct.type ?? "").toUpperCase();
       const isDebitNormal = type === "ASSET" || type === "EXPENSE";
-      const balance = isDebitNormal
+      let balance = isDebitNormal
         ? b.debits - b.credits
         : b.credits - b.debits;
-      return { ...acct, balance, totalDebits: b.debits, totalCredits: b.credits };
+
+      let fundActivityInNetAssets: number | undefined;
+      if (type === "EQUITY" && NET_ASSET_EQUITY_CODES.has(String(acct.code))) {
+        const add = equityOperational[String(acct.code)] ?? 0;
+        balance += add;
+        fundActivityInNetAssets = add;
+      }
+
+      return {
+        ...acct,
+        balance,
+        totalDebits: b.debits,
+        totalCredits: b.credits,
+        ...(fundActivityInNetAssets !== undefined ? { fundActivityInNetAssets } : {}),
+      };
     });
 
     res.json(withBalances);
@@ -446,6 +466,27 @@ router.get("/:id/ledger", requireAuth, async (req, res) => {
       };
     });
 
+    const glSubledgerBalance =
+      entries.length > 0 ? entries[entries.length - 1].runningBalance : 0;
+
+    let equityReporting: {
+      glSubledgerBalance: number;
+      fundActivityInNetAssets: number;
+      statementNetAssets: number;
+    } | undefined;
+    if (
+      String(account.type ?? "").toUpperCase() === "EQUITY" &&
+      ["3100", "3200", "3300"].includes(String(account.code))
+    ) {
+      const roll = await operationalNetByEquityAccountCode(companyId);
+      const fundActivity = roll[String(account.code)] ?? 0;
+      equityReporting = {
+        glSubledgerBalance,
+        fundActivityInNetAssets: fundActivity,
+        statementNetAssets: glSubledgerBalance + fundActivity,
+      };
+    }
+
     res.json({
       account: {
         ...account,
@@ -453,6 +494,7 @@ router.get("/:id/ledger", requireAuth, async (req, res) => {
         updatedAt: toIsoString(account.updatedAt),
       },
       entries,
+      ...(equityReporting ? { equityReporting } : {}),
     });
   } catch (error) {
     console.error("Ledger error:", error);
