@@ -220,7 +220,8 @@ router.post("/:id/post", requireAuth, requireAdmin, async (req, res) => {
     const lines = await db.select().from(journalEntryLines)
       .where(eq(journalEntryLines.journalEntryId, entry.id));
 
-    const allAccounts = await db.select().from(accounts).where(eq(accounts.companyId, companyId));
+    // Must use chartOfAccounts — JE lines store chart_of_accounts IDs, not accounts IDs
+    const allAccounts = await db.select().from(chartOfAccounts).where(eq(chartOfAccounts.companyId, companyId));
     const accountMap = Object.fromEntries(allAccounts.map(a => [a.id, a]));
 
     const allFunds = await db.select().from(funds).where(eq(funds.companyId, companyId));
