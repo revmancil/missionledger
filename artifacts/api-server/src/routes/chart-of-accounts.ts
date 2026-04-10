@@ -203,7 +203,8 @@ router.get("/", requireAuth, async (req, res) => {
     // Liabilities + Equity + Income = Credit normal (balance = credits - debits)
     const withBalances = all.map((acct) => {
       const b = balanceMap[acct.id] ?? { debits: 0, credits: 0 };
-      const type = (acct.coaType ?? acct.accountType ?? "").toUpperCase();
+      // Drizzle maps coa_type column to property `type` (not coaType / accountType)
+      const type = String(acct.type ?? "").toUpperCase();
       const isDebitNormal = type === "ASSET" || type === "EXPENSE";
       const balance = isDebitNormal
         ? b.debits - b.credits
@@ -418,7 +419,7 @@ router.get("/:id/ledger", requireAuth, async (req, res) => {
       ORDER BY ge.date ASC, ge.created_at ASC
     `);
 
-    const debitNormal = ["ASSET", "EXPENSE"].includes(account.type);
+    const debitNormal = ["ASSET", "EXPENSE"].includes(String(account.type ?? "").toUpperCase());
 
     let runningBalance = 0;
     const entries = sqlRows(rows).map((r) => {

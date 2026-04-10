@@ -220,7 +220,7 @@ async function buildStatementOfActivities(
   for (const e of glRows) {
     const coa = coaMap[e.accountId];
     if (!coa) continue;
-    const coaType = coa.coaType as string;
+    const coaType = coa.type as string;
     if (!["INCOME", "EXPENSE"].includes(coaType)) continue;
     if (!byAccount[e.accountId]) {
       byAccount[e.accountId] = { code: e.accountCode, name: e.accountName, type: coaType, debits: 0, credits: 0 };
@@ -270,7 +270,7 @@ async function buildBalanceSheet(companyId: string, asOfDate: Date) {
   for (const e of glRows) {
     const coa = coaMap[e.accountId];
     if (!coa) continue;
-    const coaType = coa.coaType as string;
+    const coaType = coa.type as string;
     if (!["ASSET", "LIABILITY", "EQUITY"].includes(coaType)) continue;
     if (!byAccount[e.accountId]) {
       byAccount[e.accountId] = { code: e.accountCode, name: e.accountName, type: coaType, debits: 0, credits: 0 };
@@ -448,7 +448,7 @@ router.post("/year-end-close", requireAuth, requireAdmin, async (req, res) => {
     for (const e of glRows) {
       const coa = coaMap[e.accountId];
       if (!coa) continue;
-      const coaType = coa.coaType as string;
+      const coaType = coa.type as string;
       if (!["INCOME", "EXPENSE"].includes(coaType)) continue;
       if (!accountBalances[e.accountId]) {
         accountBalances[e.accountId] = {
@@ -475,12 +475,12 @@ router.post("/year-end-close", requireAuth, requireAdmin, async (req, res) => {
     // Find Retained Earnings / Fund Balance account (equity, code starts with 3)
     const retainedEarnings = allCoa.find(
       (a) =>
-        (a.coaType as string) === "EQUITY" &&
+        (a.type as string) === "EQUITY" &&
         (a.name.toLowerCase().includes("retained") ||
           a.name.toLowerCase().includes("fund balance") ||
           a.name.toLowerCase().includes("net assets") ||
           a.code === "3100")
-    ) ?? allCoa.find((a) => (a.coaType as string) === "EQUITY");
+    ) ?? allCoa.find((a) => (a.type as string) === "EQUITY");
 
     if (!retainedEarnings) {
       return res.status(422).json({
