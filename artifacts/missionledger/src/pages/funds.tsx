@@ -1,10 +1,11 @@
 import { useState } from "react";
+import { useLocation } from "wouter";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { useFunds, useCreateFund, useDeleteFund } from "@/hooks/use-funds";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatCurrency } from "@/lib/utils";
-import { Plus, Trash2, Wallet } from "lucide-react";
+import { Plus, Trash2, Wallet, BookOpen } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 
@@ -31,6 +32,7 @@ export default function FundsPage() {
   const createFund = useCreateFund();
   const deleteFund = useDeleteFund();
   const [open, setOpen] = useState(false);
+  const [, setLocation] = useLocation();
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -107,6 +109,15 @@ export default function FundsPage() {
               <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Balance</span>
               <span className="text-xl font-bold text-foreground">{formatCurrency(fund.balance || 0)}</span>
             </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full mt-3 gap-2 text-xs"
+              onClick={() => setLocation(`/funds/${fund.id}/ledger`)}
+            >
+              <BookOpen className="w-3.5 h-3.5" />
+              View Ledger
+            </Button>
           </div>
         ))}
         {isLoading && <div className="col-span-3 text-center py-12 text-muted-foreground">Loading funds...</div>}

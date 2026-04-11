@@ -134,4 +134,89 @@ router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
+// GET /funds/:id/ledger — all GL entries tagged to this fund, chronological with running balance
+router.get("/:id/ledger", requireAuth, async (req, res) => {
+  try {
+    const { companyId } = (req as any).user;
+    const fundId = req.params.id;
+
+    const [fund] = await db
+      .select()
+      .from(funds)
+      .where(and(eq(funds.id, fundId), eq(funds.companyId, companyId)));
+    if (!fund) return res.status(404).json({ error: "Fund not found" });
+
+    // All non-void GL entries for this fund, joined with account info and JE reference
+    const rows = await db.execute(sql`
+      SELECT
+        ge.id,
+        ge.date,
+        ge.entry_type,
+        ge.amount,
+        ge.description,
+        ge.source_type,
+        ge.is_void,
+        c.code    AS account_code,
+        c.name    AS account_name,
+        c.coa_type AS account_type,
+        je.entry_number     AS journal_entry_number,
+        je.reference_number AS reference_number
+      FROM gl_entries ge
+      JOIN chart_of_accounts c ON c.id = ge.account_id
+      LEFT JOIN journal_entries je ON ge.journal_entry_id = je.id
+      WHERE ge.fund_id    = ${fundId}
+        AND ge.company_id = ${companyId}
+        AND (ge.is_void IS NULL OR ge.is_void = false)
+      ORDER BY ge.date ASC, ge.created_at ASC
+    `);
+
+    // Running balance: net fund position (credits add, debits subtract)
+    // This matches the logic used in GET /funds for the balance card.
+    let runningBalance = 0;
+    const entries = sqlRows(rows).map((r: any) => {
+      const amount = Number(r.amount ?? 0);
+      const isDebit = String(r.entry_type).toUpperCase() === "DEBIT";
+      const coaType = String(r.account_type ?? "").toUpperCase();
+
+      // Asset / Expense = debit-normal  → debit increases fund activity
+      // Income / Equity / Liability     → credit-normal → credit increases fund activity
+      const isDebitNormal = coaType === "ASSET" || coaType === "EXPENSE";
+      if (isDebitNormal) {
+        runningBalance += isDebit ? -amount : amount; // expense debits reduce net position
+      } else {
+        runningBalance += isDebit ? -amount : amount; // same: credit adds, debit subtracts
+      }
+
+      const d = r.date;
+      const dateIso = d instanceof Date ? d.toISOString() : d != null ? String(d) : null;
+
+      return {
+        id: r.id,
+        date: dateIso,
+        description: r.description,
+        sourceType: r.source_type,
+        reference: r.journal_entry_number || r.reference_number || null,
+        accountCode: r.account_code,
+        accountName: r.account_name,
+        accountType: r.account_type,
+        debit: isDebit ? amount : null,
+        credit: !isDebit ? amount : null,
+        runningBalance,
+      };
+    });
+
+    res.json({
+      fund: {
+        ...fund,
+        createdAt: toIsoString(fund.createdAt),
+        updatedAt: toIsoString(fund.updatedAt),
+      },
+      entries,
+    });
+  } catch (error) {
+    console.error("Fund ledger error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 export default router;

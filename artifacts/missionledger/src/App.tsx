@@ -40,6 +40,7 @@ import AdminAuditLogsPage from "@/pages/admin/audit-logs";
 import BudgetPage from "@/pages/budget";
 import AdminUsersPage from "@/pages/admin-users";
 import GivePage from "@/pages/give";
+import FundLedgerPage from "@/pages/fund-ledger";
 import PricingPage from "@/pages/pricing";
 import FeaturesPage from "@/pages/features";
 import CompareQuickbooksPage from "@/pages/compare-quickbooks";
@@ -121,6 +122,7 @@ function Router() {
       <Route path="/compare/quickbooks" component={CompareQuickbooksPage} />
 
       <Route path="/dashboard"><SubscriptionGatedRoute component={DashboardPage} /></Route>
+      <Route path="/funds/:id/ledger"><SubscriptionGatedRoute component={FundLedgerPage} /></Route>
       <Route path="/funds"><SubscriptionGatedRoute component={FundsPage} /></Route>
       <Route path="/accounts/:id/ledger"><SubscriptionGatedRoute component={AccountLedgerPage} /></Route>
       <Route path="/accounts"><SubscriptionGatedRoute component={AccountsPage} /></Route>
