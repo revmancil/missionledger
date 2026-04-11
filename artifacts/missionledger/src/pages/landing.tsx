@@ -51,16 +51,12 @@ function Header() {
         >
           Features
         </a>
-        <a
-          href="#pricing"
+        <Link
+          href="/pricing"
           className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
-          onClick={(e) => {
-            e.preventDefault();
-            document.getElementById("pricing")?.scrollIntoView({ behavior: "smooth" });
-          }}
         >
           Pricing
-        </a>
+        </Link>
         <a
           href="#faq"
           className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"

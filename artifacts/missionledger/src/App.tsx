@@ -40,6 +40,7 @@ import AdminAuditLogsPage from "@/pages/admin/audit-logs";
 import BudgetPage from "@/pages/budget";
 import AdminUsersPage from "@/pages/admin-users";
 import GivePage from "@/pages/give";
+import PricingPage from "@/pages/pricing";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -109,6 +110,7 @@ function Router() {
       <Route path="/terms" component={TermsPage} />
       <Route path="/privacy" component={PrivacyPage} />
       <Route path="/give" component={GivePage} />
+      <Route path="/pricing" component={PricingPage} />
 
       <Route path="/dashboard"><SubscriptionGatedRoute component={DashboardPage} /></Route>
       <Route path="/funds"><SubscriptionGatedRoute component={FundsPage} /></Route>
