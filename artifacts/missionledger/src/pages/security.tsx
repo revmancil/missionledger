@@ -135,9 +135,9 @@ function PhilosophySection() {
         <h2 className="text-3xl font-display font-bold mb-8">Our approach to security</h2>
         <p className="text-muted-foreground leading-relaxed mb-6">
           Financial software for mission-driven organizations must support both usability and trust.
-          MissionLedger is designed to help teams manage accounting, donor activity, and reporting
-          with stronger visibility, appropriate access controls, and clearer operational
-          accountability.
+          MissionLedger is designed to help teams manage accounting, donor activity, reporting, and
+          month-end workflows with stronger visibility, appropriate access controls, and clearer
+          operational accountability.
         </p>
         <p className="text-muted-foreground leading-relaxed">
           We believe security is not just about infrastructure. It is also about product design: who

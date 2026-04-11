@@ -2,6 +2,7 @@ import { Router } from "express";
 import { db, users, companies, bankAccounts, auditLogs } from "@workspace/db";
 import { pool } from "@workspace/db";
 import { eq, count, and, desc, gte, lte, like, or } from "drizzle-orm";
+import { backfillJeGlEntries } from "../seeds/backfill-je-gl-entries";
 import {
   requireAuth,
   requirePlatformAdmin,
@@ -469,6 +470,20 @@ router.get("/audit-logs", async (req, res) => {
   } catch (error) {
     console.error("Audit logs error:", error);
     res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ── POST /master-admin/backfill-gl-entries ────────────────────────────────────
+// Regenerates missing GL entries for every POSTED journal entry across all orgs.
+// Safe to run multiple times — skips JEs that already have GL entries.
+router.post("/backfill-gl-entries", async (_req, res) => {
+  try {
+    console.log("[master-admin] Starting GL entry backfill...");
+    const result = await backfillJeGlEntries();
+    res.json({ success: true, ...result });
+  } catch (error: any) {
+    console.error("[master-admin] Backfill error:", error);
+    res.status(500).json({ error: "Backfill failed", detail: error?.message });
   }
 });
 

@@ -207,42 +207,42 @@ const CORE_FEATURES = [
   {
     icon: Layers,
     title: "True Fund Accounting",
-    body: "Track restricted and unrestricted funds independently, generate fund-level balance sheets, and produce statement of functional expenses with a properly structured chart of accounts.",
+    body: "Track restricted and unrestricted funds clearly, monitor balances by fund, and generate fund-based financial reports without custom workarounds.",
   },
   {
     icon: Users,
     title: "Donor Tracking",
-    body: "Record donations, track pledges and pledge balances, link donors to fund designations, and generate giving histories and acknowledgment letters.",
+    body: "Keep donor records, pledges, recurring donations, and giving history organized so fundraising and finance stay easier to align.",
   },
   {
     icon: FileText,
     title: "990 Reporting Tool",
-    body: "Map your accounts to IRS Form 990 lines. Run supporting schedules and export the data you need to prepare or review your annual information return.",
+    body: "Support nonprofit reporting workflows with tools designed to make Form 990 preparation and processing more organized and manageable.",
   },
   {
     icon: CreditCard,
     title: "Bank Reconciliation",
-    body: "Import transactions via Plaid or CSV. Match entries to your ledger, clear discrepancies, and produce a reconciliation report ready for your auditor.",
+    body: "Reconcile accounts faster with connected bank feeds and a cleaner month-end review process.",
   },
   {
     icon: CalendarCheck,
     title: "Period Close Tool",
-    body: "A guided month-end and year-end close checklist walks your team through every required step so nothing gets skipped and the period locks cleanly.",
+    body: "Help your team close the books with more structure, clearer review steps, and stronger confidence at month-end.",
   },
   {
     icon: BookOpen,
     title: "Opening Balances Wizard",
-    body: "Enter your starting fund balances, account balances, and donor records in a structured guided setup that gets you operational without importing errors.",
+    body: "Get started faster by setting up opening balances in a more guided, structured workflow during onboarding or migration.",
   },
   {
     icon: ShieldCheck,
     title: "Audit-Ready Controls",
-    body: "Immutable audit logs, role-based access, locked periods, and journal entry trails give your auditors the documentation trail they need.",
+    body: "Use immutable audit logs, role-based access, and close workflows to strengthen oversight and reduce reporting risk.",
   },
   {
     icon: BarChart3,
     title: "Board-Ready Reporting",
-    body: "Statement of financial position, statement of activities, functional expense report, and fund summaries formatted for board presentation.",
+    body: "Give leadership clearer visibility with reports that support stewardship, decision-making, and accountability.",
   },
 ];
 
@@ -499,8 +499,8 @@ const PRICING_PLANS = [
     popular: false,
     features: [
       "1 bank account",
-      "500 transactions/month",
-      "Standard reports",
+      "Up to 500 transactions/month",
+      "Standard financial reports",
       "Donor tracking",
       "Opening balances wizard",
       "Email support",
@@ -518,7 +518,7 @@ const PRICING_PLANS = [
     features: [
       "5 bank accounts",
       "Unlimited transactions",
-      "Advanced reports",
+      "Advanced reports & analytics",
       "Donor tracking",
       "Bank reconciliation",
       "Period close tool",
@@ -540,10 +540,16 @@ const PRICING_PLANS = [
       "Unlimited bank accounts",
       "Unlimited transactions",
       "Custom reports",
+      "Donor tracking",
+      "Bank reconciliation",
+      "Period close tool",
+      "990 reporting tool",
+      "Opening balances wizard",
       "Dedicated support",
-      "Multi-organization",
+      "Plaid bank sync",
+      "Unlimited users",
+      "Multi-org management",
       "API access",
-      "Everything in Professional",
     ],
     cta: "Talk to sales",
     ctaHref: "/register",
@@ -617,31 +623,31 @@ function PricingSection() {
 const FAQ_ITEMS = [
   {
     q: "Is MissionLedger built specifically for nonprofits?",
-    a: "Yes. MissionLedger was designed from the ground up for nonprofits, churches, and associations — not retrofitted from software built for businesses. Fund accounting, donor tracking, 990 reporting, and the month-end close workflow are all built into the core product.",
+    a: "Yes. MissionLedger is designed for nonprofits, churches, and associations that need fund accounting, donor tracking, 990 reporting, and nonprofit-friendly financial reporting.",
   },
   {
-    q: "How does fund tracking work?",
-    a: "You create individual funds — restricted grants, operating funds, capital campaigns, endowments — and all transactions are assigned to a fund at entry. MissionLedger maintains a live balance per fund and lets you run fund-level balance sheets and activity reports at any time.",
+    q: "Can I track restricted and unrestricted funds separately?",
+    a: "Yes. MissionLedger is built to support fund-based visibility so organizations can track and report on restricted and unrestricted activity more clearly.",
   },
   {
-    q: "Can I track donors and giving history?",
-    a: "Yes. Every donation is attached to a donor record. You can track pledge balances, view full giving histories, send acknowledgment letters, and export donor data for year-end tax statements. Donor activity is linked directly to the corresponding general ledger entries.",
+    q: "Does MissionLedger include donor tracking?",
+    a: "Yes. MissionLedger includes donor tracking features such as donor records, pledges, recurring donations, and giving history.",
   },
   {
     q: "Does MissionLedger support 990 reporting?",
-    a: "MissionLedger includes a 990 Reporting Tool that maps your chart of accounts to IRS Form 990 lines. You can run supporting schedules throughout the year and export data to share with your tax preparer or CPA, reducing the work required at year-end.",
+    a: "Yes. MissionLedger includes a 990 reporting tool designed to help organizations manage nonprofit reporting workflows more effectively.",
   },
   {
-    q: "What does the month-end close process look like?",
-    a: "MissionLedger's Period Close Tool walks your team through a structured checklist for month-end and year-end close. Each step is tracked, periods lock when closed, and the process produces a clear audit trail showing who completed each step and when.",
+    q: "Does MissionLedger help with month-end close?",
+    a: "Yes. MissionLedger includes bank reconciliation and a period close tool to support a more structured and manageable close process.",
   },
   {
-    q: "How do I migrate my opening balances when I switch?",
-    a: "The Opening Balances Wizard guides you through entering your starting fund balances, account balances, and donor records in a structured setup flow. You don't need to import data from your old system — you enter starting balances directly through the wizard.",
+    q: "Can I get started more easily when migrating?",
+    a: "Yes. MissionLedger includes an opening balances wizard to help teams set up and migrate more cleanly.",
   },
   {
-    q: "Do I need a credit card to start a free trial?",
-    a: "No. Every MissionLedger plan includes a free trial with no credit card required. You can explore the full product before deciding which plan fits your organization.",
+    q: "Do I need a credit card to try it?",
+    a: "No. You can start with a free trial without entering a credit card.",
   },
 ];
 

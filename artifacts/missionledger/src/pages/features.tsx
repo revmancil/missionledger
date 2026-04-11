@@ -14,6 +14,7 @@ import {
   DollarSign,
   FileText,
   Lock,
+  BookOpen,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -52,6 +53,16 @@ function Header() {
         >
           Pricing
         </Link>
+        <a
+          href="#faq"
+          className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+          onClick={(e) => {
+            e.preventDefault();
+            document.getElementById("faq")?.scrollIntoView({ behavior: "smooth" });
+          }}
+        >
+          FAQ
+        </a>
         <Link
           href="/about"
           className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
@@ -93,8 +104,8 @@ function HeroSection() {
 
         <p className="mt-6 text-lg md:text-xl text-muted-foreground max-w-3xl mx-auto leading-relaxed">
           MissionLedger gives nonprofits, churches, and associations the tools they need to manage
-          funds, donor activity, financial reporting, and month-end workflows in one purpose-built
-          system.
+          funds, donor activity, 990 reporting, bank reconciliation, period close, opening balances,
+          and financial reporting in one purpose-built system.
         </p>
 
         <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-4">
@@ -129,12 +140,12 @@ const POSITIONING_CARDS = [
   },
   {
     icon: Heart,
-    title: "Donor and financial workflows that stay easier to reconcile",
+    title: "Donor and financial workflows that stay easier to align",
     body: "Donor records and accounting records are brought closer together so your team spends less time on manual reconciliation and fragmented data.",
   },
   {
     icon: Shield,
-    title: "Reporting and controls designed for stewardship and oversight",
+    title: "Reporting and close processes designed for stewardship and oversight",
     body: "Financial reporting, audit logs, and role-based access are designed around the accountability needs of mission-driven organizations.",
   },
 ];
@@ -185,8 +196,13 @@ const CORE_FEATURES = [
   },
   {
     icon: Heart,
-    title: "Donor Management",
-    body: "Manage pledges, recurring donations, donor history, and year-end tax statements in one place so fundraising and finance stay easier to align.",
+    title: "Donor Tracking",
+    body: "Keep donor records, pledges, recurring donations, and giving history organized so fundraising and finance stay easier to align.",
+  },
+  {
+    icon: FileText,
+    title: "990 Reporting Tool",
+    body: "Support nonprofit reporting workflows with tools designed to make Form 990 preparation and processing more organized and manageable.",
   },
   {
     icon: BarChart3,
@@ -199,6 +215,16 @@ const CORE_FEATURES = [
     body: "Reconcile accounts faster with connected bank feeds and a cleaner month-end review process.",
   },
   {
+    icon: CalendarCheck,
+    title: "Period Close Tool",
+    body: "Help your team close the books with more structure, clearer review steps, and stronger confidence at month-end.",
+  },
+  {
+    icon: BookOpen,
+    title: "Opening Balances Wizard",
+    body: "Get started faster by setting up opening balances in a more guided, structured workflow during onboarding or migration.",
+  },
+  {
     icon: Shield,
     title: "Audit-Ready Controls",
     body: "Use immutable audit logs, role-based access, and close workflows to support stronger internal controls and reporting confidence.",
@@ -207,11 +233,6 @@ const CORE_FEATURES = [
     icon: Users,
     title: "Multi-User Collaboration",
     body: "Give team members the right level of access while keeping financial workflows organized and easier to manage.",
-  },
-  {
-    icon: CalendarCheck,
-    title: "Period Close Tools",
-    body: "Support cleaner month-end processes with tools that help your team review, close, and move forward with confidence.",
   },
   {
     icon: Building2,
@@ -278,6 +299,16 @@ const DEEP_DIVES = [
     icon: Shield,
     title: "Strengthen oversight without adding complexity",
     body: "Permissions, audit logs, and structured close workflows help teams improve internal control and accountability while still keeping the product approachable for smaller organizations.",
+  },
+  {
+    icon: FileText,
+    title: "Make 990 reporting more manageable",
+    body: "MissionLedger includes a 990 reporting tool designed to support nonprofit reporting workflows. This helps position reporting as part of the system, not just an after-the-fact export process.",
+  },
+  {
+    icon: BookOpen,
+    title: "Start with cleaner setup and migration",
+    body: "The opening balances wizard is designed to make onboarding and migration feel more guided, especially for teams moving from spreadsheets or more generic systems.",
   },
 ];
 
@@ -476,11 +507,11 @@ function WhyChooseSection() {
 const PLAN_CARDS = [
   {
     name: "Starter",
-    body: "Core accounting, reporting, and bank sync for small teams",
+    body: "Core accounting, donor tracking, and guided setup for small teams",
   },
   {
     name: "Professional",
-    body: "Advanced reporting, collaboration, and period close tools for growing organizations",
+    body: "Advanced reporting, bank reconciliation, period close workflows, and 990 support for growing organizations",
     popular: true,
   },
   {
@@ -542,23 +573,31 @@ function GrowWithYouSection() {
 const FAQ_ITEMS = [
   {
     q: "Is MissionLedger built specifically for nonprofits?",
-    a: "Yes. MissionLedger is designed for nonprofits, churches, and associations that need fund accounting, donor management, and nonprofit-friendly financial reporting.",
+    a: "Yes. MissionLedger is designed for nonprofits, churches, and associations that need fund accounting, donor tracking, and nonprofit-friendly financial reporting.",
   },
   {
     q: "Does MissionLedger support fund accounting?",
     a: "Yes. MissionLedger is designed to support fund-based visibility so organizations can track and report on restricted and unrestricted activity more clearly.",
   },
   {
-    q: "Does MissionLedger include donor management?",
-    a: "Yes. MissionLedger includes donor management features such as pledges, recurring donations, donor records, and year-end tax statement support.",
+    q: "Does MissionLedger include donor tracking?",
+    a: "Yes. MissionLedger includes donor tracking features such as pledges, recurring donations, donor records, and giving history.",
+  },
+  {
+    q: "Does MissionLedger support 990 reporting?",
+    a: "Yes. MissionLedger includes a 990 reporting tool designed to help organizations manage nonprofit reporting workflows more effectively.",
+  },
+  {
+    q: "Does MissionLedger help with month-end close?",
+    a: "Yes. MissionLedger includes bank reconciliation and a period close tool to support a more structured and manageable close process.",
+  },
+  {
+    q: "Does MissionLedger include an opening balances wizard?",
+    a: "Yes. MissionLedger includes an opening balances wizard to help teams set up and migrate more cleanly.",
   },
   {
     q: "Can multiple team members use MissionLedger?",
     a: "Yes. Professional includes multi-user access, and Enterprise includes unlimited users.",
-  },
-  {
-    q: "Is MissionLedger only for nonprofits?",
-    a: "MissionLedger is designed specifically for nonprofits, churches, and associations — organizations that need mission-focused financial workflows rather than generic business accounting.",
   },
   {
     q: "Can I try MissionLedger before committing?",
@@ -568,7 +607,7 @@ const FAQ_ITEMS = [
 
 function FaqSection() {
   return (
-    <section className="py-24 bg-background">
+    <section id="faq" className="py-24 bg-background">
       <div className="max-w-3xl mx-auto px-6">
         <div className="text-center mb-14">
           <h2 className="text-3xl font-display font-bold">Frequently asked questions</h2>
