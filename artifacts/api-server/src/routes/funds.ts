@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db, funds, donations, expenses, glEntries, chartOfAccounts } from "@workspace/db";
-import { eq, and, desc, sql, isNull } from "drizzle-orm";
+import { eq, and, desc, sql } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
 import { toIsoString } from "../lib/safeIso";
 import { sqlRows } from "../lib/sqlRows";
@@ -168,29 +168,25 @@ router.get("/:id/ledger", requireAuth, async (req, res) => {
       ORDER BY ge.date ASC, ge.created_at ASC
     `);
 
-    // Orphan donations — entered via the old donations form, no transaction or JE,
-    // so no GL entry exists. The fund card balance includes these; the ledger must too.
-    const orphanDonations = await db
+    // All donations and expenses for this fund — matches the card calculation exactly.
+    // We include all of them so the ledger ending balance matches the fund card.
+    const fundDonations = await db
       .select()
       .from(donations)
       .where(
         and(
           eq(donations.companyId, companyId),
-          eq(donations.fundId, fundId),
-          isNull(donations.transactionId),
-          isNull(donations.journalEntryId)
+          eq(donations.fundId, fundId)
         )
       );
 
-    // Orphan expenses — same idea: no JE, so no GL entry.
-    const orphanExpenses = await db
+    const fundExpenses = await db
       .select()
       .from(expenses)
       .where(
         and(
           eq(expenses.companyId, companyId),
-          eq(expenses.fundId, fundId),
-          isNull(expenses.journalEntryId)
+          eq(expenses.fundId, fundId)
         )
       );
 
@@ -241,7 +237,7 @@ router.get("/:id/ledger", requireAuth, async (req, res) => {
       });
     }
 
-    for (const d of orphanDonations) {
+    for (const d of fundDonations) {
       rawRows.push({
         id: d.id,
         date: toDateIso(d.date),
@@ -257,7 +253,7 @@ router.get("/:id/ledger", requireAuth, async (req, res) => {
       });
     }
 
-    for (const e of orphanExpenses) {
+    for (const e of fundExpenses) {
       rawRows.push({
         id: e.id,
         date: toDateIso(e.date),
