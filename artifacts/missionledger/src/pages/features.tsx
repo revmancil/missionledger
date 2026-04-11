@@ -52,6 +52,12 @@ function Header() {
         >
           Pricing
         </Link>
+        <Link
+          href="/about"
+          className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+        >
+          About
+        </Link>
       </nav>
       <div className="flex items-center gap-3">
         <Link
@@ -630,6 +636,10 @@ function Footer() {
   return (
     <footer className="bg-foreground text-background py-12 text-center">
       <div className="flex items-center justify-center gap-4 text-sm opacity-70 mb-2 flex-wrap">
+        <a href={`${BASE}/about`} className="hover:opacity-100 hover:underline">
+          About
+        </a>
+        <span className="opacity-40">·</span>
         <a href={`${BASE}/terms`} className="hover:opacity-100 hover:underline">
           Terms of Service
         </a>
