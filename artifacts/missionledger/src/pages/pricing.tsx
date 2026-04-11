@@ -4,7 +4,6 @@ import {
   Check,
   CheckCircle2,
   Cloud,
-  RefreshCcw,
   BarChart3,
   Layers,
   FileText,
@@ -98,7 +97,8 @@ function HeroSection() {
 
         <p className="mt-6 text-lg md:text-xl text-muted-foreground max-w-3xl mx-auto leading-relaxed">
           MissionLedger gives nonprofits, churches, and associations nonprofit-focused accounting,
-          donor management, and financial reporting with straightforward monthly pricing.
+          donor tracking, 990 reporting, bank reconciliation, period close workflows, and financial
+          reporting with straightforward monthly pricing.
         </p>
 
         <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-4">
@@ -131,10 +131,13 @@ const PRICING_PLANS = [
     price: "$19.99",
     period: "/mo",
     popular: false,
+    description: "For very small organizations getting out of spreadsheets and setting up core nonprofit accounting workflows.",
     features: [
       "1 bank account",
-      "500 transactions/month",
-      "Standard reports",
+      "Up to 500 transactions/month",
+      "Standard financial reports",
+      "Donor tracking",
+      "Opening balances wizard",
       "Email support",
       "Plaid bank sync",
     ],
@@ -147,14 +150,18 @@ const PRICING_PLANS = [
     price: "$49",
     period: "/mo",
     popular: true,
+    description: "For growing organizations that need stronger reporting, cleaner closes, and team collaboration.",
     features: [
       "5 bank accounts",
       "Unlimited transactions",
-      "Advanced reports",
+      "Advanced reports & analytics",
+      "Donor tracking",
+      "Bank reconciliation",
+      "Period close tool",
+      "990 reporting tool",
       "Priority support",
       "Plaid bank sync",
       "Multi-user access",
-      "Period close wizard",
     ],
     cta: "Start free trial",
     ctaHref: "/register",
@@ -165,10 +172,16 @@ const PRICING_PLANS = [
     price: "$99",
     period: "/mo",
     popular: false,
+    description: "For organizations managing multiple entities, advanced reporting needs, or larger finance teams.",
     features: [
       "Unlimited bank accounts",
       "Unlimited transactions",
       "Custom reports",
+      "Donor tracking",
+      "Bank reconciliation",
+      "Period close tool",
+      "990 reporting tool",
+      "Opening balances wizard",
       "Dedicated support",
       "Plaid bank sync",
       "Unlimited users",
@@ -206,6 +219,9 @@ function PricingCardsSection() {
                   {plan.price}
                   <span className="text-base font-normal text-muted-foreground">{plan.period}</span>
                 </p>
+                {"description" in plan && (
+                  <p className="mt-3 text-sm text-muted-foreground leading-relaxed">{plan.description}</p>
+                )}
               </div>
 
               <ul className="flex-1 space-y-3 mb-8">
@@ -251,11 +267,6 @@ const INCLUDED_FEATURES = [
     icon: BarChart3,
     title: "Fund-based financial visibility",
     body: "See balances and activity at the fund level so your team always knows where restricted and unrestricted money stands.",
-  },
-  {
-    icon: RefreshCcw,
-    title: "Bank sync support",
-    body: "Connect your bank accounts via Plaid for automated transaction import and faster reconciliation.",
   },
   {
     icon: FileText,
@@ -342,6 +353,41 @@ const TABLE_ROWS = [
     type: "text" as const,
   },
   {
+    feature: "Donor tracking",
+    starter: true,
+    professional: true,
+    enterprise: true,
+    type: "check" as const,
+  },
+  {
+    feature: "Opening balances wizard",
+    starter: true,
+    professional: true,
+    enterprise: true,
+    type: "check" as const,
+  },
+  {
+    feature: "Bank reconciliation",
+    starter: false,
+    professional: true,
+    enterprise: true,
+    type: "mixed" as const,
+  },
+  {
+    feature: "Period close tool",
+    starter: false,
+    professional: true,
+    enterprise: true,
+    type: "mixed" as const,
+  },
+  {
+    feature: "990 reporting tool",
+    starter: false,
+    professional: true,
+    enterprise: true,
+    type: "mixed" as const,
+  },
+  {
     feature: "Plaid bank sync",
     starter: true,
     professional: true,
@@ -356,31 +402,24 @@ const TABLE_ROWS = [
     type: "text" as const,
   },
   {
-    feature: "Period close tools",
-    starter: false,
-    professional: "Period close wizard",
-    enterprise: "Included",
-    type: "mixed" as const,
-  },
-  {
     feature: "Multi-org management",
     starter: false,
     professional: false,
-    enterprise: "Included",
+    enterprise: true,
     type: "mixed" as const,
   },
   {
     feature: "API access",
     starter: false,
     professional: false,
-    enterprise: "Included",
+    enterprise: true,
     type: "mixed" as const,
   },
   {
     feature: "Support",
-    starter: "Email",
-    professional: "Priority",
-    enterprise: "Dedicated",
+    starter: "Email support",
+    professional: "Priority support",
+    enterprise: "Dedicated support",
     type: "text" as const,
   },
 ];
@@ -454,21 +493,21 @@ const WHO_FOR = [
     plan: "Starter",
     price: "$19.99/mo",
     description:
-      "Best for very small nonprofits, churches, or associations that want a simpler way to manage core accounting without relying on spreadsheets.",
+      "Best for very small nonprofits, churches, or associations that want a simpler way to manage core accounting, donor tracking, and setup without relying on spreadsheets.",
     popular: false,
   },
   {
     plan: "Professional",
     price: "$49/mo",
     description:
-      "Best for growing teams that need more reporting depth, collaboration, and cleaner month-end workflows.",
+      "Best for growing teams that need more reporting depth, bank reconciliation, period close workflows, 990 support, and collaboration.",
     popular: true,
   },
   {
     plan: "Enterprise",
     price: "$99/mo",
     description:
-      "Best for organizations with multiple entities, more advanced reporting needs, or larger finance teams that need flexibility and support.",
+      "Best for organizations with multiple entities, more advanced reporting needs, API requirements, or larger finance teams that need flexibility and support.",
     popular: false,
   },
 ];
@@ -478,7 +517,7 @@ function WhoForSection() {
     <section className="py-24 bg-background">
       <div className="max-w-7xl mx-auto px-6">
         <div className="text-center mb-14">
-          <h2 className="text-3xl font-display font-bold">Who each plan is for</h2>
+          <h2 className="text-3xl font-display font-bold">Which plan should you choose?</h2>
           <p className="mt-4 text-muted-foreground max-w-xl mx-auto">
             Each plan is designed for a different stage of organizational complexity.
           </p>
@@ -531,7 +570,7 @@ const WHY_PRICING = [
   {
     icon: TrendingUp,
     title: "Grow without friction",
-    body: "Upgrade when you need more users, reporting depth, or organizational complexity. Your data moves with you.",
+    body: "Upgrade when you need more reporting depth, stronger close workflows, more users, or greater organizational complexity.",
   },
   {
     icon: Zap,
@@ -549,8 +588,11 @@ function WhyPricingSection() {
             Why our pricing works for nonprofits
           </h2>
           <p className="mt-4 text-muted-foreground max-w-2xl mx-auto">
-            We designed MissionLedger's pricing around the realities of mission-driven organizations
-            — lean budgets, changing needs, and a focus on stewardship.
+            Many mission-driven organizations need stronger accounting tools but cannot justify
+            enterprise software cost or complexity. MissionLedger is designed to give nonprofits,
+            churches, and associations a more purpose-built financial workflow — including donor
+            tracking, 990 reporting support, cleaner month-end processes, and guided setup — with
+            pricing that stays straightforward and accessible.
           </p>
         </div>
 
@@ -582,15 +624,27 @@ const FAQ_ITEMS = [
   },
   {
     q: "Which plan is best for a small nonprofit?",
-    a: "Starter is a strong fit for very small organizations, while Professional is better for growing teams that need more reporting and collaboration.",
+    a: "Starter is a strong fit for very small organizations, while Professional is better for growing teams that need more reporting, donor tracking, structured month-end workflows, and 990 support.",
   },
   {
     q: "Can I upgrade later?",
     a: "Yes. You can start with the plan that fits today and move up as your organization's needs grow.",
   },
   {
-    q: "Which plan includes multi-user access?",
-    a: "Professional includes multi-user access, and Enterprise includes unlimited users.",
+    q: "Which plans include donor tracking?",
+    a: "Donor tracking is included across MissionLedger plans.",
+  },
+  {
+    q: "Which plans include 990 reporting?",
+    a: "The 990 reporting tool is included in Professional and Enterprise.",
+  },
+  {
+    q: "Which plans include period close workflows?",
+    a: "The period close tool is included in Professional and Enterprise.",
+  },
+  {
+    q: "Which plans include the opening balances wizard?",
+    a: "The opening balances wizard is included to help organizations get started with cleaner setup and migration workflows.",
   },
   {
     q: "Which plan includes API access?",
@@ -598,7 +652,7 @@ const FAQ_ITEMS = [
   },
   {
     q: "Is MissionLedger built specifically for nonprofits?",
-    a: "Yes. MissionLedger is designed for nonprofits, churches, and associations that need fund accounting, donor management, and nonprofit-friendly financial reporting.",
+    a: "Yes. MissionLedger is designed for nonprofits, churches, and associations that need fund accounting, donor tracking, nonprofit-friendly reporting, and stronger financial workflows.",
   },
 ];
 
