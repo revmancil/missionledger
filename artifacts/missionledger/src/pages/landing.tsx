@@ -163,6 +163,11 @@ function WhySection() {
             nonprofits, churches, and associations, so your financial workflow makes sense from
             the start.
           </p>
+          <div className="mt-6">
+            <Link href="/compare/quickbooks" className="inline-flex items-center gap-2 text-sm font-medium text-primary hover:underline">
+              See how MissionLedger compares to QuickBooks →
+            </Link>
+          </div>
         </div>
 
         <div className="grid md:grid-cols-3 gap-8">
