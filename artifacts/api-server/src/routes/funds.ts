@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db, funds, donations, expenses, glEntries, chartOfAccounts } from "@workspace/db";
-import { eq, and, desc, sql } from "drizzle-orm";
+import { eq, and, desc, sql, isNull } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
 import { toIsoString } from "../lib/safeIso";
 import { sqlRows } from "../lib/sqlRows";
@@ -140,11 +140,10 @@ router.get("/:id/ledger", requireAuth, async (req, res) => {
       .where(and(eq(funds.id, fundId), eq(funds.companyId, companyId)));
     if (!fund) return res.status(404).json({ error: "Fund not found" });
 
-    // Fund ledger: only INCOME, EXPENSE, and EQUITY entries.
+    // Fund ledger: only INCOME, EXPENSE, and EQUITY GL entries.
     // ASSET/LIABILITY entries are the "other side" of double-entry and would
-    // double-count against the income/expense entries, producing wrong balances.
-    // This matches the same filter used on the fund balance cards.
-    const rows = await db.execute(sql`
+    // double-count against income/expense entries.
+    const glRows = await db.execute(sql`
       SELECT
         ge.id,
         ge.date,
@@ -153,6 +152,7 @@ router.get("/:id/ledger", requireAuth, async (req, res) => {
         ge.description,
         ge.source_type,
         ge.is_void,
+        ge.created_at,
         c.code    AS account_code,
         c.name    AS account_name,
         c.coa_type AS account_type,
@@ -168,37 +168,131 @@ router.get("/:id/ledger", requireAuth, async (req, res) => {
       ORDER BY ge.date ASC, ge.created_at ASC
     `);
 
-    // Running balance: net fund position (credits add, debits subtract)
-    // This matches the logic used in GET /funds for the balance card.
-    let runningBalance = 0;
-    const entries = sqlRows(rows).map((r: any) => {
+    // Orphan donations — entered via the old donations form, no transaction or JE,
+    // so no GL entry exists. The fund card balance includes these; the ledger must too.
+    const orphanDonations = await db
+      .select()
+      .from(donations)
+      .where(
+        and(
+          eq(donations.companyId, companyId),
+          eq(donations.fundId, fundId),
+          isNull(donations.transactionId),
+          isNull(donations.journalEntryId)
+        )
+      );
+
+    // Orphan expenses — same idea: no JE, so no GL entry.
+    const orphanExpenses = await db
+      .select()
+      .from(expenses)
+      .where(
+        and(
+          eq(expenses.companyId, companyId),
+          eq(expenses.fundId, fundId),
+          isNull(expenses.journalEntryId)
+        )
+      );
+
+    // Build a unified list of raw ledger rows, sorted by date then createdAt
+    type RawRow = {
+      id: string;
+      date: string | null;
+      description: string | null;
+      sourceType: string;
+      reference: string | null;
+      accountCode: string | null;
+      accountName: string | null;
+      accountType: string | null;
+      credit: number | null;
+      debit: number | null;
+      sortKey: number; // epoch ms for sort
+    };
+
+    const toDateIso = (d: unknown): string | null => {
+      if (!d) return null;
+      if (d instanceof Date) return d.toISOString();
+      return String(d);
+    };
+    const toEpoch = (d: unknown): number => {
+      const iso = toDateIso(d);
+      if (!iso) return 0;
+      const t = new Date(iso).getTime();
+      return isNaN(t) ? 0 : t;
+    };
+
+    const rawRows: RawRow[] = [];
+
+    for (const r of sqlRows(glRows) as any[]) {
       const amount = Number(r.amount ?? 0);
       const isDebit = String(r.entry_type).toUpperCase() === "DEBIT";
-      const coaType = String(r.account_type ?? "").toUpperCase();
-
-      // Asset / Expense = debit-normal  → debit increases fund activity
-      // Income / Equity / Liability     → credit-normal → credit increases fund activity
-      const isDebitNormal = coaType === "ASSET" || coaType === "EXPENSE";
-      if (isDebitNormal) {
-        runningBalance += isDebit ? -amount : amount; // expense debits reduce net position
-      } else {
-        runningBalance += isDebit ? -amount : amount; // same: credit adds, debit subtracts
-      }
-
-      const d = r.date;
-      const dateIso = d instanceof Date ? d.toISOString() : d != null ? String(d) : null;
-
-      return {
+      rawRows.push({
         id: r.id,
-        date: dateIso,
-        description: r.description,
+        date: toDateIso(r.date),
+        description: r.description ?? null,
         sourceType: r.source_type,
         reference: r.journal_entry_number || r.reference_number || null,
-        accountCode: r.account_code,
-        accountName: r.account_name,
-        accountType: r.account_type,
-        debit: isDebit ? amount : null,
+        accountCode: r.account_code ?? null,
+        accountName: r.account_name ?? null,
+        accountType: r.account_type ?? null,
         credit: !isDebit ? amount : null,
+        debit: isDebit ? amount : null,
+        sortKey: toEpoch(r.date) * 1000 + toEpoch(r.created_at),
+      });
+    }
+
+    for (const d of orphanDonations) {
+      rawRows.push({
+        id: d.id,
+        date: toDateIso(d.date),
+        description: d.notes ? `Donation from ${d.donorName} — ${d.notes}` : `Donation from ${d.donorName}`,
+        sourceType: "DONATION",
+        reference: null,
+        accountCode: null,
+        accountName: "Donation (direct entry)",
+        accountType: "INCOME",
+        credit: Number(d.amount ?? 0),
+        debit: null,
+        sortKey: toEpoch(d.date),
+      });
+    }
+
+    for (const e of orphanExpenses) {
+      rawRows.push({
+        id: e.id,
+        date: toDateIso(e.date),
+        description: e.description,
+        sourceType: "EXPENSE_RECORD",
+        reference: null,
+        accountCode: null,
+        accountName: `Expense — ${e.category}`,
+        accountType: "EXPENSE",
+        credit: null,
+        debit: Number(e.amount ?? 0),
+        sortKey: toEpoch(e.date),
+      });
+    }
+
+    // Sort by date
+    rawRows.sort((a, b) => a.sortKey - b.sortKey);
+
+    // Compute running balance: credit adds, debit subtracts (same as card formula)
+    let runningBalance = 0;
+    const entries = rawRows.map((r) => {
+      const credit = r.credit ?? 0;
+      const debit = r.debit ?? 0;
+      runningBalance += credit - debit;
+      return {
+        id: r.id,
+        date: r.date,
+        description: r.description,
+        sourceType: r.sourceType,
+        reference: r.reference,
+        accountCode: r.accountCode,
+        accountName: r.accountName,
+        accountType: r.accountType,
+        debit: r.debit,
+        credit: r.credit,
         runningBalance,
       };
     });
