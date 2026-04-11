@@ -202,7 +202,8 @@ router.get("/:id/ledger", requireAuth, async (req, res) => {
       accountType: string | null;
       credit: number | null;
       debit: number | null;
-      sortKey: number; // epoch ms for sort
+      sortDate: number;    // primary sort: transaction date epoch ms
+      sortCreated: number; // secondary sort: created_at epoch ms
     };
 
     const toDateIso = (d: unknown): string | null => {
@@ -233,7 +234,8 @@ router.get("/:id/ledger", requireAuth, async (req, res) => {
         accountType: r.account_type ?? null,
         credit: !isDebit ? amount : null,
         debit: isDebit ? amount : null,
-        sortKey: toEpoch(r.date) * 1000 + toEpoch(r.created_at),
+        sortDate: toEpoch(r.date),
+        sortCreated: toEpoch(r.created_at),
       });
     }
 
@@ -249,7 +251,8 @@ router.get("/:id/ledger", requireAuth, async (req, res) => {
         accountType: "INCOME",
         credit: Number(d.amount ?? 0),
         debit: null,
-        sortKey: toEpoch(d.date),
+        sortDate: toEpoch(d.date),
+        sortCreated: toEpoch(d.createdAt),
       });
     }
 
@@ -265,12 +268,15 @@ router.get("/:id/ledger", requireAuth, async (req, res) => {
         accountType: "EXPENSE",
         credit: null,
         debit: Number(e.amount ?? 0),
-        sortKey: toEpoch(e.date),
+        sortDate: toEpoch(e.date),
+        sortCreated: toEpoch(e.createdAt),
       });
     }
 
-    // Sort by date
-    rawRows.sort((a, b) => a.sortKey - b.sortKey);
+    // Sort by transaction date ascending, then by created_at ascending as tiebreaker
+    rawRows.sort((a, b) =>
+      a.sortDate !== b.sortDate ? a.sortDate - b.sortDate : a.sortCreated - b.sortCreated
+    );
 
     // Compute running balance: credit adds, debit subtracts (same as card formula)
     let runningBalance = 0;
