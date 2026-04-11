@@ -27,6 +27,8 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogFooter,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import {
@@ -642,6 +644,27 @@ function HistoryPanel({
   onRefresh: () => void;
 }) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+  const handleDelete = async (id: string) => {
+    setDeletingId(id);
+    try {
+      const res = await api(`/api/journal-entries/${id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        toast.error(err.error || "Failed to delete journal entry");
+      } else {
+        toast.success("Journal entry deleted");
+        setConfirmDeleteId(null);
+        onRefresh();
+      }
+    } catch {
+      toast.error("Failed to delete journal entry");
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   return (
     <div className="rounded-xl border border-border bg-card overflow-hidden">
@@ -677,6 +700,7 @@ function HistoryPanel({
                 <TableHead className="text-xs font-semibold uppercase tracking-wide">Description</TableHead>
                 <TableHead className="text-xs font-semibold uppercase tracking-wide text-right">Total Debits</TableHead>
                 <TableHead className="text-xs font-semibold uppercase tracking-wide">Lines</TableHead>
+                <TableHead className="w-10" />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -686,6 +710,7 @@ function HistoryPanel({
                   0
                 );
                 const st = String(entry?.status ?? "").toUpperCase();
+                const canDelete = st === "VOID" || st === "DRAFT";
                 return (
                   <Fragment key={entry.id}>
                     <TableRow
@@ -714,10 +739,25 @@ function HistoryPanel({
                           {entry.lines?.length ?? 0} lines
                         </Badge>
                       </TableCell>
+                      <TableCell>
+                        {canDelete && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 w-7 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setConfirmDeleteId(entry.id);
+                            }}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </Button>
+                        )}
+                      </TableCell>
                     </TableRow>
                     {expandedId === entry.id && (
                       <TableRow>
-                        <TableCell colSpan={7} className="bg-muted/20 p-0">
+                        <TableCell colSpan={8} className="bg-muted/20 p-0">
                           <div className="p-4">
                             <table className="w-full text-sm">
                               <thead>
@@ -750,6 +790,31 @@ function HistoryPanel({
               })}
             </TableBody>
           </Table>
+
+          {/* Delete confirmation dialog */}
+          <Dialog open={!!confirmDeleteId} onOpenChange={(open) => { if (!open) setConfirmDeleteId(null); }}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Delete Journal Entry</DialogTitle>
+                <DialogDescription>
+                  This will permanently delete this journal entry. This action cannot be undone.
+                  Only void or draft entries can be deleted.
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setConfirmDeleteId(null)}>
+                  Cancel
+                </Button>
+                <Button
+                  variant="destructive"
+                  disabled={!!deletingId}
+                  onClick={() => confirmDeleteId && handleDelete(confirmDeleteId)}
+                >
+                  {deletingId ? "Deleting…" : "Delete Entry"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </div>
       )}
     </div>
