@@ -104,6 +104,7 @@ export default function FundLedger() {
               {fmt(finalBalance)}
             </span>{" "}
             net position
+            <span className="ml-2 text-xs text-muted-foreground/70">(income, expenses &amp; equity entries only — matches fund card balance)</span>
           </p>
         </div>
 
@@ -129,7 +130,7 @@ export default function FundLedger() {
         {entries.length === 0 ? (
           <div className="rounded-xl border border-dashed border-border bg-muted/20 p-12 text-center text-muted-foreground">
             <p className="font-medium">No GL activity for this fund yet.</p>
-            <p className="text-sm mt-1">Transactions and journal entries tagged to this fund will appear here.</p>
+            <p className="text-sm mt-1">Transactions and journal entries tagged to this fund will appear here once posted.</p>
           </div>
         ) : (
           <div className="rounded-xl border border-border overflow-hidden">

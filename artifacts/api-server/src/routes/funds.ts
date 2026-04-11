@@ -140,7 +140,10 @@ router.get("/:id/ledger", requireAuth, async (req, res) => {
       .where(and(eq(funds.id, fundId), eq(funds.companyId, companyId)));
     if (!fund) return res.status(404).json({ error: "Fund not found" });
 
-    // All non-void GL entries for this fund, joined with account info and JE reference
+    // Fund ledger: only INCOME, EXPENSE, and EQUITY entries.
+    // ASSET/LIABILITY entries are the "other side" of double-entry and would
+    // double-count against the income/expense entries, producing wrong balances.
+    // This matches the same filter used on the fund balance cards.
     const rows = await db.execute(sql`
       SELECT
         ge.id,
@@ -161,6 +164,7 @@ router.get("/:id/ledger", requireAuth, async (req, res) => {
       WHERE ge.fund_id    = ${fundId}
         AND ge.company_id = ${companyId}
         AND (ge.is_void IS NULL OR ge.is_void = false)
+        AND c.coa_type IN ('INCOME', 'EXPENSE', 'EQUITY')
       ORDER BY ge.date ASC, ge.created_at ASC
     `);
 
