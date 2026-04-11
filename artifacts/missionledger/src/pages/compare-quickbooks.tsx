@@ -40,7 +40,7 @@ function Header() {
       </div>
       <nav className="hidden md:flex items-center gap-6">
         <Link
-          href="/#features"
+          href="/features"
           className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
         >
           Features

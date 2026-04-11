@@ -41,16 +41,12 @@ function Header() {
         />
       </div>
       <nav className="hidden md:flex items-center gap-6">
-        <a
-          href="#features"
+        <Link
+          href="/features"
           className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
-          onClick={(e) => {
-            e.preventDefault();
-            document.getElementById("features")?.scrollIntoView({ behavior: "smooth" });
-          }}
         >
           Features
-        </a>
+        </Link>
         <Link
           href="/pricing"
           className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
