@@ -41,6 +41,7 @@ import BudgetPage from "@/pages/budget";
 import AdminUsersPage from "@/pages/admin-users";
 import GivePage from "@/pages/give";
 import PricingPage from "@/pages/pricing";
+import CompareQuickbooksPage from "@/pages/compare-quickbooks";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -111,6 +112,7 @@ function Router() {
       <Route path="/privacy" component={PrivacyPage} />
       <Route path="/give" component={GivePage} />
       <Route path="/pricing" component={PricingPage} />
+      <Route path="/compare/quickbooks" component={CompareQuickbooksPage} />
 
       <Route path="/dashboard"><SubscriptionGatedRoute component={DashboardPage} /></Route>
       <Route path="/funds"><SubscriptionGatedRoute component={FundsPage} /></Route>
