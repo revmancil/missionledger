@@ -44,6 +44,7 @@ import PricingPage from "@/pages/pricing";
 import FeaturesPage from "@/pages/features";
 import CompareQuickbooksPage from "@/pages/compare-quickbooks";
 import AboutPage from "@/pages/about";
+import SecurityPage from "@/pages/security";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -116,6 +117,7 @@ function Router() {
       <Route path="/pricing" component={PricingPage} />
       <Route path="/features" component={FeaturesPage} />
       <Route path="/about" component={AboutPage} />
+      <Route path="/security" component={SecurityPage} />
       <Route path="/compare/quickbooks" component={CompareQuickbooksPage} />
 
       <Route path="/dashboard"><SubscriptionGatedRoute component={DashboardPage} /></Route>

@@ -640,6 +640,10 @@ function Footer() {
           About
         </a>
         <span className="opacity-40">·</span>
+        <a href={`${BASE}/security`} className="hover:opacity-100 hover:underline">
+          Security
+        </a>
+        <span className="opacity-40">·</span>
         <a href={`${BASE}/terms`} className="hover:opacity-100 hover:underline">
           Terms of Service
         </a>
