@@ -52,12 +52,6 @@ router.get("/", requireAuth, async (req, res) => {
       // Total balance = old-style donations/expenses + GL-entry-based contribution
       const balance = totalDonations - totalExpenses + glContribution;
 
-      if (glContribution !== 0) {
-        console.log(
-          `[Fund Balance] "${fund.name}": donations=${totalDonations.toFixed(2)}, expenses=${totalExpenses.toFixed(2)}, GL contribution=${glContribution.toFixed(2)}, total=${balance.toFixed(2)}`
-        );
-      }
-
       return {
         ...fund,
         createdAt: toIsoString(fund.createdAt),

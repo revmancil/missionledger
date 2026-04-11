@@ -173,21 +173,5 @@ export async function backfillJeGlEntries(): Promise<{
   return { checked, skipped, backfilled, errors, details };
 }
 
-// Allow direct execution: `npx tsx src/seeds/backfill-je-gl-entries.ts`
-if (require.main === module || process.argv[1]?.includes("backfill-je-gl-entries")) {
-  backfillJeGlEntries()
-    .then((result) => {
-      console.log("\n=== Backfill Summary ===");
-      console.log(`Checked:    ${result.checked}`);
-      console.log(`Skipped:    ${result.skipped} (already had GL entries)`);
-      console.log(`Backfilled: ${result.backfilled}`);
-      console.log(`Errors:     ${result.errors}`);
-      console.log("\nDetails:");
-      result.details.forEach((d) => console.log(" •", d));
-      process.exit(result.errors > 0 ? 1 : 0);
-    })
-    .catch((err) => {
-      console.error("Fatal error:", err);
-      process.exit(1);
-    });
-}
+// Trigger via the master-admin API endpoint:
+//   POST /api/master-admin/backfill-gl-entries  (requires master-admin Bearer token)
