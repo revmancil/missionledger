@@ -104,7 +104,7 @@ export default function FundLedger() {
               {fmt(finalBalance)}
             </span>{" "}
             net position
-            <span className="ml-2 text-xs text-muted-foreground/70">(income, expenses &amp; equity entries only — matches fund card balance)</span>
+            <span className="ml-2 text-xs text-muted-foreground/70">(income, expenses &amp; equity GL entries)</span>
           </p>
         </div>
 

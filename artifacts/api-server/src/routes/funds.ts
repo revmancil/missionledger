@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, funds, donations, expenses, glEntries, chartOfAccounts } from "@workspace/db";
+import { db, funds, glEntries, chartOfAccounts } from "@workspace/db";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
 import { toIsoString } from "../lib/safeIso";
@@ -12,12 +12,9 @@ router.get("/", requireAuth, async (req, res) => {
     const { companyId } = (req as any).user;
     const all = await db.select().from(funds).where(eq(funds.companyId, companyId)).orderBy(desc(funds.createdAt));
 
-    const allDonations = await db.select().from(donations).where(eq(donations.companyId, companyId));
-    const allExpenses = await db.select().from(expenses).where(eq(expenses.companyId, companyId));
-
-    // Aggregate GL entries per fund — only for equity/income/expense account types
-    // (avoids double-counting asset/liability accounts in the fund balance)
-    // OPENING_BALANCE and MANUAL_JE entries are the primary additional sources.
+    // Fund balance = GL entries only (INCOME/EXPENSE/EQUITY), credit − debit.
+    // Transactions recorded in the bank register already create the income/expense
+    // GL entries — adding the donations/expenses tables on top double-counts them.
     const glRows = await db.execute(sql`
       SELECT
         g.fund_id,
@@ -32,34 +29,20 @@ router.get("/", requireAuth, async (req, res) => {
       GROUP BY g.fund_id
     `);
 
-    // Build a map: fundId → net GL contribution (credits − debits for equity-like accounts)
     const glByFund: Record<string, number> = {};
     for (const row of sqlRows(glRows) as any[]) {
       const credit = parseFloat(row.total_credit) || 0;
       const debit  = parseFloat(row.total_debit)  || 0;
-      // For equity/income: credit normal (positive contribution)
-      // For expense: debit normal (negative contribution) → credit - debit is still correct sign
       glByFund[row.fund_id] = credit - debit;
     }
 
     const enriched = all.map(fund => {
-      const fundDonations = allDonations.filter(d => d.fundId === fund.id);
-      const fundExpenses  = allExpenses.filter(e => e.fundId === fund.id);
-      const totalDonations = fundDonations.reduce((s, d) => s + (d.amount || 0), 0);
-      const totalExpenses  = fundExpenses.reduce((s, e)  => s + (e.amount || 0), 0);
-      const glContribution = glByFund[fund.id] ?? 0;
-
-      // Total balance = old-style donations/expenses + GL-entry-based contribution
-      const balance = totalDonations - totalExpenses + glContribution;
-
+      const balance = glByFund[fund.id] ?? 0;
       return {
         ...fund,
         createdAt: toIsoString(fund.createdAt),
         updatedAt: toIsoString(fund.updatedAt),
         balance,
-        totalDonations,
-        totalExpenses,
-        glContribution,
       };
     });
 
@@ -168,44 +151,6 @@ router.get("/:id/ledger", requireAuth, async (req, res) => {
       ORDER BY ge.date ASC, ge.created_at ASC
     `);
 
-    // All donations and expenses for this fund — matches the card calculation exactly.
-    // We include all of them so the ledger ending balance matches the fund card.
-    const fundDonations = await db
-      .select()
-      .from(donations)
-      .where(
-        and(
-          eq(donations.companyId, companyId),
-          eq(donations.fundId, fundId)
-        )
-      );
-
-    const fundExpenses = await db
-      .select()
-      .from(expenses)
-      .where(
-        and(
-          eq(expenses.companyId, companyId),
-          eq(expenses.fundId, fundId)
-        )
-      );
-
-    // Build a unified list of raw ledger rows, sorted by date then createdAt
-    type RawRow = {
-      id: string;
-      date: string | null;
-      description: string | null;
-      sourceType: string;
-      reference: string | null;
-      accountCode: string | null;
-      accountName: string | null;
-      accountType: string | null;
-      credit: number | null;
-      debit: number | null;
-      sortDate: number;    // primary sort: transaction date epoch ms
-      sortCreated: number; // secondary sort: created_at epoch ms
-    };
-
     const toDateIso = (d: unknown): string | null => {
       if (!d) return null;
       if (d instanceof Date) return d.toISOString();
@@ -218,12 +163,12 @@ router.get("/:id/ledger", requireAuth, async (req, res) => {
       return isNaN(t) ? 0 : t;
     };
 
-    const rawRows: RawRow[] = [];
-
-    for (const r of sqlRows(glRows) as any[]) {
+    // Build entries from GL rows only — sorted by date then created_at
+    let runningBalance = 0;
+    const unsorted = (sqlRows(glRows) as any[]).map((r) => {
       const amount = Number(r.amount ?? 0);
       const isDebit = String(r.entry_type).toUpperCase() === "DEBIT";
-      rawRows.push({
+      return {
         id: r.id,
         date: toDateIso(r.date),
         description: r.description ?? null,
@@ -236,54 +181,15 @@ router.get("/:id/ledger", requireAuth, async (req, res) => {
         debit: isDebit ? amount : null,
         sortDate: toEpoch(r.date),
         sortCreated: toEpoch(r.created_at),
-      });
-    }
+      };
+    });
 
-    for (const d of fundDonations) {
-      rawRows.push({
-        id: d.id,
-        date: toDateIso(d.date),
-        description: d.notes ? `Donation from ${d.donorName} — ${d.notes}` : `Donation from ${d.donorName}`,
-        sourceType: "DONATION",
-        reference: null,
-        accountCode: null,
-        accountName: "Donation (direct entry)",
-        accountType: "INCOME",
-        credit: Number(d.amount ?? 0),
-        debit: null,
-        sortDate: toEpoch(d.date),
-        sortCreated: toEpoch(d.createdAt),
-      });
-    }
-
-    for (const e of fundExpenses) {
-      rawRows.push({
-        id: e.id,
-        date: toDateIso(e.date),
-        description: e.description,
-        sourceType: "EXPENSE_RECORD",
-        reference: null,
-        accountCode: null,
-        accountName: `Expense — ${e.category}`,
-        accountType: "EXPENSE",
-        credit: null,
-        debit: Number(e.amount ?? 0),
-        sortDate: toEpoch(e.date),
-        sortCreated: toEpoch(e.createdAt),
-      });
-    }
-
-    // Sort by transaction date ascending, then by created_at ascending as tiebreaker
-    rawRows.sort((a, b) =>
+    unsorted.sort((a, b) =>
       a.sortDate !== b.sortDate ? a.sortDate - b.sortDate : a.sortCreated - b.sortCreated
     );
 
-    // Compute running balance: credit adds, debit subtracts (same as card formula)
-    let runningBalance = 0;
-    const entries = rawRows.map((r) => {
-      const credit = r.credit ?? 0;
-      const debit = r.debit ?? 0;
-      runningBalance += credit - debit;
+    const entries = unsorted.map((r) => {
+      runningBalance += (r.credit ?? 0) - (r.debit ?? 0);
       return {
         id: r.id,
         date: r.date,
