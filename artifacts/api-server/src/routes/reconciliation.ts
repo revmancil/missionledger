@@ -219,6 +219,26 @@ router.post("/:id/complete", requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
+// ── DELETE /:id — remove VOID or IN_PROGRESS sessions only ───────────────────
+router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { companyId } = (req as any).user;
+    const [recon] = await db.select().from(reconciliations)
+      .where(and(eq(reconciliations.id, req.params.id), eq(reconciliations.companyId, companyId)));
+    if (!recon) return res.status(404).json({ error: "Not found" });
+    if (recon.status === "COMPLETED")
+      return res.status(400).json({ error: "Completed reconciliations cannot be deleted." });
+
+    // Delete items first, then the session
+    await db.delete(reconciliationItems).where(eq(reconciliationItems.reconciliationId, req.params.id));
+    await db.delete(reconciliations).where(eq(reconciliations.id, req.params.id));
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Delete recon error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // ── Legacy ────────────────────────────────────────────────────────────────────
 router.put("/:id/items", requireAuth, requireAdmin, async (req, res) => {
   try {

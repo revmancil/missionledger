@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { format, parseISO } from "date-fns";
 import {
   CheckCircle2, Circle, Lock, Unlock, RefreshCw, ChevronLeft,
-  AlertTriangle, CheckCheck, Banknote, FileCheck, Clock,
+  AlertTriangle, CheckCheck, Banknote, FileCheck, Clock, Trash2,
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
@@ -80,16 +80,18 @@ function DiffBadge({ diff }: { diff: number }) {
 
 // ── History Screen ────────────────────────────────────────────────────────────
 function HistoryScreen({
-  history, bankAccounts, onStart, onResume, loading,
+  history, bankAccounts, onStart, onResume, onDelete, loading,
 }: {
   history: HistoryRecord[];
   bankAccounts: BankAccount[];
   onStart: () => void;
   onResume: (r: HistoryRecord) => void;
+  onDelete: (r: HistoryRecord) => void;
   loading: boolean;
 }) {
   const bankMap = Object.fromEntries(bankAccounts.map((b) => [b.id, b]));
   const inProgress = history.find((r) => r.status === "IN_PROGRESS");
+  const [confirmId, setConfirmId] = useState<string | null>(null);
 
   return (
     <div className="space-y-6">
@@ -147,12 +149,15 @@ function HistoryScreen({
                 <th className="text-right px-5 py-3 font-semibold text-xs text-muted-foreground uppercase tracking-wide">Cleared Balance</th>
                 <th className="text-center px-5 py-3 font-semibold text-xs text-muted-foreground uppercase tracking-wide">Status</th>
                 <th className="text-left px-5 py-3 font-semibold text-xs text-muted-foreground uppercase tracking-wide">Completed By</th>
+                <th className="px-5 py-3" />
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
               {history.map((r) => {
                 const bank = bankMap[r.bankAccountId];
                 const resumable = r.status === "IN_PROGRESS";
+                const deletable = r.status !== "COMPLETED";
+                const confirming = confirmId === r.id;
                 return (
                   <tr
                     key={r.id}
@@ -191,6 +196,31 @@ function HistoryScreen({
                       {r.reconciledBy ?? "—"}
                       {r.reconciledAt && (
                         <div className="text-xs">{format(parseISO(r.reconciledAt), "MM/dd/yyyy")}</div>
+                      )}
+                    </td>
+                    <td className="px-3 py-3 text-right" onClick={(e) => e.stopPropagation()}>
+                      {deletable && (
+                        confirming ? (
+                          <div className="flex items-center gap-1.5 justify-end">
+                            <span className="text-xs text-red-600 font-medium">Delete?</span>
+                            <button
+                              onClick={() => { onDelete(r); setConfirmId(null); }}
+                              className="text-xs px-2 py-0.5 rounded bg-red-500 text-white hover:bg-red-600"
+                            >Yes</button>
+                            <button
+                              onClick={() => setConfirmId(null)}
+                              className="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-600 hover:bg-gray-200"
+                            >No</button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => setConfirmId(r.id)}
+                            className="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                            title="Delete"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        )
                       )}
                     </td>
                   </tr>
@@ -687,6 +717,15 @@ export default function ReconciliationPage() {
     await loadWorkspace(r.id, r as Reconciliation);
   }
 
+  async function handleDelete(r: HistoryRecord) {
+    try {
+      await api(`${BASE}api/reconciliation/${r.id}`, { method: "DELETE" });
+      setHistory((prev) => prev.filter((h) => h.id !== r.id));
+    } catch {
+      // silently ignore — record stays in list
+    }
+  }
+
   async function handleToggle(item: ReconItem) {
     if (!activeRecon) return;
     const next = !item.cleared;
@@ -746,6 +785,7 @@ export default function ReconciliationPage() {
             bankAccounts={bankAccounts}
             onStart={() => { setSaveError(""); setPhase("setup"); }}
             onResume={handleResume}
+            onDelete={handleDelete}
             loading={loading}
           />
         )}
