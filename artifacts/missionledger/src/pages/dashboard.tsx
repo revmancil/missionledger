@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
-import { format, parseISO } from "date-fns";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { format, parseISO, startOfMonth, endOfMonth, startOfQuarter, endOfQuarter, startOfYear, endOfYear } from "date-fns";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, PieChart, Pie, Cell, Legend,
@@ -190,6 +190,59 @@ export default function Dashboard() {
   const [showFixNow, setShowFixNow] = useState(false);
   const [registrationInfo, setRegistrationInfo] = useState<{ companyId: string; companyCode: string; companyName: string } | null>(null);
 
+  // ── Spending by Category filters ──────────────────────────────────────────
+  type CategoryPreset = "this-month" | "this-quarter" | "ytd" | "all-time" | "custom";
+  const [categoryPreset, setCategoryPreset] = useState<CategoryPreset>("this-month");
+  const [categoryCustomStart, setCategoryCustomStart] = useState("");
+  const [categoryCustomEnd, setCategoryCustomEnd] = useState("");
+  const [categorySpend, setCategorySpend] = useState<Array<{ name: string; code: string; amount: number }> | null>(null);
+  const [categoryLoading, setCategoryLoading] = useState(false);
+  const categoryAbortRef = useRef<AbortController | null>(null);
+
+  function getCategoryDateRange(preset: CategoryPreset): { startDate?: string; endDate?: string } {
+    const now = new Date();
+    if (preset === "this-month") return { startDate: format(startOfMonth(now), "yyyy-MM-dd"), endDate: format(endOfMonth(now), "yyyy-MM-dd") };
+    if (preset === "this-quarter") return { startDate: format(startOfQuarter(now), "yyyy-MM-dd"), endDate: format(endOfQuarter(now), "yyyy-MM-dd") };
+    if (preset === "ytd") return { startDate: format(startOfYear(now), "yyyy-MM-dd"), endDate: format(now, "yyyy-MM-dd") };
+    if (preset === "all-time") return {};
+    if (preset === "custom") return {
+      startDate: categoryCustomStart || undefined,
+      endDate: categoryCustomEnd || undefined,
+    };
+    return {};
+  }
+
+  const loadCategorySpend = useCallback(async (preset: CategoryPreset, customStart: string, customEnd: string) => {
+    if (categoryAbortRef.current) categoryAbortRef.current.abort();
+    const ctrl = new AbortController();
+    categoryAbortRef.current = ctrl;
+    setCategoryLoading(true);
+    try {
+      const range = preset === "custom"
+        ? { startDate: customStart || undefined, endDate: customEnd || undefined }
+        : (() => {
+            const now = new Date();
+            if (preset === "this-month") return { startDate: format(startOfMonth(now), "yyyy-MM-dd"), endDate: format(endOfMonth(now), "yyyy-MM-dd") };
+            if (preset === "this-quarter") return { startDate: format(startOfQuarter(now), "yyyy-MM-dd"), endDate: format(endOfQuarter(now), "yyyy-MM-dd") };
+            if (preset === "ytd") return { startDate: format(startOfYear(now), "yyyy-MM-dd"), endDate: format(now, "yyyy-MM-dd") };
+            return {};
+          })();
+      const params = new URLSearchParams();
+      if (range.startDate) params.set("startDate", range.startDate);
+      if (range.endDate) params.set("endDate", range.endDate);
+      const qs = params.toString();
+      const res = await authJsonFetch(`api/dashboard/spending-by-category${qs ? `?${qs}` : ""}`, { signal: ctrl.signal });
+      if (res.ok) {
+        const body = await res.json();
+        setCategorySpend(body.spendingByCategory);
+      }
+    } catch (e: any) {
+      if (e?.name !== "AbortError") console.error("Category spend fetch error", e);
+    } finally {
+      setCategoryLoading(false);
+    }
+  }, []);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -227,6 +280,11 @@ export default function Dashboard() {
 
   // Re-fetch whenever any component triggers a global refetch (e.g. after a transaction save)
   useEffect(() => { load(); }, [load, version]);
+
+  // Load spending by category when preset/custom dates change
+  useEffect(() => {
+    loadCategorySpend(categoryPreset, categoryCustomStart, categoryCustomEnd);
+  }, [loadCategorySpend, categoryPreset, categoryCustomStart, categoryCustomEnd]);
 
   useEffect(() => {
     try {
@@ -416,23 +474,65 @@ export default function Dashboard() {
             <h3 className="font-semibold text-[hsl(210,60%,25%)]">Spending by Category</h3>
             <p className="text-xs text-muted-foreground mt-0.5">Top expense accounts</p>
           </div>
-          {data.spendingByCategory.length === 0 ? (
+
+          {/* ── Date filter presets ── */}
+          <div className="flex flex-wrap gap-1 mb-3">
+            {(["this-month", "this-quarter", "ytd", "all-time", "custom"] as const).map((p) => (
+              <button
+                key={p}
+                onClick={() => setCategoryPreset(p)}
+                className={cn(
+                  "px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors",
+                  categoryPreset === p
+                    ? "bg-[hsl(210,60%,35%)] text-white border-[hsl(210,60%,35%)]"
+                    : "bg-white text-muted-foreground border-gray-200 hover:border-gray-300 hover:text-foreground"
+                )}
+              >
+                {{ "this-month": "This Month", "this-quarter": "This Quarter", "ytd": "YTD", "all-time": "All Time", "custom": "Custom" }[p]}
+              </button>
+            ))}
+          </div>
+
+          {/* ── Custom date inputs ── */}
+          {categoryPreset === "custom" && (
+            <div className="flex items-center gap-2 mb-3">
+              <input
+                type="date"
+                value={categoryCustomStart}
+                onChange={(e) => setCategoryCustomStart(e.target.value)}
+                className="flex-1 border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-violet-300"
+              />
+              <span className="text-xs text-muted-foreground shrink-0">to</span>
+              <input
+                type="date"
+                value={categoryCustomEnd}
+                onChange={(e) => setCategoryCustomEnd(e.target.value)}
+                className="flex-1 border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-violet-300"
+              />
+            </div>
+          )}
+
+          {categoryLoading ? (
+            <div className="flex items-center justify-center h-52 text-muted-foreground text-sm">
+              <RefreshCw className="h-5 w-5 animate-spin opacity-40" />
+            </div>
+          ) : !categorySpend || categorySpend.length === 0 ? (
             <div className="flex items-center justify-center h-52 text-muted-foreground text-sm italic text-center px-4">
-              No expense transactions yet.
+              No expense transactions for this period.
             </div>
           ) : (
             <div className="flex flex-col items-center">
               <ResponsiveContainer width="100%" height={170}>
                 <PieChart>
                   <Pie
-                    data={data.spendingByCategory}
+                    data={categorySpend}
                     dataKey="amount"
                     nameKey="name"
                     cx="50%" cy="50%"
                     innerRadius={50} outerRadius={78}
                     paddingAngle={2}
                   >
-                    {data.spendingByCategory.map((_, i) => (
+                    {categorySpend.map((_, i) => (
                       <Cell key={i} fill={DONUT_COLORS[i % DONUT_COLORS.length]} />
                     ))}
                   </Pie>
@@ -441,7 +541,7 @@ export default function Dashboard() {
               </ResponsiveContainer>
               {/* Legend */}
               <div className="w-full mt-1 space-y-1.5">
-                {data.spendingByCategory.slice(0, 5).map((cat, i) => (
+                {categorySpend.slice(0, 5).map((cat, i) => (
                   <div key={cat.name} className="flex items-center justify-between text-xs">
                     <div className="flex items-center gap-2 min-w-0">
                       <span

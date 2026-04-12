@@ -7,6 +7,12 @@ import { eq, and, gte, lte } from "drizzle-orm";
 import { requireAuth } from "../lib/auth";
 import { listTransactionRowsForCompany } from "../lib/transactionList";
 
+/** Parse a YYYY-MM-DD string to a Date set to start-of-day local time. */
+function parseDay(s: string): Date {
+  const [y, m, d] = s.split("-").map(Number);
+  return new Date(y, m - 1, d, 0, 0, 0, 0);
+}
+
 const router = Router();
 
 const MONTH_LABELS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
@@ -296,6 +302,75 @@ router.get("/", requireAuth, async (req, res) => {
     });
   } catch (error) {
     console.error("Dashboard error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ── Spending by Category with optional date range ─────────────────────────────
+router.get("/spending-by-category", requireAuth, async (req, res) => {
+  try {
+    const user = (req as any).user;
+    const companyId = user.companyId;
+
+    // Optional date range from query params (YYYY-MM-DD)
+    const startDate: Date | null = req.query.startDate ? parseDay(String(req.query.startDate)) : null;
+    const endDate: Date | null = req.query.endDate
+      ? (() => { const d = parseDay(String(req.query.endDate)); d.setHours(23, 59, 59, 999); return d; })()
+      : null;
+
+    const [allCoa, allTx, allSplits] = await Promise.all([
+      db.select({ id: chartOfAccounts.id, code: chartOfAccounts.code, name: chartOfAccounts.name })
+        .from(chartOfAccounts)
+        .where(eq(chartOfAccounts.companyId, companyId)),
+      listTransactionRowsForCompany(companyId),
+      db.select({ transactionId: transactionSplits.transactionId, chartAccountId: transactionSplits.chartAccountId, amount: transactionSplits.amount })
+        .from(transactionSplits),
+    ]);
+
+    const coaMap: Record<string, { id: string; code: string; name: string }> =
+      Object.fromEntries(allCoa.map((a) => [a.id, a]));
+
+    const activeTx = allTx.filter((t) => {
+      if (t.isVoid) return false;
+      const d = t.date instanceof Date ? t.date : new Date(t.date);
+      if (startDate && d < startDate) return false;
+      if (endDate && d > endDate) return false;
+      return true;
+    });
+
+    const spendMap: Record<string, number> = {};
+
+    // Simple (non-split) debit transactions
+    for (const t of activeTx) {
+      if (t.type === "DEBIT" && !t.isSplit && t.chartAccountId) {
+        spendMap[t.chartAccountId] = (spendMap[t.chartAccountId] ?? 0) + t.amount;
+      }
+    }
+
+    // Split debit transactions — sum by split account
+    const txIds = new Set(activeTx.filter((t) => t.isSplit).map((t) => t.id));
+    for (const s of allSplits) {
+      if (!txIds.has(s.transactionId)) continue;
+      const parentTx = activeTx.find((t) => t.id === s.transactionId);
+      if (!parentTx || parentTx.type !== "DEBIT") continue;
+      if (s.chartAccountId) {
+        spendMap[s.chartAccountId] = (spendMap[s.chartAccountId] ?? 0) + Math.abs(s.amount);
+      }
+    }
+
+    const spendingByCategory = Object.entries(spendMap)
+      .map(([id, amount]) => ({
+        name: coaMap[id]?.name ?? "Uncategorized",
+        code: coaMap[id]?.code ?? "",
+        amount: Math.round(amount * 100) / 100,
+      }))
+      .filter((e) => e.amount > 0)
+      .sort((a, b) => b.amount - a.amount)
+      .slice(0, 8);
+
+    res.json({ spendingByCategory });
+  } catch (error) {
+    console.error("Spending by category error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });
