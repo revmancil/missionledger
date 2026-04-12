@@ -880,6 +880,12 @@ async function ensureSchema() {
   } catch (err: any) {
     console.error("Schema migration error (reconciliation tables):", err.message);
   }
+
+  // reconciliation_items.transaction_id — may be missing on DBs created before this column was added
+  await ensureAlter(
+    "reconciliation_items.transaction_id",
+    `ALTER TABLE reconciliation_items ADD COLUMN IF NOT EXISTS transaction_id TEXT`,
+  );
 }
 
 async function main() {
