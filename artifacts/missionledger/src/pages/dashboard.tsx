@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { format, parseISO, startOfMonth, endOfMonth, startOfQuarter, endOfQuarter, startOfYear, endOfYear } from "date-fns";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -192,52 +192,41 @@ export default function Dashboard() {
 
   // ── Spending by Category filters ──────────────────────────────────────────
   type CategoryPreset = "this-month" | "this-quarter" | "ytd" | "all-time" | "custom";
-  const [categoryPreset, setCategoryPreset] = useState<CategoryPreset>("this-month");
+  const [categoryPreset, setCategoryPreset] = useState<CategoryPreset>("all-time");
   const [categoryCustomStart, setCategoryCustomStart] = useState("");
   const [categoryCustomEnd, setCategoryCustomEnd] = useState("");
   const [categorySpend, setCategorySpend] = useState<Array<{ name: string; code: string; amount: number }> | null>(null);
   const [categoryLoading, setCategoryLoading] = useState(false);
-  const categoryAbortRef = useRef<AbortController | null>(null);
 
-  function getCategoryDateRange(preset: CategoryPreset): { startDate?: string; endDate?: string } {
+  function buildCategoryQs(preset: CategoryPreset, customStart: string, customEnd: string): string {
     const now = new Date();
-    if (preset === "this-month") return { startDate: format(startOfMonth(now), "yyyy-MM-dd"), endDate: format(endOfMonth(now), "yyyy-MM-dd") };
-    if (preset === "this-quarter") return { startDate: format(startOfQuarter(now), "yyyy-MM-dd"), endDate: format(endOfQuarter(now), "yyyy-MM-dd") };
-    if (preset === "ytd") return { startDate: format(startOfYear(now), "yyyy-MM-dd"), endDate: format(now, "yyyy-MM-dd") };
-    if (preset === "all-time") return {};
-    if (preset === "custom") return {
-      startDate: categoryCustomStart || undefined,
-      endDate: categoryCustomEnd || undefined,
-    };
-    return {};
+    let startDate: string | undefined;
+    let endDate: string | undefined;
+    if (preset === "this-month") { startDate = format(startOfMonth(now), "yyyy-MM-dd"); endDate = format(endOfMonth(now), "yyyy-MM-dd"); }
+    else if (preset === "this-quarter") { startDate = format(startOfQuarter(now), "yyyy-MM-dd"); endDate = format(endOfQuarter(now), "yyyy-MM-dd"); }
+    else if (preset === "ytd") { startDate = format(startOfYear(now), "yyyy-MM-dd"); endDate = format(now, "yyyy-MM-dd"); }
+    else if (preset === "custom") { startDate = customStart || undefined; endDate = customEnd || undefined; }
+    // "all-time" → no params
+    const p = new URLSearchParams();
+    if (startDate) p.set("startDate", startDate);
+    if (endDate) p.set("endDate", endDate);
+    const qs = p.toString();
+    return qs ? `?${qs}` : "";
   }
 
   const loadCategorySpend = useCallback(async (preset: CategoryPreset, customStart: string, customEnd: string) => {
-    if (categoryAbortRef.current) categoryAbortRef.current.abort();
-    const ctrl = new AbortController();
-    categoryAbortRef.current = ctrl;
     setCategoryLoading(true);
     try {
-      const range = preset === "custom"
-        ? { startDate: customStart || undefined, endDate: customEnd || undefined }
-        : (() => {
-            const now = new Date();
-            if (preset === "this-month") return { startDate: format(startOfMonth(now), "yyyy-MM-dd"), endDate: format(endOfMonth(now), "yyyy-MM-dd") };
-            if (preset === "this-quarter") return { startDate: format(startOfQuarter(now), "yyyy-MM-dd"), endDate: format(endOfQuarter(now), "yyyy-MM-dd") };
-            if (preset === "ytd") return { startDate: format(startOfYear(now), "yyyy-MM-dd"), endDate: format(now, "yyyy-MM-dd") };
-            return {};
-          })();
-      const params = new URLSearchParams();
-      if (range.startDate) params.set("startDate", range.startDate);
-      if (range.endDate) params.set("endDate", range.endDate);
-      const qs = params.toString();
-      const res = await authJsonFetch(`api/dashboard/spending-by-category${qs ? `?${qs}` : ""}`, { signal: ctrl.signal });
+      const qs = buildCategoryQs(preset, customStart, customEnd);
+      const res = await authJsonFetch(`api/dashboard/spending-by-category${qs}`);
       if (res.ok) {
         const body = await res.json();
-        setCategorySpend(body.spendingByCategory);
+        setCategorySpend(body.spendingByCategory ?? []);
+      } else {
+        console.error("Spending by category fetch failed", res.status);
       }
     } catch (e: any) {
-      if (e?.name !== "AbortError") console.error("Category spend fetch error", e);
+      console.error("Category spend fetch error", e);
     } finally {
       setCategoryLoading(false);
     }
@@ -281,7 +270,7 @@ export default function Dashboard() {
   // Re-fetch whenever any component triggers a global refetch (e.g. after a transaction save)
   useEffect(() => { load(); }, [load, version]);
 
-  // Load spending by category when preset/custom dates change
+  // Re-fetch category spend when preset or custom dates change
   useEffect(() => {
     loadCategorySpend(categoryPreset, categoryCustomStart, categoryCustomEnd);
   }, [loadCategorySpend, categoryPreset, categoryCustomStart, categoryCustomEnd]);
