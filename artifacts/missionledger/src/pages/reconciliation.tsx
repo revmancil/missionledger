@@ -80,14 +80,17 @@ function DiffBadge({ diff }: { diff: number }) {
 
 // ── History Screen ────────────────────────────────────────────────────────────
 function HistoryScreen({
-  history, bankAccounts, onStart, loading,
+  history, bankAccounts, onStart, onResume, loading,
 }: {
   history: HistoryRecord[];
   bankAccounts: BankAccount[];
   onStart: () => void;
+  onResume: (r: HistoryRecord) => void;
   loading: boolean;
 }) {
   const bankMap = Object.fromEntries(bankAccounts.map((b) => [b.id, b]));
+  const inProgress = history.find((r) => r.status === "IN_PROGRESS");
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -99,6 +102,29 @@ function HistoryScreen({
           <FileCheck className="h-4 w-4" /> Start Reconciliation
         </Button>
       </div>
+
+      {/* Resume banner */}
+      {inProgress && (
+        <div className="flex items-center justify-between gap-4 px-5 py-4 rounded-xl border border-amber-200 bg-amber-50">
+          <div className="flex items-center gap-3">
+            <Clock className="h-5 w-5 text-amber-600 shrink-0" />
+            <div>
+              <p className="text-sm font-semibold text-amber-800">Reconciliation in progress</p>
+              <p className="text-xs text-amber-700 mt-0.5">
+                {bankMap[inProgress.bankAccountId]?.name ?? "Bank account"} · Statement date:{" "}
+                {format(parseISO(inProgress.statementDate), "MMM d, yyyy")}
+              </p>
+            </div>
+          </div>
+          <Button
+            size="sm"
+            onClick={() => onResume(inProgress)}
+            className="shrink-0 bg-amber-600 hover:bg-amber-700 text-white gap-1.5"
+          >
+            <Unlock className="h-3.5 w-3.5" /> Resume
+          </Button>
+        </div>
+      )}
 
       {loading ? (
         <div className="py-16 text-center text-muted-foreground animate-pulse">Loading history…</div>
@@ -126,8 +152,18 @@ function HistoryScreen({
             <tbody className="divide-y divide-gray-50">
               {history.map((r) => {
                 const bank = bankMap[r.bankAccountId];
+                const resumable = r.status === "IN_PROGRESS";
                 return (
-                  <tr key={r.id} className="hover:bg-[hsl(210,60%,98%)] transition-colors">
+                  <tr
+                    key={r.id}
+                    className={cn(
+                      "transition-colors",
+                      resumable
+                        ? "hover:bg-amber-50 cursor-pointer"
+                        : "hover:bg-[hsl(210,60%,98%)]"
+                    )}
+                    onClick={resumable ? () => onResume(r) : undefined}
+                  >
                     <td className="px-5 py-3 font-medium">{bank?.name ?? "—"}</td>
                     <td className="px-5 py-3 text-muted-foreground">
                       {format(parseISO(r.statementDate), "MMM d, yyyy")}
@@ -170,12 +206,13 @@ function HistoryScreen({
 
 // ── Setup Screen ──────────────────────────────────────────────────────────────
 function SetupScreen({
-  bankAccounts, onSubmit, onBack, saving,
+  bankAccounts, onSubmit, onBack, saving, serverError,
 }: {
   bankAccounts: BankAccount[];
   onSubmit: (v: { bankAccountId: string; statementDate: string; statementBalance: string }) => void;
   onBack: () => void;
   saving: boolean;
+  serverError?: string;
 }) {
   const [bankAccountId, setBankAccountId] = useState(bankAccounts[0]?.id ?? "");
   const [statementDate, setStatementDate] = useState(format(new Date(), "yyyy-MM-dd"));
@@ -208,9 +245,9 @@ function SetupScreen({
 
       <div className="max-w-lg mx-auto">
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-8 space-y-6">
-          {err && (
+          {(err || serverError) && (
             <div className="flex items-center gap-2 p-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700">
-              <AlertTriangle className="h-4 w-4 shrink-0" /> {err}
+              <AlertTriangle className="h-4 w-4 shrink-0" /> {err || serverError}
             </div>
           )}
 
@@ -595,6 +632,7 @@ export default function ReconciliationPage() {
   const [activeRecon, setActiveRecon] = useState<Reconciliation | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
   const [completing, setCompleting] = useState(false);
 
   const loadHistory = useCallback(async () => {
@@ -611,27 +649,42 @@ export default function ReconciliationPage() {
 
   useEffect(() => { loadHistory(); }, [loadHistory]);
 
+  async function loadWorkspace(id: string, recon: Reconciliation) {
+    const res = await api(`${BASE}api/reconciliation/${id}/items`);
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}));
+      setSaveError(e.error ?? "Failed to load reconciliation workspace.");
+      return;
+    }
+    const data = await res.json();
+    setActiveRecon(data.reconciliation ?? recon);
+    setItems(data.items ?? []);
+    setPhase("workspace");
+  }
+
   async function handleSetupSubmit(vals: { bankAccountId: string; statementDate: string; statementBalance: string }) {
     setSaving(true);
+    setSaveError("");
     try {
       const res = await api(`${BASE}api/reconciliation`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(vals),
       });
-      if (!res.ok) return;
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        setSaveError(e.error ?? `Server error (${res.status}). Please try again.`);
+        return;
+      }
       const created: Reconciliation = await res.json();
       await loadWorkspace(created.id, created);
+    } catch {
+      setSaveError("Network error. Please check your connection and try again.");
     } finally { setSaving(false); }
   }
 
-  async function loadWorkspace(id: string, recon: Reconciliation) {
-    const res = await api(`${BASE}api/reconciliation/${id}/items`);
-    if (!res.ok) return;
-    const data = await res.json();
-    setActiveRecon(data.reconciliation ?? recon);
-    setItems(data.items ?? []);
-    setPhase("workspace");
+  async function handleResume(r: HistoryRecord) {
+    await loadWorkspace(r.id, r as Reconciliation);
   }
 
   async function handleToggle(item: ReconItem) {
@@ -691,7 +744,8 @@ export default function ReconciliationPage() {
           <HistoryScreen
             history={history}
             bankAccounts={bankAccounts}
-            onStart={() => setPhase("setup")}
+            onStart={() => { setSaveError(""); setPhase("setup"); }}
+            onResume={handleResume}
             loading={loading}
           />
         )}
@@ -701,6 +755,7 @@ export default function ReconciliationPage() {
             onSubmit={handleSetupSubmit}
             onBack={() => setPhase("history")}
             saving={saving}
+            serverError={saveError}
           />
         )}
         {phase === "workspace" && activeRecon && (
