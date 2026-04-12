@@ -838,6 +838,48 @@ async function ensureSchema() {
     "transaction_splits.fund_id",
     `ALTER TABLE transaction_splits ADD COLUMN IF NOT EXISTS fund_id TEXT`,
   );
+
+  // reconciliations + reconciliation_items
+  try {
+    await pool.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'reconciliation_status') THEN
+          CREATE TYPE reconciliation_status AS ENUM ('IN_PROGRESS', 'COMPLETED', 'VOID');
+        END IF;
+      END $$;
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS reconciliations (
+        id                TEXT PRIMARY KEY DEFAULT gen_random_uuid(),
+        company_id        TEXT NOT NULL,
+        bank_account_id   TEXT NOT NULL,
+        statement_date    TIMESTAMP NOT NULL,
+        statement_balance NUMERIC(15,2) NOT NULL,
+        opening_balance   NUMERIC(15,2) NOT NULL DEFAULT 0,
+        cleared_balance   NUMERIC(15,2),
+        difference        NUMERIC(15,2),
+        status            reconciliation_status NOT NULL DEFAULT 'IN_PROGRESS',
+        reconciled_by     TEXT,
+        reconciled_at     TIMESTAMP,
+        created_at        TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at        TIMESTAMP NOT NULL DEFAULT NOW()
+      )
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS reconciliation_items (
+        id                 TEXT PRIMARY KEY DEFAULT gen_random_uuid(),
+        reconciliation_id  TEXT NOT NULL,
+        bank_transaction_id TEXT,
+        transaction_id     TEXT,
+        cleared            BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at         TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at         TIMESTAMP NOT NULL DEFAULT NOW()
+      )
+    `);
+    console.log("Schema check: reconciliations + reconciliation_items OK");
+  } catch (err: any) {
+    console.error("Schema migration error (reconciliation tables):", err.message);
+  }
 }
 
 async function main() {
