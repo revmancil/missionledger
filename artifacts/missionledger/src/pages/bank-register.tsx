@@ -75,6 +75,7 @@ const FUNCTIONAL_TYPES = [
 interface SplitLine {
   id: string; // local key only
   chartAccountId: string;
+  fundId: string;
   vendorId: string;
   amount: string; // raw string for input
   memo: string;
@@ -106,7 +107,7 @@ function fmtAmt(n: number) {
 }
 
 function newSplitLine(): SplitLine {
-  return { id: crypto.randomUUID(), chartAccountId: "", vendorId: "", amount: "", memo: "", functionalType: "" };
+  return { id: crypto.randomUUID(), chartAccountId: "", fundId: "", vendorId: "", amount: "", memo: "", functionalType: "" };
 }
 
 type DonorLine = {
@@ -783,6 +784,7 @@ export default function BankRegisterPage() {
         ? tx.splits.map((s) => ({
             id: s.id,
             chartAccountId: s.chartAccountId ?? "",
+            fundId: (s as any).fundId ?? "",
             vendorId: s.vendorId ?? "",
             amount: String(s.amount),
             memo: s.memo ?? "",
@@ -855,6 +857,7 @@ export default function BankRegisterPage() {
         splits: form.isSplit
           ? form.splits.map((s, i) => ({
               chartAccountId: s.chartAccountId || null,
+              fundId: s.fundId || null,
               vendorId: s.vendorId || null,
               amount: parseFloat(s.amount) || 0,
               memo: s.memo || null,
@@ -1426,7 +1429,7 @@ export default function BankRegisterPage() {
 
       {/* ── Transaction Form Dialog ──────────────────────────────────────────── */}
       <Dialog open={showForm} onOpenChange={setShowForm}>
-        <DialogContent className="w-[calc(100vw-1rem)] max-w-2xl max-h-[90dvh] overflow-y-auto p-4 md:p-6">
+        <DialogContent className="w-[calc(100vw-1rem)] max-w-4xl max-h-[90dvh] overflow-y-auto p-4 md:p-6">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               {editTx ? "Edit Transaction" : "Add Transaction"}
@@ -1752,8 +1755,9 @@ export default function BankRegisterPage() {
                 </div>
 
                 {/* Column headers — desktop only */}
-                <div className="hidden sm:grid grid-cols-[1fr_1fr_auto_80px_32px] gap-2 px-4 py-1.5 bg-violet-50/50 border-b border-violet-100">
+                <div className="hidden sm:grid grid-cols-[1.2fr_1fr_1fr_auto_80px_32px] gap-2 px-4 py-1.5 bg-violet-50/50 border-b border-violet-100">
                   <span className="text-[10px] font-semibold text-muted-foreground uppercase">Account</span>
+                  <span className="text-[10px] font-semibold text-muted-foreground uppercase">Fund</span>
                   <span className="text-[10px] font-semibold text-muted-foreground uppercase">Vendor</span>
                   <span className="text-[10px] font-semibold text-muted-foreground uppercase">Memo</span>
                   <span className="text-[10px] font-semibold text-muted-foreground uppercase text-right">Amount</span>
@@ -1794,6 +1798,16 @@ export default function BankRegisterPage() {
                             {FUNCTIONAL_TYPES.map((ft) => <option key={ft.value} value={ft.value}>{ft.label}</option>)}
                           </select>
                         )}
+                        <select
+                          className="w-full border border-gray-200 rounded-md px-2 py-2 text-sm bg-white"
+                          value={split.fundId}
+                          onChange={(e) => updateSplit(idx, "fundId", e.target.value)}
+                        >
+                          <option value="">— No Fund —</option>
+                          {fundList.map((f) => (
+                            <option key={f.id} value={f.id}>{fundLabel(f)}</option>
+                          ))}
+                        </select>
                         <div className="grid grid-cols-2 gap-2">
                           <VendorCombobox value={split.vendorId} vendors={vendorList}
                             onChange={(id) => updateSplit(idx, "vendorId", id)}
@@ -1805,7 +1819,7 @@ export default function BankRegisterPage() {
                           value={split.memo} onChange={(e) => updateSplit(idx, "memo", e.target.value)} />
                       </div>
                       {/* Desktop layout: grid */}
-                      <div className="hidden sm:grid grid-cols-[1fr_1fr_auto_80px_32px] gap-2 items-start px-4 pt-2 pb-1">
+                      <div className="hidden sm:grid grid-cols-[1.2fr_1fr_1fr_auto_80px_32px] gap-2 items-start px-4 pt-2 pb-1">
                         <div className="space-y-1">
                           <CoaSelect
                             value={split.chartAccountId}
@@ -1834,6 +1848,16 @@ export default function BankRegisterPage() {
                             </select>
                           )}
                         </div>
+                        <select
+                          className="w-full border border-gray-200 rounded-md px-2 py-2 text-sm bg-white focus:outline-none focus:ring-1 focus:ring-violet-300"
+                          value={split.fundId}
+                          onChange={(e) => updateSplit(idx, "fundId", e.target.value)}
+                        >
+                          <option value="">— No Fund —</option>
+                          {fundList.map((f) => (
+                            <option key={f.id} value={f.id}>{fundLabel(f)}</option>
+                          ))}
+                        </select>
                         <VendorCombobox
                           value={split.vendorId}
                           vendors={vendorList}

@@ -161,7 +161,7 @@ function serializeTx(
 async function upsertSplits(
   transactionId: string,
   companyId: string,
-  rawSplits: Array<{ chartAccountId?: string | null; vendorId?: string | null; amount: number; memo?: string | null; functionalType?: string | null; sortOrder?: number }>
+  rawSplits: Array<{ chartAccountId?: string | null; vendorId?: string | null; fundId?: string | null; amount: number; memo?: string | null; functionalType?: string | null; sortOrder?: number }>
 ) {
   await db.delete(transactionSplits).where(eq(transactionSplits.transactionId, transactionId));
   if (rawSplits.length === 0) return;
@@ -172,6 +172,7 @@ async function upsertSplits(
       companyId,
       chartAccountId: s.chartAccountId ?? null,
       vendorId: s.vendorId ?? null,
+      fundId: s.fundId ?? null,
       amount: s.amount,
       memo: s.memo ?? null,
       functionalType: s.functionalType ?? null,
@@ -447,6 +448,7 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
             companyId,
             chartAccountId: s.chartAccountId ?? null,
             vendorId: s.vendorId ?? null,
+            fundId: s.fundId ?? null,
             amount: s.amount,
             memo: s.memo ?? null,
             functionalType: s.functionalType ?? null,

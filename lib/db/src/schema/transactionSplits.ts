@@ -8,6 +8,7 @@ export const transactionSplits = pgTable("transaction_splits", {
   companyId: text("company_id").notNull(),
   chartAccountId: text("chart_account_id"),
   vendorId: text("vendor_id"),
+  fundId: text("fund_id"),
   amount: numeric("amount", { precision: 15, scale: 2, mode: "number" }).notNull().$type<number>(),
   memo: text("memo"),
   functionalType: text("functional_type"), // 990 tag: PROGRAM_SERVICE | MANAGEMENT_GENERAL | FUNDRAISING

@@ -833,6 +833,11 @@ async function ensureSchema() {
   } catch (err: any) {
     console.error("Schema migration error (custom_report_templates):", err.message);
   }
+
+  await ensureAlter(
+    "transaction_splits.fund_id",
+    `ALTER TABLE transaction_splits ADD COLUMN IF NOT EXISTS fund_id TEXT`,
+  );
 }
 
 async function main() {
