@@ -219,6 +219,48 @@ router.post("/:id/complete", requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
+// ── POST /:id/reopen — revert COMPLETED back to IN_PROGRESS ──────────────────
+router.post("/:id/reopen", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { companyId } = (req as any).user;
+
+    const [recon] = await db.select().from(reconciliations)
+      .where(and(eq(reconciliations.id, req.params.id), eq(reconciliations.companyId, companyId)));
+    if (!recon) return res.status(404).json({ error: "Not found" });
+    if (recon.status !== "COMPLETED") return res.status(400).json({ error: "Only completed reconciliations can be reopened" });
+
+    // Find all transaction IDs that were cleared in this reconciliation
+    const items = await db.select().from(reconciliationItems)
+      .where(eq(reconciliationItems.reconciliationId, req.params.id));
+    const clearedTxIds = items.filter((i) => i.cleared && i.transactionId).map((i) => i.transactionId as string);
+
+    // Unlock those transactions back to CLEARED
+    for (const txId of clearedTxIds) {
+      await db.update(transactions)
+        .set({ status: "CLEARED", updatedAt: new Date() })
+        .where(and(eq(transactions.id, txId), eq(transactions.companyId, companyId)));
+    }
+
+    // Revert reconciliation to IN_PROGRESS
+    const [reopened] = await db.update(reconciliations)
+      .set({
+        status: "IN_PROGRESS",
+        clearedBalance: null,
+        difference: null,
+        reconciledBy: null,
+        reconciledAt: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(reconciliations.id, req.params.id))
+      .returning();
+
+    res.json(serializeRecon(reopened));
+  } catch (err) {
+    console.error("Reopen recon error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // ── DELETE /:id — remove VOID or IN_PROGRESS sessions only ───────────────────
 router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
   try {

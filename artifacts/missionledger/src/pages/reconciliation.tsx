@@ -581,7 +581,7 @@ function ColToolbar({
 // ── Workspace Screen ──────────────────────────────────────────────────────────
 function WorkspaceScreen({
   recon, items, bankAccounts, onToggle, onToggleAll,
-  onComplete, onBack, completing,
+  onComplete, onReopen, onBack, completing, reopening,
 }: {
   recon: Reconciliation;
   items: ReconItem[];
@@ -589,8 +589,10 @@ function WorkspaceScreen({
   onToggle: (item: ReconItem) => void;
   onToggleAll: (col: "credits" | "debits", cleared: boolean) => void;
   onComplete: () => void;
+  onReopen: () => void;
   onBack: () => void;
   completing: boolean;
+  reopening: boolean;
 }) {
   const bank = bankAccounts.find((b) => b.id === recon.bankAccountId);
   const locked = recon.status === "COMPLETED";
@@ -622,11 +624,9 @@ function WorkspaceScreen({
       {/* ── Top bar ──────────────────────────────── */}
       <div className="border-b bg-white px-6 py-4">
         <div className="flex items-center gap-3 mb-1">
-          {!locked && (
-            <button onClick={onBack} className="p-1.5 rounded-lg hover:bg-gray-100 text-muted-foreground">
-              <ChevronLeft className="h-5 w-5" />
-            </button>
-          )}
+          <button onClick={onBack} className="p-1.5 rounded-lg hover:bg-gray-100 text-muted-foreground">
+            <ChevronLeft className="h-5 w-5" />
+          </button>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
               <h2 className="text-xl font-bold text-[hsl(210,60%,25%)]">
@@ -639,6 +639,20 @@ function WorkspaceScreen({
               Statement through {format(parseISO(recon.statementDate), "MMMM d, yyyy")}
             </p>
           </div>
+          {locked && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onReopen}
+              disabled={reopening}
+              className="shrink-0 gap-1.5 border-amber-300 text-amber-700 hover:bg-amber-50"
+            >
+              {reopening
+                ? <><RefreshCw className="h-3.5 w-3.5 animate-spin" /> Reopening…</>
+                : <><Unlock className="h-3.5 w-3.5" /> Edit Reconciliation</>
+              }
+            </Button>
+          )}
         </div>
       </div>
 
@@ -863,6 +877,7 @@ export default function ReconciliationPage() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [completing, setCompleting] = useState(false);
+  const [reopening, setReopening] = useState(false);
 
   const loadHistory = useCallback(async () => {
     setLoading(true);
@@ -918,6 +933,26 @@ export default function ReconciliationPage() {
 
   async function handleView(r: HistoryRecord) {
     await loadWorkspace(r.id, r as Reconciliation);
+  }
+
+  async function handleReopen() {
+    if (!activeRecon) return;
+    setReopening(true);
+    try {
+      const res = await api(`${BASE}api/reconciliation/${activeRecon.id}/reopen`, { method: "POST" });
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        alert(e.error ?? "Could not reopen reconciliation.");
+        return;
+      }
+      const reopened: Reconciliation = await res.json();
+      setActiveRecon(reopened);
+      await loadHistory();
+    } catch {
+      alert("Network error. Please try again.");
+    } finally {
+      setReopening(false);
+    }
   }
 
   async function handleDelete(r: HistoryRecord) {
@@ -1011,8 +1046,10 @@ export default function ReconciliationPage() {
             onToggle={handleToggle}
             onToggleAll={handleToggleAll}
             onComplete={handleComplete}
+            onReopen={handleReopen}
             onBack={() => setPhase("history")}
             completing={completing}
+            reopening={reopening}
           />
         )}
         {phase === "done" && activeRecon && (
