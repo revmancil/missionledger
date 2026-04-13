@@ -26,7 +26,7 @@ router.get("/", requireAuth, async (req, res) => {
         ge.account_id,
         ge.account_code,
         ge.account_name,
-        coa.type AS coa_type,
+        coa.coa_type,
         ROUND(SUM(CASE WHEN ge.entry_type = 'DEBIT'  THEN ge.amount ELSE 0 END)::numeric, 2) AS total_debit,
         ROUND(SUM(CASE WHEN ge.entry_type = 'CREDIT' THEN ge.amount ELSE 0 END)::numeric, 2) AS total_credit
       FROM gl_entries ge
@@ -34,11 +34,11 @@ router.get("/", requireAuth, async (req, res) => {
       WHERE ge.company_id = ${companyId}
         AND (ge.is_void IS NULL OR ge.is_void = false)
         AND (
-          coa.type NOT IN ('INCOME', 'EXPENSE')
+          coa.coa_type NOT IN ('INCOME', 'EXPENSE')
           OR ${closedUntil} IS NULL
           OR ge.date > ${closedUntil}
         )
-      GROUP BY ge.account_id, ge.account_code, ge.account_name, coa.type
+      GROUP BY ge.account_id, ge.account_code, ge.account_name, coa.coa_type
       ORDER BY ge.account_code
     `);
 
