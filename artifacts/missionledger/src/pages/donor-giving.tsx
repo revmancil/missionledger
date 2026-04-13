@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/hooks/use-auth";
 
 async function apiFetch(path: string, opts?: RequestInit): Promise<Response> {
   const token = localStorage.getItem("ml_token");
@@ -350,7 +351,8 @@ export default function DonorGivingPage() {
     count: donors.length,
   }), [donors]);
 
-  const orgName = (window as any).__missionledger_org_name ?? "Your Organization";
+  const { user } = useAuth();
+  const orgName = user?.companyName || "Your Organization";
 
   function toggleDonor(name: string) {
     setExpandedDonor(prev => prev === name ? null : name);
