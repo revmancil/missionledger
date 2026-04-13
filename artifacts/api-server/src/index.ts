@@ -893,6 +893,40 @@ async function ensureSchema() {
     `ALTER TABLE reconciliation_items ALTER COLUMN bank_transaction_id DROP NOT NULL`,
   );
 
+  // financial_snapshots
+  try {
+    await pool.query(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'snapshot_type') THEN
+          CREATE TYPE snapshot_type AS ENUM ('STATEMENT_OF_ACTIVITIES','BALANCE_SHEET','PERIOD_CLOSE','YEAR_END_CLOSE');
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'snapshot_status') THEN
+          CREATE TYPE snapshot_status AS ENUM ('DRAFT','FINALIZED');
+        END IF;
+      END $$;
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS financial_snapshots (
+        id                        TEXT PRIMARY KEY DEFAULT gen_random_uuid(),
+        company_id                TEXT NOT NULL,
+        snapshot_type             snapshot_type NOT NULL,
+        period_label              TEXT NOT NULL,
+        period_start              TIMESTAMP NOT NULL,
+        period_end                TIMESTAMP NOT NULL,
+        data                      TEXT NOT NULL,
+        snapshot_status           snapshot_status NOT NULL DEFAULT 'FINALIZED',
+        closing_journal_entry_id  TEXT,
+        closed_by                 TEXT NOT NULL,
+        closed_by_email           TEXT,
+        created_at                TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at                TIMESTAMP NOT NULL DEFAULT NOW()
+      )
+    `);
+    console.log("Schema check: financial_snapshots OK");
+  } catch (err: any) {
+    console.error("Schema migration error (financial_snapshots):", err.message);
+  }
+
   // reconciliations — statement file attachment columns
   await ensureAlter(
     "reconciliations.statement_file_name",
