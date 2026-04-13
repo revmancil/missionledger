@@ -3,7 +3,7 @@ import { format, parseISO } from "date-fns";
 import {
   CheckCircle2, Circle, Lock, Unlock, RefreshCw, ChevronLeft,
   AlertTriangle, CheckCheck, Banknote, FileCheck, Clock, Trash2,
-  ArrowUpAZ, ArrowDownAZ, Search, X, Eye,
+  ArrowUpAZ, ArrowDownAZ, Search, X, Eye, Upload, FileText, Download,
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
@@ -45,6 +45,7 @@ interface Reconciliation {
   clearedBalance: number | null; difference: number | null;
   status: "IN_PROGRESS" | "COMPLETED" | "VOID";
   reconciledBy: string | null; reconciledAt: string | null;
+  statementFileName: string | null; statementFileData: string | null;
 }
 interface HistoryRecord extends Reconciliation {
   bankAccountName?: string;
@@ -581,7 +582,7 @@ function ColToolbar({
 // ── Workspace Screen ──────────────────────────────────────────────────────────
 function WorkspaceScreen({
   recon, items, bankAccounts, onToggle, onToggleAll,
-  onComplete, onReopen, onBack, completing, reopening,
+  onComplete, onReopen, onStatementUploaded, onBack, completing, reopening,
 }: {
   recon: Reconciliation;
   items: ReconItem[];
@@ -590,12 +591,50 @@ function WorkspaceScreen({
   onToggleAll: (col: "credits" | "debits", cleared: boolean) => void;
   onComplete: () => void;
   onReopen: () => void;
+  onStatementUploaded: (fileName: string) => void;
   onBack: () => void;
   completing: boolean;
   reopening: boolean;
 }) {
   const bank = bankAccounts.find((b) => b.id === recon.bankAccountId);
   const locked = recon.status === "COMPLETED";
+
+  // ── Statement upload state ────────────────────────────────────────────────
+  const [uploading, setUploading] = useState(false);
+  const [uploadErr, setUploadErr] = useState("");
+  const [attachedName, setAttachedName] = useState<string | null>(recon.statementFileName ?? null);
+
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    setUploadErr("");
+    try {
+      const fileData: string = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      const res = await api(`${BASE}api/reconciliation/${recon.id}/statement`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileName: file.name, fileData }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setUploadErr(err.error ?? "Upload failed");
+        return;
+      }
+      setAttachedName(file.name);
+      onStatementUploaded(file.name);
+    } catch {
+      setUploadErr("Network error during upload");
+    } finally {
+      setUploading(false);
+      e.target.value = "";
+    }
+  }
 
   // ── Filter + sort state ───────────────────────────────────────────────────
   const [creditSearch, setCreditSearch] = useState("");
@@ -653,6 +692,42 @@ function WorkspaceScreen({
               }
             </Button>
           )}
+
+          {/* ── Statement attachment ── */}
+          <div className="shrink-0 flex items-center gap-2">
+            {attachedName ? (
+              <>
+                <a
+                  href={`${BASE}api/reconciliation/${recon.id}/statement`}
+                  target="_blank" rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 text-xs text-[hsl(210,60%,40%)] hover:text-[hsl(210,60%,25%)] font-medium border border-blue-200 px-2.5 py-1.5 rounded-lg hover:bg-blue-50 transition-colors"
+                  title={attachedName}
+                >
+                  <FileText className="h-3.5 w-3.5 shrink-0" />
+                  <span className="max-w-[120px] truncate">{attachedName}</span>
+                  <Download className="h-3 w-3 shrink-0" />
+                </a>
+                <label className="cursor-pointer flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground border border-gray-200 px-2 py-1.5 rounded-lg hover:bg-gray-50 transition-colors" title="Replace statement">
+                  <Upload className="h-3.5 w-3.5" />
+                  <input type="file" accept=".pdf,.png,.jpg,.jpeg" className="hidden" onChange={handleFileChange} disabled={uploading} />
+                </label>
+              </>
+            ) : (
+              <label className={cn(
+                "cursor-pointer flex items-center gap-1.5 text-xs font-medium border px-2.5 py-1.5 rounded-lg transition-colors",
+                uploading
+                  ? "text-muted-foreground border-gray-200 bg-gray-50 cursor-not-allowed"
+                  : "text-[hsl(210,60%,40%)] border-blue-200 hover:bg-blue-50"
+              )}>
+                {uploading
+                  ? <><RefreshCw className="h-3.5 w-3.5 animate-spin" /> Uploading…</>
+                  : <><Upload className="h-3.5 w-3.5" /> Attach Statement</>
+                }
+                <input type="file" accept=".pdf,.png,.jpg,.jpeg" className="hidden" onChange={handleFileChange} disabled={uploading} />
+              </label>
+            )}
+            {uploadErr && <span className="text-xs text-red-600">{uploadErr}</span>}
+          </div>
         </div>
       </div>
 
@@ -1047,6 +1122,9 @@ export default function ReconciliationPage() {
             onToggleAll={handleToggleAll}
             onComplete={handleComplete}
             onReopen={handleReopen}
+            onStatementUploaded={(fileName) =>
+              setActiveRecon((r) => r ? { ...r, statementFileName: fileName } : r)
+            }
             onBack={() => setPhase("history")}
             completing={completing}
             reopening={reopening}

@@ -281,6 +281,54 @@ router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
+// ── POST /:id/statement — attach bank statement file (base64) ────────────────
+router.post("/:id/statement", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { companyId } = (req as any).user;
+    const { fileName, fileData } = req.body ?? {};
+    if (!fileName || !fileData) return res.status(400).json({ error: "fileName and fileData are required" });
+
+    const [recon] = await db.select({ id: reconciliations.id })
+      .from(reconciliations)
+      .where(and(eq(reconciliations.id, req.params.id), eq(reconciliations.companyId, companyId)));
+    if (!recon) return res.status(404).json({ error: "Not found" });
+
+    await db.update(reconciliations)
+      .set({ statementFileName: fileName, statementFileData: fileData, updatedAt: new Date() } as any)
+      .where(eq(reconciliations.id, req.params.id));
+
+    res.json({ success: true, fileName });
+  } catch (err) {
+    console.error("Upload statement error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ── GET /:id/statement — download attached statement ──────────────────────────
+router.get("/:id/statement", requireAuth, async (req, res) => {
+  try {
+    const { companyId } = (req as any).user;
+    const result = await db.select().from(reconciliations)
+      .where(and(eq(reconciliations.id, req.params.id), eq(reconciliations.companyId, companyId)));
+    const recon = result[0] as any;
+    if (!recon) return res.status(404).json({ error: "Not found" });
+    if (!recon.statementFileData) return res.status(404).json({ error: "No statement attached" });
+
+    // fileData is a data URL: "data:<mime>;base64,<data>"
+    const [header, base64] = recon.statementFileData.split(",");
+    const mimeMatch = header.match(/data:([^;]+)/);
+    const mime = mimeMatch ? mimeMatch[1] : "application/octet-stream";
+    const buffer = Buffer.from(base64, "base64");
+
+    res.setHeader("Content-Type", mime);
+    res.setHeader("Content-Disposition", `attachment; filename="${recon.statementFileName ?? "statement"}"`);
+    res.send(buffer);
+  } catch (err) {
+    console.error("Download statement error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // ── Legacy ────────────────────────────────────────────────────────────────────
 router.put("/:id/items", requireAuth, requireAdmin, async (req, res) => {
   try {

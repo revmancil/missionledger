@@ -892,6 +892,16 @@ async function ensureSchema() {
     "reconciliation_items.bank_transaction_id nullable",
     `ALTER TABLE reconciliation_items ALTER COLUMN bank_transaction_id DROP NOT NULL`,
   );
+
+  // reconciliations — statement file attachment columns
+  await ensureAlter(
+    "reconciliations.statement_file_name",
+    `ALTER TABLE reconciliations ADD COLUMN IF NOT EXISTS statement_file_name TEXT`,
+  );
+  await ensureAlter(
+    "reconciliations.statement_file_data",
+    `ALTER TABLE reconciliations ADD COLUMN IF NOT EXISTS statement_file_data TEXT`,
+  );
 }
 
 async function main() {

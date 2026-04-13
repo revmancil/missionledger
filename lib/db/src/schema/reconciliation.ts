@@ -16,6 +16,8 @@ export const reconciliations = pgTable("reconciliations", {
   status: reconciliationStatusEnum("status").notNull().default("IN_PROGRESS"),
   reconciledBy: text("reconciled_by"),
   reconciledAt: timestamp("reconciled_at"),
+  statementFileName: text("statement_file_name"),
+  statementFileData: text("statement_file_data"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
