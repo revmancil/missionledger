@@ -697,16 +697,25 @@ function WorkspaceScreen({
           <div className="shrink-0 flex items-center gap-2">
             {attachedName ? (
               <>
-                <a
-                  href={`${BASE}api/reconciliation/${recon.id}/statement`}
-                  target="_blank" rel="noopener noreferrer"
+                <button
+                  onClick={async () => {
+                    const res = await api(`${BASE}api/reconciliation/${recon.id}/statement`);
+                    if (!res.ok) return;
+                    const blob = await res.blob();
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = attachedName ?? "statement";
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  }}
                   className="flex items-center gap-1.5 text-xs text-[hsl(210,60%,40%)] hover:text-[hsl(210,60%,25%)] font-medium border border-blue-200 px-2.5 py-1.5 rounded-lg hover:bg-blue-50 transition-colors"
-                  title={attachedName}
+                  title={`Download ${attachedName}`}
                 >
                   <FileText className="h-3.5 w-3.5 shrink-0" />
                   <span className="max-w-[120px] truncate">{attachedName}</span>
                   <Download className="h-3 w-3 shrink-0" />
-                </a>
+                </button>
                 <label className="cursor-pointer flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground border border-gray-200 px-2 py-1.5 rounded-lg hover:bg-gray-50 transition-colors" title="Replace statement">
                   <Upload className="h-3.5 w-3.5" />
                   <input type="file" accept=".pdf,.png,.jpg,.jpeg" className="hidden" onChange={handleFileChange} disabled={uploading} />
