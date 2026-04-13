@@ -233,13 +233,13 @@ export default function TrialBalancePage() {
                 <Calendar className="h-3.5 w-3.5" />
                 {data.periodStart ? (
                   <>
-                    <span className="font-medium text-violet-700">Current Period:</span>
+                    <span className="font-medium text-violet-700">Open Period:</span>
                     <span>{fmtDate(data.periodStart)} – Present</span>
                     <span className="opacity-40 mx-1">·</span>
-                    <span className="text-muted-foreground/60">Income &amp; Expense accounts reflect this period only; Balance Sheet is all-time</span>
+                    <span className="text-muted-foreground/60">All accounts shown all-time to verify ledger balance</span>
                   </>
                 ) : (
-                  <span>All-time (no period has been closed yet)</span>
+                  <span>All-time · no period has been closed yet</span>
                 )}
               </div>
             )}

@@ -18,9 +18,11 @@ router.get("/", requireAuth, async (req, res) => {
       .where(eq(companies.id, companyId));
     const closedUntil: Date | null = company?.closedUntil ?? null;
 
-    // Sum debits and credits per account, joining COA for type.
-    // INCOME/EXPENSE accounts are filtered to the current open period (after closedUntil).
-    // ASSET/LIABILITY/EQUITY are always all-time (permanent accounts).
+    // Sum debits and credits per account — ALL TIME.
+    // A trial balance must include every GL entry to verify sum(debits)=sum(credits).
+    // Filtering income/expense by period would exclude the matching bank-side entries
+    // and cause a false imbalance. Period-aware income/expense reporting belongs on
+    // the Income Statement, not the trial balance.
     const rows = await db.execute(sql`
       SELECT
         ge.account_id,
@@ -33,11 +35,6 @@ router.get("/", requireAuth, async (req, res) => {
       JOIN chart_of_accounts coa ON coa.id = ge.account_id
       WHERE ge.company_id = ${companyId}
         AND (ge.is_void IS NULL OR ge.is_void = false)
-        AND (
-          coa.coa_type NOT IN ('INCOME', 'EXPENSE')
-          OR ${closedUntil}::timestamptz IS NULL
-          OR ge.date > ${closedUntil}::timestamptz
-        )
       GROUP BY ge.account_id, ge.account_code, ge.account_name, coa.coa_type
       ORDER BY ge.account_code
     `);
