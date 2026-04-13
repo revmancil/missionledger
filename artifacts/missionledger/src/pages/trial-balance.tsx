@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import {
   CheckCircle2, AlertTriangle, RefreshCw, RotateCcw,
-  BookOpen, TrendingUp, TrendingDown, Scale, Info, Layers,
+  BookOpen, TrendingUp, TrendingDown, Scale, Info, Layers, Calendar,
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
@@ -35,9 +35,15 @@ interface TrialBalance {
   difference: number;
   isBalanced: boolean;
   glEntryCount: number;
+  closedUntil: string | null;
+  periodStart: string | null;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+function fmtDate(iso: string) {
+  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
 function fmt(n: number) {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -222,6 +228,21 @@ export default function TrialBalancePage() {
             <p className="text-sm text-muted-foreground mt-0.5">
               Double-entry verification · sum(debits) − sum(credits) must equal $0.00
             </p>
+            {data && (
+              <div className="flex items-center gap-1.5 mt-1.5 text-xs text-muted-foreground">
+                <Calendar className="h-3.5 w-3.5" />
+                {data.periodStart ? (
+                  <>
+                    <span className="font-medium text-violet-700">Current Period:</span>
+                    <span>{fmtDate(data.periodStart)} – Present</span>
+                    <span className="opacity-40 mx-1">·</span>
+                    <span className="text-muted-foreground/60">Income &amp; Expense accounts reflect this period only; Balance Sheet is all-time</span>
+                  </>
+                ) : (
+                  <span>All-time (no period has been closed yet)</span>
+                )}
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-3">
             {syncResult && (

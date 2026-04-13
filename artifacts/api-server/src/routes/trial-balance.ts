@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, glEntries, transactions, transactionSplits, chartOfAccounts, bankAccounts } from "@workspace/db";
+import { db, glEntries, transactions, transactionSplits, chartOfAccounts, bankAccounts, companies } from "@workspace/db";
 import { eq, and, sql } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
 import { generateGlEntries } from "../lib/gl";
@@ -12,33 +12,41 @@ router.get("/", requireAuth, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
 
-    // Sum debits and credits per account using raw SQL aggregation
+    // Fetch company to get closedUntil (current period boundary)
+    const [company] = await db.select({ closedUntil: companies.closedUntil })
+      .from(companies)
+      .where(eq(companies.id, companyId));
+    const closedUntil: Date | null = company?.closedUntil ?? null;
+
+    // Sum debits and credits per account, joining COA for type.
+    // INCOME/EXPENSE accounts are filtered to the current open period (after closedUntil).
+    // ASSET/LIABILITY/EQUITY are always all-time (permanent accounts).
     const rows = await db.execute(sql`
       SELECT
-        account_id,
-        account_code,
-        account_name,
-        ROUND(SUM(CASE WHEN entry_type = 'DEBIT'  THEN amount ELSE 0 END)::numeric, 2) AS total_debit,
-        ROUND(SUM(CASE WHEN entry_type = 'CREDIT' THEN amount ELSE 0 END)::numeric, 2) AS total_credit
-      FROM gl_entries
-      WHERE company_id = ${companyId} AND is_void = false
-      GROUP BY account_id, account_code, account_name
-      ORDER BY account_code
+        ge.account_id,
+        ge.account_code,
+        ge.account_name,
+        coa.type AS coa_type,
+        ROUND(SUM(CASE WHEN ge.entry_type = 'DEBIT'  THEN ge.amount ELSE 0 END)::numeric, 2) AS total_debit,
+        ROUND(SUM(CASE WHEN ge.entry_type = 'CREDIT' THEN ge.amount ELSE 0 END)::numeric, 2) AS total_credit
+      FROM gl_entries ge
+      JOIN chart_of_accounts coa ON coa.id = ge.account_id
+      WHERE ge.company_id = ${companyId}
+        AND (ge.is_void IS NULL OR ge.is_void = false)
+        AND (
+          coa.type NOT IN ('INCOME', 'EXPENSE')
+          OR ${closedUntil} IS NULL
+          OR ge.date > ${closedUntil}
+        )
+      GROUP BY ge.account_id, ge.account_code, ge.account_name, coa.type
+      ORDER BY ge.account_code
     `);
-
-    // Enrich each row with COA type (for grouping on frontend)
-    const allCoa = await db
-      .select({ id: chartOfAccounts.id, type: chartOfAccounts.type })
-      .from(chartOfAccounts)
-      .where(eq(chartOfAccounts.companyId, companyId));
-
-    const coaTypeMap = Object.fromEntries(allCoa.map((a) => [a.id, a.type]));
 
     const accounts = (rows.rows as any[]).map((r) => ({
       accountId:   r.account_id,
       accountCode: r.account_code,
       accountName: r.account_name,
-      accountType: coaTypeMap[r.account_id] ?? "UNKNOWN",
+      accountType: (r.coa_type as string) ?? "UNKNOWN",
       totalDebit:  parseFloat(r.total_debit)  || 0,
       totalCredit: parseFloat(r.total_credit) || 0,
       balance:     (parseFloat(r.total_debit) || 0) - (parseFloat(r.total_credit) || 0),
@@ -57,6 +65,11 @@ router.get("/", requireAuth, async (req, res) => {
     )[0] as { count?: number } | undefined;
     const count = countRow?.count ?? 0;
 
+    // Period info: the day after closedUntil is the first day of the current open period
+    const periodStart: string | null = closedUntil
+      ? new Date(closedUntil.getTime() + 86400000).toISOString()
+      : null;
+
     res.json({
       accounts,
       grandTotalDebit,
@@ -64,6 +77,8 @@ router.get("/", requireAuth, async (req, res) => {
       difference,
       isBalanced,
       glEntryCount: Number(count) || 0,
+      closedUntil: closedUntil ? closedUntil.toISOString() : null,
+      periodStart,
     });
   } catch (err) {
     console.error("Trial balance error:", err);
