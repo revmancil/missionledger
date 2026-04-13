@@ -886,6 +886,12 @@ async function ensureSchema() {
     "reconciliation_items.transaction_id",
     `ALTER TABLE reconciliation_items ADD COLUMN IF NOT EXISTS transaction_id TEXT`,
   );
+
+  // reconciliation_items.bank_transaction_id — older DBs created it NOT NULL; make it nullable
+  await ensureAlter(
+    "reconciliation_items.bank_transaction_id nullable",
+    `ALTER TABLE reconciliation_items ALTER COLUMN bank_transaction_id DROP NOT NULL`,
+  );
 }
 
 async function main() {
