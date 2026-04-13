@@ -3,7 +3,7 @@ import { format, parseISO } from "date-fns";
 import {
   CheckCircle2, Circle, Lock, Unlock, RefreshCw, ChevronLeft,
   AlertTriangle, CheckCheck, Banknote, FileCheck, Clock, Trash2,
-  ArrowUpAZ, ArrowDownAZ, Search, X,
+  ArrowUpAZ, ArrowDownAZ, Search, X, Eye,
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
@@ -81,12 +81,13 @@ function DiffBadge({ diff }: { diff: number }) {
 
 // ── History Screen ────────────────────────────────────────────────────────────
 function HistoryScreen({
-  history, bankAccounts, onStart, onResume, onDelete, loading,
+  history, bankAccounts, onStart, onResume, onView, onDelete, loading,
 }: {
   history: HistoryRecord[];
   bankAccounts: BankAccount[];
   onStart: () => void;
   onResume: (r: HistoryRecord) => void;
+  onView: (r: HistoryRecord) => void;
   onDelete: (r: HistoryRecord) => void;
   loading: boolean;
 }) {
@@ -156,19 +157,23 @@ function HistoryScreen({
             <tbody className="divide-y divide-gray-50">
               {history.map((r) => {
                 const bank = bankMap[r.bankAccountId];
-                const resumable = r.status === "IN_PROGRESS";
-                const deletable = r.status !== "COMPLETED";
+                const resumable  = r.status === "IN_PROGRESS";
+                const viewable   = r.status === "COMPLETED";
+                const deletable  = r.status !== "COMPLETED";
                 const confirming = confirmId === r.id;
                 return (
                   <tr
                     key={r.id}
                     className={cn(
                       "transition-colors",
-                      resumable
-                        ? "hover:bg-amber-50 cursor-pointer"
-                        : "hover:bg-[hsl(210,60%,98%)]"
+                      resumable ? "hover:bg-amber-50 cursor-pointer" :
+                      viewable  ? "hover:bg-emerald-50 cursor-pointer" :
+                                  "hover:bg-[hsl(210,60%,98%)]"
                     )}
-                    onClick={resumable ? () => onResume(r) : undefined}
+                    onClick={
+                      resumable ? () => onResume(r) :
+                      viewable  ? () => onView(r)   : undefined
+                    }
                   >
                     <td className="px-5 py-3 font-medium">{bank?.name ?? "—"}</td>
                     <td className="px-5 py-3 text-muted-foreground">
@@ -200,6 +205,15 @@ function HistoryScreen({
                       )}
                     </td>
                     <td className="px-3 py-3 text-right" onClick={(e) => e.stopPropagation()}>
+                      {viewable && (
+                        <button
+                          onClick={() => onView(r)}
+                          className="p-1.5 rounded-lg text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 transition-colors"
+                          title="View details"
+                        >
+                          <Eye className="h-4 w-4" />
+                        </button>
+                      )}
                       {deletable && (
                         confirming ? (
                           <div className="flex items-center gap-1.5 justify-end">
@@ -902,6 +916,10 @@ export default function ReconciliationPage() {
     await loadWorkspace(r.id, r as Reconciliation);
   }
 
+  async function handleView(r: HistoryRecord) {
+    await loadWorkspace(r.id, r as Reconciliation);
+  }
+
   async function handleDelete(r: HistoryRecord) {
     try {
       await api(`${BASE}api/reconciliation/${r.id}`, { method: "DELETE" });
@@ -970,6 +988,7 @@ export default function ReconciliationPage() {
             bankAccounts={bankAccounts}
             onStart={() => { setSaveError(""); setPhase("setup"); }}
             onResume={handleResume}
+            onView={handleView}
             onDelete={handleDelete}
             loading={loading}
           />
