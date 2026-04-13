@@ -3,6 +3,7 @@ import { format, parseISO } from "date-fns";
 import {
   CheckCircle2, Circle, Lock, Unlock, RefreshCw, ChevronLeft,
   AlertTriangle, CheckCheck, Banknote, FileCheck, Clock, Trash2,
+  ArrowUpAZ, ArrowDownAZ, Search, X,
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
@@ -455,6 +456,114 @@ function TxRow({ item, onToggle, locked }: {
   );
 }
 
+// ── Sort / filter helpers ─────────────────────────────────────────────────────
+type SortField = "date" | "payee" | "amount";
+type SortDir   = "asc" | "desc";
+
+function sortAndFilter(
+  items: ReconItem[],
+  search: string,
+  field: SortField,
+  dir: SortDir,
+): ReconItem[] {
+  const q = search.trim().toLowerCase();
+  const filtered = q
+    ? items.filter((i) => {
+        const tx = i.transaction;
+        if (!tx) return false;
+        return (
+          tx.payee.toLowerCase().includes(q) ||
+          (tx.memo ?? "").toLowerCase().includes(q) ||
+          (tx.checkNumber ?? "").toLowerCase().includes(q)
+        );
+      })
+    : items;
+
+  return [...filtered].sort((a, b) => {
+    const ta = a.transaction;
+    const tb = b.transaction;
+    if (!ta || !tb) return 0;
+    let cmp = 0;
+    if (field === "date")   cmp = new Date(ta.date).getTime() - new Date(tb.date).getTime();
+    if (field === "payee")  cmp = ta.payee.localeCompare(tb.payee);
+    if (field === "amount") cmp = ta.amount - tb.amount;
+    return dir === "asc" ? cmp : -cmp;
+  });
+}
+
+// ── Column toolbar ────────────────────────────────────────────────────────────
+function ColToolbar({
+  search, onSearch,
+  sort, onSort,
+  accentClass,
+}: {
+  search: string;
+  onSearch: (v: string) => void;
+  sort: { field: SortField; dir: SortDir };
+  onSort: (f: SortField, d: SortDir) => void;
+  accentClass: string;
+}) {
+  const fields: { key: SortField; label: string }[] = [
+    { key: "date",   label: "Date" },
+    { key: "payee",  label: "Payee" },
+    { key: "amount", label: "Amount" },
+  ];
+
+  function toggle(f: SortField) {
+    if (sort.field === f) {
+      onSort(f, sort.dir === "asc" ? "desc" : "asc");
+    } else {
+      onSort(f, "asc");
+    }
+  }
+
+  return (
+    <div className="px-3 py-2 border-b bg-white flex flex-wrap items-center gap-2">
+      {/* Search */}
+      <div className="relative flex-1 min-w-[120px]">
+        <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+        <input
+          type="text"
+          placeholder="Filter…"
+          value={search}
+          onChange={(e) => onSearch(e.target.value)}
+          className="w-full pl-7 pr-6 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-violet-300"
+        />
+        {search && (
+          <button onClick={() => onSearch("")} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+            <X className="h-3 w-3" />
+          </button>
+        )}
+      </div>
+      {/* Sort buttons */}
+      <div className="flex items-center gap-1">
+        {fields.map(({ key, label }) => {
+          const active = sort.field === key;
+          return (
+            <button
+              key={key}
+              onClick={() => toggle(key)}
+              className={cn(
+                "flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-medium border transition-colors",
+                active
+                  ? `${accentClass} border-current`
+                  : "text-muted-foreground border-gray-200 hover:border-gray-300 bg-white"
+              )}
+            >
+              {label}
+              {active && (
+                sort.dir === "asc"
+                  ? <ArrowUpAZ className="h-3 w-3" />
+                  : <ArrowDownAZ className="h-3 w-3" />
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ── Workspace Screen ──────────────────────────────────────────────────────────
 function WorkspaceScreen({
   recon, items, bankAccounts, onToggle, onToggleAll,
@@ -472,18 +581,27 @@ function WorkspaceScreen({
   const bank = bankAccounts.find((b) => b.id === recon.bankAccountId);
   const locked = recon.status === "COMPLETED";
 
-  const credits = items.filter((i) => i.transaction?.type === "CREDIT");
-  const debits  = items.filter((i) => i.transaction?.type === "DEBIT");
+  // ── Filter + sort state ───────────────────────────────────────────────────
+  const [creditSearch, setCreditSearch] = useState("");
+  const [debitSearch,  setDebitSearch]  = useState("");
+  const [creditSort,   setCreditSort]   = useState<{ field: SortField; dir: SortDir }>({ field: "date", dir: "asc" });
+  const [debitSort,    setDebitSort]    = useState<{ field: SortField; dir: SortDir }>({ field: "date", dir: "asc" });
 
-  // Live math
-  const clearedCredits = credits.filter((i) => i.cleared).reduce((s, i) => s + (i.transaction?.amount ?? 0), 0);
-  const clearedDebits  = debits.filter((i) => i.cleared).reduce((s, i) => s + (i.transaction?.amount ?? 0), 0);
+  const allCredits = items.filter((i) => i.transaction?.type === "CREDIT");
+  const allDebits  = items.filter((i) => i.transaction?.type === "DEBIT");
+
+  const credits = sortAndFilter(allCredits, creditSearch, creditSort.field, creditSort.dir);
+  const debits  = sortAndFilter(allDebits,  debitSearch,  debitSort.field,  debitSort.dir);
+
+  // Live math — always use full (unfiltered) sets for totals
+  const clearedCredits = allCredits.filter((i) => i.cleared).reduce((s, i) => s + (i.transaction?.amount ?? 0), 0);
+  const clearedDebits  = allDebits.filter((i) => i.cleared).reduce((s, i) => s + (i.transaction?.amount ?? 0), 0);
   const clearedBalance = (recon.openingBalance ?? 0) + clearedCredits - clearedDebits;
   const difference     = recon.statementBalance - clearedBalance;
   const balanced       = Math.abs(difference) < 0.005;
 
-  const allCreditsChecked = credits.length > 0 && credits.every((i) => i.cleared);
-  const allDebitsChecked  = debits.length > 0 && debits.every((i) => i.cleared);
+  const allCreditsChecked = allCredits.length > 0 && allCredits.every((i) => i.cleared);
+  const allDebitsChecked  = allDebits.length > 0  && allDebits.every((i) => i.cleared);
 
   return (
     <div className="space-y-4 -m-4 md:-m-8">
@@ -520,12 +638,12 @@ function WorkspaceScreen({
               <div>
                 <h3 className="font-semibold text-emerald-800">Deposits / Credits</h3>
                 <p className="text-xs text-emerald-600 mt-0.5">
-                  {credits.filter((i) => i.cleared).length} of {credits.length} checked
+                  {allCredits.filter((i) => i.cleared).length} of {allCredits.length} checked
                   {" · "}
                   <span className="font-semibold">{fmt(clearedCredits)}</span> cleared
                 </p>
               </div>
-              {!locked && credits.length > 0 && (
+              {!locked && allCredits.length > 0 && (
                 <button
                   onClick={() => onToggleAll("credits", !allCreditsChecked)}
                   className="text-xs text-emerald-700 hover:text-emerald-900 font-medium px-2 py-1 rounded border border-emerald-200 hover:bg-emerald-100"
@@ -534,6 +652,11 @@ function WorkspaceScreen({
                 </button>
               )}
             </div>
+            <ColToolbar
+              search={creditSearch} onSearch={setCreditSearch}
+              sort={creditSort} onSort={(f, d) => setCreditSort({ field: f, dir: d })}
+              accentClass="text-emerald-700 bg-emerald-50"
+            />
             <table className="w-full">
               <thead className="bg-[hsl(150,20%,98%)] border-b">
                 <tr>
@@ -546,7 +669,9 @@ function WorkspaceScreen({
               </thead>
               <tbody>
                 {credits.length === 0 ? (
-                  <tr><td colSpan={6} className="px-4 py-8 text-center text-sm text-muted-foreground italic">No deposits in this period</td></tr>
+                  <tr><td colSpan={6} className="px-4 py-8 text-center text-sm text-muted-foreground italic">
+                    {creditSearch ? "No deposits match your filter" : "No deposits in this period"}
+                  </td></tr>
                 ) : (
                   credits.map((item) => (
                     <TxRow key={item.id} item={item} onToggle={() => !locked && onToggle(item)} locked={locked} />
@@ -562,12 +687,12 @@ function WorkspaceScreen({
               <div>
                 <h3 className="font-semibold text-[hsl(210,60%,30%)]">Checks / Payments</h3>
                 <p className="text-xs text-[hsl(210,60%,50%)] mt-0.5">
-                  {debits.filter((i) => i.cleared).length} of {debits.length} checked
+                  {allDebits.filter((i) => i.cleared).length} of {allDebits.length} checked
                   {" · "}
                   <span className="font-semibold">{fmt(clearedDebits)}</span> cleared
                 </p>
               </div>
-              {!locked && debits.length > 0 && (
+              {!locked && allDebits.length > 0 && (
                 <button
                   onClick={() => onToggleAll("debits", !allDebitsChecked)}
                   className="text-xs text-[hsl(210,60%,40%)] hover:text-[hsl(210,60%,25%)] font-medium px-2 py-1 rounded border border-blue-200 hover:bg-blue-100"
@@ -576,6 +701,11 @@ function WorkspaceScreen({
                 </button>
               )}
             </div>
+            <ColToolbar
+              search={debitSearch} onSearch={setDebitSearch}
+              sort={debitSort} onSort={(f, d) => setDebitSort({ field: f, dir: d })}
+              accentClass="text-[hsl(210,60%,40%)] bg-blue-50"
+            />
             <table className="w-full">
               <thead className="bg-[hsl(210,20%,98%)] border-b">
                 <tr>
@@ -588,7 +718,9 @@ function WorkspaceScreen({
               </thead>
               <tbody>
                 {debits.length === 0 ? (
-                  <tr><td colSpan={6} className="px-4 py-8 text-center text-sm text-muted-foreground italic">No payments in this period</td></tr>
+                  <tr><td colSpan={6} className="px-4 py-8 text-center text-sm text-muted-foreground italic">
+                    {debitSearch ? "No payments match your filter" : "No payments in this period"}
+                  </td></tr>
                 ) : (
                   debits.map((item) => (
                     <TxRow key={item.id} item={item} onToggle={() => !locked && onToggle(item)} locked={locked} />
