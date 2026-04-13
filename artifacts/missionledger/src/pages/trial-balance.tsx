@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import {
   CheckCircle2, AlertTriangle, RefreshCw, RotateCcw,
-  BookOpen, TrendingUp, TrendingDown, Scale, Info, Layers, Calendar,
+  BookOpen, TrendingUp, TrendingDown, Scale, Info, Layers, Calendar, History,
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
@@ -25,7 +25,7 @@ interface TBAccount {
   accountType: "ASSET" | "LIABILITY" | "EQUITY" | "INCOME" | "EXPENSE" | "UNKNOWN";
   totalDebit: number;
   totalCredit: number;
-  balance: number; // debit - credit
+  balance: number;
 }
 
 interface TrialBalance {
@@ -37,6 +37,15 @@ interface TrialBalance {
   glEntryCount: number;
   closedUntil: string | null;
   periodStart: string | null;
+  asOf: string | null;
+}
+
+interface ClosedPeriod {
+  periodLabel: string;
+  periodStart: string;
+  periodEnd: string;
+  closedByEmail: string | null;
+  closedAt: string;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -55,12 +64,12 @@ function fmt(n: number) {
 const TYPE_ORDER = ["ASSET", "LIABILITY", "EQUITY", "INCOME", "EXPENSE"];
 
 const TYPE_META: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
-  ASSET:     { label: "Assets",     color: "text-blue-700 bg-blue-50",    icon: <Scale   className="h-3.5 w-3.5" /> },
-  LIABILITY: { label: "Liabilities", color: "text-orange-700 bg-orange-50", icon: <TrendingDown className="h-3.5 w-3.5" /> },
-  EQUITY:    { label: "Equity / Net Assets", color: "text-violet-700 bg-violet-50", icon: <Layers className="h-3.5 w-3.5" /> },
-  INCOME:    { label: "Income",     color: "text-emerald-700 bg-emerald-50", icon: <TrendingUp className="h-3.5 w-3.5" /> },
-  EXPENSE:   { label: "Expenses",   color: "text-red-700 bg-red-50",       icon: <BookOpen className="h-3.5 w-3.5" /> },
-  UNKNOWN:   { label: "Uncategorised", color: "text-gray-700 bg-gray-50",  icon: <Info className="h-3.5 w-3.5" /> },
+  ASSET:     { label: "Assets",              color: "text-blue-700 bg-blue-50",      icon: <Scale        className="h-3.5 w-3.5" /> },
+  LIABILITY: { label: "Liabilities",         color: "text-orange-700 bg-orange-50",  icon: <TrendingDown className="h-3.5 w-3.5" /> },
+  EQUITY:    { label: "Equity / Net Assets", color: "text-violet-700 bg-violet-50",  icon: <Layers       className="h-3.5 w-3.5" /> },
+  INCOME:    { label: "Income",              color: "text-emerald-700 bg-emerald-50", icon: <TrendingUp   className="h-3.5 w-3.5" /> },
+  EXPENSE:   { label: "Expenses",            color: "text-red-700 bg-red-50",         icon: <BookOpen     className="h-3.5 w-3.5" /> },
+  UNKNOWN:   { label: "Uncategorised",       color: "text-gray-700 bg-gray-50",       icon: <Info         className="h-3.5 w-3.5" /> },
 };
 
 // ── Balance Check Banner ──────────────────────────────────────────────────────
@@ -69,9 +78,7 @@ function BalanceBanner({ data }: { data: TrialBalance }) {
   return (
     <div className={cn(
       "rounded-2xl border-2 px-6 py-5",
-      isBalanced
-        ? "border-emerald-200 bg-emerald-50"
-        : "border-red-300 bg-red-50"
+      isBalanced ? "border-emerald-200 bg-emerald-50" : "border-red-300 bg-red-50"
     )}>
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div className="flex items-center gap-3">
@@ -129,7 +136,6 @@ function AccountGroup({ type, accounts }: { type: string; accounts: TBAccount[] 
 
   return (
     <div className="rounded-xl border border-gray-100 overflow-hidden">
-      {/* Group header */}
       <button
         onClick={() => setOpen((o) => !o)}
         className={cn(
@@ -149,7 +155,6 @@ function AccountGroup({ type, accounts }: { type: string; accounts: TBAccount[] 
         </div>
       </button>
 
-      {/* Account rows */}
       {open && (
         <table className="w-full text-sm">
           <tbody className="divide-y divide-gray-50">
@@ -180,13 +185,78 @@ function AccountGroup({ type, accounts }: { type: string; accounts: TBAccount[] 
   );
 }
 
+// ── Trial Balance Body ────────────────────────────────────────────────────────
+function TrialBalanceBody({ data }: { data: TrialBalance }) {
+  const grouped = TYPE_ORDER.reduce<Record<string, TBAccount[]>>((acc, t) => {
+    acc[t] = (data.accounts ?? []).filter((a) => a.accountType === t);
+    return acc;
+  }, {});
+
+  return (
+    <>
+      <BalanceBanner data={data} />
+
+      {data.glEntryCount === 0 && (
+        <div className="flex items-start gap-3 p-4 rounded-xl border border-amber-100 bg-amber-50 text-sm text-amber-800">
+          <Info className="h-4 w-4 mt-0.5 shrink-0" />
+          <span>
+            No GL entries found yet. Click <strong>Sync GL Entries</strong> to generate double-entry records
+            from all existing transactions, or new transactions will generate entries automatically going forward.
+          </span>
+        </div>
+      )}
+
+      {data.accounts.length > 0 && (
+        <div className="grid grid-cols-[1fr_auto_auto] text-[10px] font-bold uppercase tracking-widest text-muted-foreground px-5 pb-0.5">
+          <span>Account</span>
+          <span className="w-36 text-right text-blue-500">Debit</span>
+          <span className="w-36 text-right text-violet-500 ml-2 pr-5">Credit</span>
+        </div>
+      )}
+
+      <div className="space-y-3">
+        {TYPE_ORDER.map((type) => (
+          <AccountGroup key={type} type={type} accounts={grouped[type] ?? []} />
+        ))}
+      </div>
+
+      {data.accounts.length > 0 && (
+        <div className={cn(
+          "rounded-xl border-2 px-5 py-4 flex items-center justify-between",
+          data.isBalanced ? "border-emerald-200 bg-emerald-50" : "border-red-200 bg-red-50"
+        )}>
+          <span className="font-bold text-base">
+            {data.isBalanced ? "✓ Grand Totals" : "⚠ Grand Totals (Out of Balance)"}
+          </span>
+          <div className="flex items-center gap-12 font-bold tabular-nums text-base">
+            <span className="text-blue-700 w-36 text-right">{fmt(data.grandTotalDebit)}</span>
+            <span className="text-violet-700 w-36 text-right">{fmt(data.grandTotalCredit)}</span>
+          </div>
+        </div>
+      )}
+
+      <p className="text-[11px] text-muted-foreground text-center pb-2">
+        Per GAAP double-entry accounting: Assets + Expenses = Liabilities + Equity + Revenue.
+        Every transaction generates at minimum two GL entries (bank side + category side). Total debits must equal total credits.
+      </p>
+    </>
+  );
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function TrialBalancePage() {
-  const [loading, setLoading]   = useState(true);
-  const [syncing, setSyncing]   = useState(false);
-  const [data, setData]         = useState<TrialBalance | null>(null);
-  const [error, setError]       = useState("");
+  const [loading, setLoading]     = useState(true);
+  const [syncing, setSyncing]     = useState(false);
+  const [data, setData]           = useState<TrialBalance | null>(null);
+  const [error, setError]         = useState("");
   const [syncResult, setSyncResult] = useState<string>("");
+
+  // Period history
+  const [periods, setPeriods]           = useState<ClosedPeriod[]>([]);
+  const [selectedPeriod, setSelectedPeriod] = useState<ClosedPeriod | null>(null); // null = current
+  const [histLoading, setHistLoading]   = useState(false);
+  const [histData, setHistData]         = useState<TrialBalance | null>(null);
+  const [histError, setHistError]       = useState("");
 
   const load = useCallback(async () => {
     setLoading(true); setError("");
@@ -198,7 +268,26 @@ export default function TrialBalancePage() {
     finally { setLoading(false); }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  const loadPeriods = useCallback(async () => {
+    try {
+      const res = await api(`${BASE}api/trial-balance/periods`);
+      if (res.ok) setPeriods(await res.json());
+    } catch {}
+  }, []);
+
+  useEffect(() => { load(); loadPeriods(); }, [load, loadPeriods]);
+
+  // Load historical trial balance when a period is selected
+  useEffect(() => {
+    if (!selectedPeriod) { setHistData(null); setHistError(""); return; }
+    setHistLoading(true); setHistError("");
+    const asOf = selectedPeriod.periodEnd.substring(0, 10);
+    api(`${BASE}api/trial-balance?asOf=${asOf}`)
+      .then((r) => r.ok ? r.json() : Promise.reject())
+      .then((d) => setHistData(d))
+      .catch(() => setHistError("Failed to load historical trial balance"))
+      .finally(() => setHistLoading(false));
+  }, [selectedPeriod]);
 
   async function handleSync() {
     setSyncing(true); setSyncResult("");
@@ -211,11 +300,9 @@ export default function TrialBalancePage() {
     finally { setSyncing(false); }
   }
 
-  // Group accounts by type
-  const grouped = TYPE_ORDER.reduce<Record<string, TBAccount[]>>((acc, t) => {
-    acc[t] = (data?.accounts ?? []).filter((a) => a.accountType === t);
-    return acc;
-  }, {});
+  const activeData = selectedPeriod ? histData : data;
+  const activeLoading = selectedPeriod ? histLoading : loading;
+  const activeError = selectedPeriod ? histError : error;
 
   return (
     <AppLayout title="Trial Balance">
@@ -228,7 +315,7 @@ export default function TrialBalancePage() {
             <p className="text-sm text-muted-foreground mt-0.5">
               Double-entry verification · sum(debits) − sum(credits) must equal $0.00
             </p>
-            {data && (
+            {data && !selectedPeriod && (
               <div className="flex items-center gap-1.5 mt-1.5 text-xs text-muted-foreground">
                 <Calendar className="h-3.5 w-3.5" />
                 {data.periodStart ? (
@@ -243,6 +330,15 @@ export default function TrialBalancePage() {
                 )}
               </div>
             )}
+            {selectedPeriod && (
+              <div className="flex items-center gap-1.5 mt-1.5 text-xs text-amber-700">
+                <History className="h-3.5 w-3.5" />
+                <span className="font-medium">Closing Trial Balance:</span>
+                <span>{selectedPeriod.periodLabel}</span>
+                <span className="opacity-40 mx-1">·</span>
+                <span className="text-muted-foreground/60">as of {fmtDate(selectedPeriod.periodEnd)}</span>
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-3">
             {syncResult && (
@@ -250,87 +346,97 @@ export default function TrialBalancePage() {
                 ✓ {syncResult}
               </span>
             )}
-            <Button variant="outline" size="sm" onClick={load} disabled={loading} className="gap-2">
-              <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
-              Refresh
-            </Button>
-            <Button
-              variant="outline" size="sm"
-              onClick={handleSync} disabled={syncing}
-              className="gap-2 border-blue-200 text-blue-700 hover:bg-blue-50"
-            >
-              {syncing
-                ? <><RefreshCw className="h-4 w-4 animate-spin" /> Syncing…</>
-                : <><RotateCcw className="h-4 w-4" /> Sync GL Entries</>
-              }
-            </Button>
+            {!selectedPeriod && (
+              <>
+                <Button variant="outline" size="sm" onClick={load} disabled={loading} className="gap-2">
+                  <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
+                  Refresh
+                </Button>
+                <Button
+                  variant="outline" size="sm"
+                  onClick={handleSync} disabled={syncing}
+                  className="gap-2 border-blue-200 text-blue-700 hover:bg-blue-50"
+                >
+                  {syncing
+                    ? <><RefreshCw className="h-4 w-4 animate-spin" /> Syncing…</>
+                    : <><RotateCcw className="h-4 w-4" /> Sync GL Entries</>
+                  }
+                </Button>
+              </>
+            )}
           </div>
         </div>
 
-        {error && (
-          <div className="flex items-center gap-2 p-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700">
-            <AlertTriangle className="h-4 w-4 shrink-0" /> {error}
+        {/* Period selector tabs */}
+        {periods.length > 0 && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mr-1 flex items-center gap-1">
+              <History className="h-3.5 w-3.5" /> Period:
+            </span>
+            <button
+              onClick={() => setSelectedPeriod(null)}
+              className={cn(
+                "px-3 py-1.5 rounded-full text-xs font-semibold border transition-all",
+                !selectedPeriod
+                  ? "bg-[hsl(210,60%,25%)] text-white border-[hsl(210,60%,25%)]"
+                  : "bg-white text-muted-foreground border-gray-200 hover:border-gray-300 hover:text-foreground"
+              )}
+            >
+              Current
+            </button>
+            {periods.map((p) => (
+              <button
+                key={p.periodEnd}
+                onClick={() => setSelectedPeriod(p)}
+                className={cn(
+                  "px-3 py-1.5 rounded-full text-xs font-semibold border transition-all",
+                  selectedPeriod?.periodEnd === p.periodEnd
+                    ? "bg-amber-600 text-white border-amber-600"
+                    : "bg-white text-muted-foreground border-gray-200 hover:border-amber-300 hover:text-amber-700"
+                )}
+              >
+                {p.periodLabel}
+              </button>
+            ))}
           </div>
         )}
 
-        {loading ? (
+        {/* Historical period info card */}
+        {selectedPeriod && (
+          <div className="flex items-center justify-between p-3 rounded-xl border border-amber-100 bg-amber-50 text-sm">
+            <div className="flex items-center gap-3 text-amber-800">
+              <History className="h-4 w-4 shrink-0" />
+              <div>
+                <span className="font-semibold">Closing Trial Balance — {selectedPeriod.periodLabel}</span>
+                <span className="text-amber-600 ml-2 text-xs">
+                  {fmtDate(selectedPeriod.periodStart)} – {fmtDate(selectedPeriod.periodEnd)}
+                </span>
+                {selectedPeriod.closedByEmail && (
+                  <span className="text-amber-600 ml-2 text-xs">· Closed by {selectedPeriod.closedByEmail}</span>
+                )}
+              </div>
+            </div>
+            <button
+              onClick={() => setSelectedPeriod(null)}
+              className="text-xs text-amber-700 underline hover:no-underline"
+            >
+              Back to Current
+            </button>
+          </div>
+        )}
+
+        {activeError && (
+          <div className="flex items-center gap-2 p-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700">
+            <AlertTriangle className="h-4 w-4 shrink-0" /> {activeError}
+          </div>
+        )}
+
+        {activeLoading ? (
           <div className="flex items-center justify-center py-20">
             <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground opacity-40" />
           </div>
-        ) : data ? (
-          <>
-            {/* Balance banner */}
-            <BalanceBanner data={data} />
-
-            {/* GL Entry explainer */}
-            {data.glEntryCount === 0 && (
-              <div className="flex items-start gap-3 p-4 rounded-xl border border-amber-100 bg-amber-50 text-sm text-amber-800">
-                <Info className="h-4 w-4 mt-0.5 shrink-0" />
-                <span>
-                  No GL entries found yet. Click <strong>Sync GL Entries</strong> to generate double-entry records
-                  from all existing transactions, or new transactions will generate entries automatically going forward.
-                </span>
-              </div>
-            )}
-
-            {/* Column headers */}
-            {data.accounts.length > 0 && (
-              <div className="grid grid-cols-[1fr_auto_auto] text-[10px] font-bold uppercase tracking-widest text-muted-foreground px-5 pb-0.5">
-                <span>Account</span>
-                <span className="w-36 text-right text-blue-500">Debit</span>
-                <span className="w-36 text-right text-violet-500 ml-2 pr-5">Credit</span>
-              </div>
-            )}
-
-            {/* Account groups */}
-            <div className="space-y-3">
-              {TYPE_ORDER.map((type) => (
-                <AccountGroup key={type} type={type} accounts={grouped[type] ?? []} />
-              ))}
-            </div>
-
-            {/* Grand total row */}
-            {data.accounts.length > 0 && (
-              <div className={cn(
-                "rounded-xl border-2 px-5 py-4 flex items-center justify-between",
-                data.isBalanced ? "border-emerald-200 bg-emerald-50" : "border-red-200 bg-red-50"
-              )}>
-                <span className="font-bold text-base">
-                  {data.isBalanced ? "✓ Grand Totals" : "⚠ Grand Totals (Out of Balance)"}
-                </span>
-                <div className="flex items-center gap-12 font-bold tabular-nums text-base">
-                  <span className="text-blue-700 w-36 text-right">{fmt(data.grandTotalDebit)}</span>
-                  <span className="text-violet-700 w-36 text-right">{fmt(data.grandTotalCredit)}</span>
-                </div>
-              </div>
-            )}
-
-            {/* GAAP note */}
-            <p className="text-[11px] text-muted-foreground text-center pb-2">
-              Per GAAP double-entry accounting: Assets + Expenses = Liabilities + Equity + Revenue.
-              Every transaction generates at minimum two GL entries (bank side + category side). Total debits must equal total credits.
-            </p>
-          </>
+        ) : activeData ? (
+          <TrialBalanceBody data={activeData} />
         ) : null}
       </div>
     </AppLayout>
