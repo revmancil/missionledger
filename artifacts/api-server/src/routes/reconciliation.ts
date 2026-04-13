@@ -36,13 +36,14 @@ router.get("/", requireAuth, async (req, res) => {
 router.post("/", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
-    const { bankAccountId, statementDate, statementBalance } = req.body ?? {};
+    const { bankAccountId, statementDate, statementBalance, openingBalance: openingBalanceInput } = req.body ?? {};
     if (!bankAccountId || !statementDate || statementBalance === undefined)
       return res.status(400).json({ error: "bankAccountId, statementDate, statementBalance are required" });
 
     const stmtDate = new Date(statementDate);
 
-    // Opening balance: last completed recon's clearedBalance, or bank account opening balance
+    // Opening balance: always use last completed recon's clearedBalance when one exists.
+    // Otherwise fall back to the value the user entered (openingBalanceInput).
     const [lastRecon] = await db
       .select().from(reconciliations)
       .where(and(
@@ -56,9 +57,8 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
     let openingBalance = 0;
     if (lastRecon) {
       openingBalance = lastRecon.clearedBalance ?? 0;
-    } else {
-      const [bank] = await db.select().from(bankAccounts).where(eq(bankAccounts.id, bankAccountId));
-      openingBalance = (bank as any)?.openingBalance ?? 0;
+    } else if (openingBalanceInput !== undefined) {
+      openingBalance = parseFloat(openingBalanceInput) || 0;
     }
 
     // Void any prior IN_PROGRESS sessions for this bank account

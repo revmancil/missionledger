@@ -236,10 +236,11 @@ function HistoryScreen({
 
 // ── Setup Screen ──────────────────────────────────────────────────────────────
 function SetupScreen({
-  bankAccounts, onSubmit, onBack, saving, serverError,
+  bankAccounts, history, onSubmit, onBack, saving, serverError,
 }: {
   bankAccounts: BankAccount[];
-  onSubmit: (v: { bankAccountId: string; statementDate: string; statementBalance: string }) => void;
+  history: HistoryRecord[];
+  onSubmit: (v: { bankAccountId: string; statementDate: string; statementBalance: string; openingBalance: string }) => void;
   onBack: () => void;
   saving: boolean;
   serverError?: string;
@@ -247,9 +248,23 @@ function SetupScreen({
   const [bankAccountId, setBankAccountId] = useState(bankAccounts[0]?.id ?? "");
   const [statementDate, setStatementDate] = useState(format(new Date(), "yyyy-MM-dd"));
   const [statementBalance, setStatementBalance] = useState("");
+  const [openingBalance, setOpeningBalance] = useState("");
   const [err, setErr] = useState("");
 
   const selected = bankAccounts.find((b) => b.id === bankAccountId);
+
+  // Find the most recent COMPLETED reconciliation for the selected bank account
+  const lastCompleted = history
+    .filter((r) => r.bankAccountId === bankAccountId && r.status === "COMPLETED")
+    .sort((a, b) => new Date(b.statementDate).getTime() - new Date(a.statementDate).getTime())[0] ?? null;
+
+  const lockedOpening = lastCompleted !== null;
+  const lockedOpeningValue = lastCompleted ? String(lastCompleted.clearedBalance ?? 0) : null;
+
+  // Reset opening balance field when bank account changes
+  useEffect(() => {
+    setOpeningBalance(lockedOpeningValue ?? "");
+  }, [bankAccountId]);
 
   function submit() {
     if (!bankAccountId) { setErr("Please select a bank account"); return; }
@@ -257,8 +272,16 @@ function SetupScreen({
     if (!statementBalance || isNaN(parseFloat(statementBalance))) {
       setErr("Please enter the statement ending balance"); return;
     }
+    if (!lockedOpening && (openingBalance === "" || isNaN(parseFloat(openingBalance)))) {
+      setErr("Please enter the opening balance for this first reconciliation"); return;
+    }
     setErr("");
-    onSubmit({ bankAccountId, statementDate, statementBalance });
+    onSubmit({
+      bankAccountId,
+      statementDate,
+      statementBalance,
+      openingBalance: lockedOpening ? (lockedOpeningValue ?? "0") : openingBalance,
+    });
   }
 
   return (
@@ -304,6 +327,36 @@ function SetupScreen({
                 Ledger balance: <span className="font-semibold">{fmt(selected.currentBalance)}</span>
               </p>
             )}
+          </div>
+
+          {/* Opening Balance */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <Label className="text-sm font-semibold">Opening Balance</Label>
+              {lockedOpening && (
+                <span className="flex items-center gap-1 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+                  <Lock className="h-3 w-3" /> From previous reconciliation
+                </span>
+              )}
+            </div>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground font-medium">$</span>
+              <Input
+                type="number" step="0.01" placeholder="0.00"
+                value={lockedOpening ? (lockedOpeningValue ?? "") : openingBalance}
+                onChange={(e) => !lockedOpening && setOpeningBalance(e.target.value)}
+                readOnly={lockedOpening}
+                className={cn(
+                  "pl-7 h-11 text-lg font-semibold",
+                  lockedOpening && "bg-gray-50 text-muted-foreground cursor-not-allowed"
+                )}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground mt-1.5">
+              {lockedOpening
+                ? `Ending balance from your ${format(parseISO(lastCompleted!.statementDate), "MMM d, yyyy")} reconciliation.`
+                : "Enter the beginning balance from your bank statement (first reconciliation only)."}
+            </p>
           </div>
 
           <div>
@@ -692,7 +745,7 @@ export default function ReconciliationPage() {
     setPhase("workspace");
   }
 
-  async function handleSetupSubmit(vals: { bankAccountId: string; statementDate: string; statementBalance: string }) {
+  async function handleSetupSubmit(vals: { bankAccountId: string; statementDate: string; statementBalance: string; openingBalance: string }) {
     setSaving(true);
     setSaveError("");
     try {
@@ -792,6 +845,7 @@ export default function ReconciliationPage() {
         {phase === "setup" && (
           <SetupScreen
             bankAccounts={bankAccounts}
+            history={history}
             onSubmit={handleSetupSubmit}
             onBack={() => setPhase("history")}
             saving={saving}
