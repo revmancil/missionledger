@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
+import { useAuth } from "@/hooks/use-auth";
 import { useGetProfitLossReport, useGetBalanceSheetReport, useGetCashFlowReport, useGetFunds } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -179,6 +180,8 @@ interface PreparerData {
 type Tab = "financial" | "gl" | "journal" | "register" | "prep990";
 
 export default function ReportsPage() {
+  const { user } = useAuth();
+  const orgName = user?.companyName || "Your Organization";
   const currentYear = new Date().getFullYear();
   const [tab, setTab]             = useState<Tab>("financial");
   const [startDate, setStartDate] = useState(`${currentYear}-01-01`);
@@ -309,7 +312,7 @@ export default function ReportsPage() {
       doc.setTextColor(255, 255, 255);
       doc.setFont("helvetica", "bold");
       doc.setFontSize(16);
-      doc.text("MissionLedger", 40, 22);
+      doc.text(orgName, 40, 22);
       doc.setFontSize(11);
       doc.setFont("helvetica", "normal");
       doc.text(pageTitle, 40, 37);
