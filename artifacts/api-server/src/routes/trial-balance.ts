@@ -35,8 +35,8 @@ router.get("/", requireAuth, async (req, res) => {
         AND (ge.is_void IS NULL OR ge.is_void = false)
         AND (
           coa.coa_type NOT IN ('INCOME', 'EXPENSE')
-          OR ${closedUntil} IS NULL
-          OR ge.date > ${closedUntil}
+          OR ${closedUntil}::timestamptz IS NULL
+          OR ge.date > ${closedUntil}::timestamptz
         )
       GROUP BY ge.account_id, ge.account_code, ge.account_name, coa.coa_type
       ORDER BY ge.account_code
