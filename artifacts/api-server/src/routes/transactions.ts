@@ -446,7 +446,10 @@ router.get("/", requireAuth, async (req, res) => {
             date: gl.date instanceof Date ? gl.date.toISOString() : gl.date,
             payee: gl.description || "Journal Entry",
             amount: gl.amount,
-            type: gl.entryType as "DEBIT" | "CREDIT",
+            // GL convention is opposite to bank register convention for asset accounts:
+            // GL DEBIT to bank = increase = Deposit (register "CREDIT")
+            // GL CREDIT to bank = decrease = Payment (register "DEBIT")
+            type: gl.entryType === "DEBIT" ? "CREDIT" : "DEBIT",
             status: "CLEARED",
             checkNumber: null,
             referenceNumber: jeNumber,
