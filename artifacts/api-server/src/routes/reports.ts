@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, accounts, bankAccounts, chartOfAccounts, journalEntries, journalEntryLines, donations, expenses, budgets, budgetLines, glEntries, funds, transactions, transactionSplits } from "@workspace/db";
+import { db, accounts, chartOfAccounts, journalEntries, journalEntryLines, donations, expenses, budgets, budgetLines, glEntries, funds, transactions, transactionSplits } from "@workspace/db";
 import { eq, and, gte, lte, inArray, sql, isNotNull, isNull, ne } from "drizzle-orm";
 import { requireAuth } from "../lib/auth";
 import { sqlRows } from "../lib/sqlRows";
@@ -33,10 +33,17 @@ function parseAsOfDay(asOfDate: unknown): { ok: true; end: Date; ymd: string } |
   return { ok: true, end: b.to, ymd: b.ymd };
 }
 
+function hasReportBalance(amount: number, grossDebitsCredits: number): boolean {
+  return Math.abs(amount) >= 0.005 || grossDebitsCredits > 0.005;
+}
+
 // GET /reports/profit-loss  — Statement of Activities from GL entries
 router.get("/profit-loss", requireAuth, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
+    if (!companyId) {
+      return res.status(400).json({ error: "No organization in session. Refresh the page or sign in again." });
+    }
     const { startDate, endDate } = req.query;
 
     const range = parseReportRange(startDate, endDate);
@@ -60,16 +67,30 @@ router.get("/profit-loss", requireAuth, async (req, res) => {
         AND g.is_void = false
         AND g.date >= ${start}
         AND g.date <= ${endOfDay}
+      LEFT JOIN journal_entries je
+        ON je.id = g.journal_entry_id
+        AND je.status != 'VOID'
       WHERE c.company_id = ${companyId}
         AND c.is_active = true
         AND c.coa_type IN ('INCOME', 'EXPENSE')
+        AND (g.id IS NULL OR g.journal_entry_id IS NULL OR je.id IS NOT NULL)
       GROUP BY c.id, c.code, c.name, c.coa_type, c.sort_order
       ORDER BY c.sort_order, c.code
     `);
 
-    const rows = sqlRows(glRows).map((r) => {
+    type PlRow = {
+      accountId: string;
+      accountCode: string;
+      accountName: string;
+      accountType: string;
+      amount: number;
+      gross: number;
+      children: never[];
+    };
+    const rows: PlRow[] = sqlRows(glRows).map((r) => {
       const debit  = parseFloat(r.total_debit)  || 0;
       const credit = parseFloat(r.total_credit) || 0;
+      const gross = debit + credit;
       const amount = r.account_type === "INCOME" ? credit - debit : debit - credit;
       return {
         accountId:   r.account_id,
@@ -77,12 +98,22 @@ router.get("/profit-loss", requireAuth, async (req, res) => {
         accountName: r.account_name,
         accountType: r.account_type,
         amount,
+        gross,
         children: [],
       };
     });
 
-    const revenueRows  = rows.filter(r => r.accountType === "INCOME"   && r.amount !== 0);
-    const expenseRows  = rows.filter(r => r.accountType === "EXPENSE"  && r.amount !== 0);
+    const toLine = (r: PlRow) => ({
+      accountId: r.accountId,
+      accountCode: r.accountCode,
+      accountName: r.accountName,
+      accountType: r.accountType,
+      amount: r.amount,
+      children: [] as never[],
+    });
+
+    const revenueRows  = rows.filter((r) => r.accountType === "INCOME"   && hasReportBalance(r.amount, r.gross)).map(toLine);
+    const expenseRows  = rows.filter((r) => r.accountType === "EXPENSE"  && hasReportBalance(r.amount, r.gross)).map(toLine);
     const totalRevenue  = revenueRows.reduce((s, r) => s + r.amount, 0);
     const totalExpenses = expenseRows.reduce((s, r) => s + r.amount, 0);
 
@@ -144,28 +175,32 @@ router.get("/balance-sheet", requireAuth, async (req, res) => {
       ORDER BY c.sort_order, c.code
     `);
 
-    // ── 1b. Bank balance overrides using currentBalance ───────────────────────
-    // For banks with an explicit gl_account_id link, override the GL-derived balance
-    // with currentBalance (which includes both register transactions and JE GL entries).
-    // Banks without gl_account_id fall through to the raw GL balance from assetLiabRows.
-    const allBanksResult = await db
-      .select({
-        id: bankAccounts.id,
-        name: bankAccounts.name,
-        glAccountId: bankAccounts.glAccountId,
-        currentBalance: bankAccounts.currentBalance,
-      })
-      .from(bankAccounts)
-      .where(and(eq(bankAccounts.companyId, companyId), eq(bankAccounts.isActive, true)));
-
-    // Build map: COA account id → currentBalance (linked banks only)
-    const bankBalanceMap = new Map<string, number>();
-    for (const ba of allBanksResult) {
-      if (ba.glAccountId) {
-        const bal = Number(ba.currentBalance) || 0;
-        bankBalanceMap.set(ba.glAccountId, (bankBalanceMap.get(ba.glAccountId) || 0) + bal);
-      }
-    }
+    // ── 1b. Equity (chart) accounts — cumulative GL through as-of (all funds) ─
+    const equityCoaRows = await db.execute(sql`
+      SELECT
+        c.id              AS account_id,
+        c.code            AS account_code,
+        c.name            AS account_name,
+        c.coa_type        AS account_type,
+        c.sort_order      AS sort_order,
+        ROUND(COALESCE(SUM(CASE WHEN g.entry_type = 'DEBIT'  THEN g.amount ELSE 0 END), 0)::numeric, 2) AS total_debit,
+        ROUND(COALESCE(SUM(CASE WHEN g.entry_type = 'CREDIT' THEN g.amount ELSE 0 END), 0)::numeric, 2) AS total_credit
+      FROM chart_of_accounts c
+      LEFT JOIN gl_entries g
+        ON g.account_id = c.id
+        AND g.company_id = ${companyId}
+        AND g.is_void = false
+        AND g.date <= ${asOfEnd}
+      LEFT JOIN journal_entries je
+        ON je.id = g.journal_entry_id
+        AND je.status != 'VOID'
+      WHERE c.company_id = ${companyId}
+        AND c.is_active = true
+        AND c.coa_type = 'EQUITY'
+        AND (g.id IS NULL OR g.journal_entry_id IS NULL OR je.id IS NOT NULL)
+      GROUP BY c.id, c.code, c.name, c.coa_type, c.sort_order
+      ORDER BY c.sort_order, c.code
+    `);
 
     // ── 2. Net Assets split by fund type (EQUITY + INCOME/EXPENSE by fund) ───
     // Join GL entries with funds table to get the fund_type for each entry.
@@ -201,20 +236,57 @@ router.get("/balance-sheet", requireAuth, async (req, res) => {
       ORDER BY c.sort_order, c.code
     `);
 
-    // Map asset/liability rows — override GL balance with currentBalance for linked bank accounts
+    // Map asset/liability — pure GL through as-of (matches account ledger running balance at that date)
     const assetLiabMapped = sqlRows(assetLiabRows).map((r) => {
       const debit  = parseFloat(r.total_debit)  || 0;
       const credit = parseFloat(r.total_credit) || 0;
-      let amount = r.account_type === "ASSET" ? debit - credit : credit - debit;
-      // If this COA account is linked to a bank, use currentBalance (includes JE GL entries)
-      if (r.account_type === "ASSET" && bankBalanceMap.has(r.account_id)) {
-        amount = bankBalanceMap.get(r.account_id)!;
-      }
-      return { accountId: r.account_id, accountCode: r.account_code, accountName: r.account_name, accountType: r.account_type, amount, isBankLinked: bankBalanceMap.has(r.account_id) };
+      const gross = debit + credit;
+      const amount = r.account_type === "ASSET" ? debit - credit : credit - debit;
+      return {
+        accountId: r.account_id,
+        accountCode: r.account_code,
+        accountName: r.account_name,
+        accountType: r.account_type,
+        amount,
+        gross,
+      };
     });
 
-    const assets      = assetLiabMapped.filter(r => r.accountType === "ASSET"     && r.amount !== 0);
-    const liabilities = assetLiabMapped.filter(r => r.accountType === "LIABILITY" && r.amount !== 0);
+    const equityMapped = sqlRows(equityCoaRows).map((r) => {
+      const debit  = parseFloat(r.total_debit)  || 0;
+      const credit = parseFloat(r.total_credit) || 0;
+      const gross = debit + credit;
+      const amount = credit - debit; // EQUITY credit-normal
+      return { accountId: r.account_id, accountCode: r.account_code, accountName: r.account_name, amount, gross };
+    });
+
+    const assets = assetLiabMapped
+      .filter((r) => r.accountType === "ASSET" && hasReportBalance(r.amount, r.gross))
+      .map((r) => ({
+        accountId: r.accountId,
+        accountCode: r.accountCode,
+        accountName: r.accountName,
+        accountType: r.accountType,
+        amount: r.amount,
+      }));
+    const liabilities = assetLiabMapped
+      .filter((r) => r.accountType === "LIABILITY" && hasReportBalance(r.amount, r.gross))
+      .map((r) => ({
+        accountId: r.accountId,
+        accountCode: r.accountCode,
+        accountName: r.accountName,
+        accountType: r.accountType,
+        amount: r.amount,
+      }));
+    const equityLines = equityMapped
+      .filter((r) => hasReportBalance(r.amount, r.gross))
+      .map((r) => ({
+        accountId: r.accountId,
+        accountCode: r.accountCode,
+        accountName: r.accountName,
+        amount: r.amount,
+        children: [] as never[],
+      }));
 
     // Map net asset rows — accumulate by (account, fund_type)
     // Separate into unrestricted (fund_type='UNRESTRICTED') vs restricted (all others)
@@ -297,9 +369,9 @@ router.get("/balance-sheet", requireAuth, async (req, res) => {
       netIncome,
       // Reconciling item for uncategorized bank transactions
       unpostedActivity,
-      // Legacy fields kept for compatibility
-      equity: [],
-      totalEquity: totalUnrestrictedNetAssets,
+      // Equity chart accounts (GL cumulative through as-of); legacy totalEquity ≈ sum of equity lines + P&L in net assets
+      equity: equityLines,
+      totalEquity: equityLines.reduce((s, r) => s + r.amount, 0),
       // Balance check (should always be 0 after unpostedActivity is applied)
       difference: totalAssets - (totalLiabilities + totalNetAssets + unpostedActivity),
     });

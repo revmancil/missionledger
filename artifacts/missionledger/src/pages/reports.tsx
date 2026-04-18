@@ -481,6 +481,30 @@ export default function ReportsPage() {
 
     y = (doc as any).lastAutoTable.finalY + 10;
 
+    // Equity (chart) — cumulative GL through as-of
+    const eqLines = bsData?.equity ?? [];
+    if (eqLines.length > 0) {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.setTextColor(30, 64, 108);
+      doc.text("Equity (chart of accounts)", 40, y + 6);
+      y += 14;
+      autoTable(doc, {
+        startY: y,
+        head: [["Account Code", "Account Name", "Balance"]],
+        body: [
+          ...eqLines.map((e: any) => [e.accountCode, e.accountName, formatCurrency(e.amount)]),
+          [{ content: "Subtotal — equity accounts", colSpan: 2, styles: { fontStyle: "bold" } }, { content: formatCurrency(bsData?.totalEquity ?? 0), styles: { fontStyle: "bold" } }],
+        ],
+        theme: "striped",
+        headStyles: { fillColor: [6, 95, 70], fontSize: 9 },
+        bodyStyles: { fontSize: 9 },
+        columnStyles: { 2: { halign: "right" } },
+        margin: { left: 40, right: 40 },
+      });
+      y = (doc as any).lastAutoTable.finalY + 10;
+    }
+
     // Net Assets
     doc.setFont("helvetica", "bold");
     doc.setFontSize(10);
@@ -1035,13 +1059,30 @@ export default function ReportsPage() {
                         <div>
                           <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Net Assets</h4>
 
+                          {(bs?.equity ?? []).length > 0 && (
+                            <div className="mb-2">
+                              <p className="text-xs font-medium text-muted-foreground mb-0.5">Equity (chart of accounts)</p>
+                              <p className="text-[10px] text-muted-foreground/90 mb-1">Cumulative GL balances through the as-of date (all funds).</p>
+                              {(bs?.equity ?? []).map((e: { accountId: string; accountCode: string; accountName: string; amount: number }) => (
+                                <div key={e.accountId} className="flex justify-between py-0.5 border-b border-border/30 pl-2">
+                                  <span className="text-muted-foreground">{e.accountCode} {e.accountName}</span>
+                                  <span className="tabular-nums">{formatCurrency(e.amount)}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
                           {/* Unrestricted */}
                           <div className="mb-1">
                             <p className="text-xs font-medium text-emerald-700 mb-0.5">Unrestricted (General &amp; Payroll)</p>
-                            <div className="flex justify-between py-0.5 border-b border-border/30 pl-2">
-                              <span className="text-muted-foreground">Equity Balances</span>
-                              <span className="tabular-nums">{formatCurrency((bs?.totalUnrestrictedNetAssets ?? 0) - (bs?.unrestrictedNetIncome ?? 0))}</span>
-                            </div>
+                            {(bs?.equity ?? []).length === 0 ? (
+                              <div className="flex justify-between py-0.5 border-b border-border/30 pl-2">
+                                <span className="text-muted-foreground">Equity Balances</span>
+                                <span className="tabular-nums">{formatCurrency((bs?.totalUnrestrictedNetAssets ?? 0) - (bs?.unrestrictedNetIncome ?? 0))}</span>
+                              </div>
+                            ) : (
+                              <p className="text-[10px] text-muted-foreground/90 pl-2 mb-1">Unrestricted net position (by fund) including income &amp; expense through the as-of date.</p>
+                            )}
                             {(bs?.unrestrictedNetIncome ?? 0) !== 0 && (
                               <div className="flex justify-between py-0.5 border-b border-border/30 pl-2">
                                 <span className="text-muted-foreground">Current Period Net Income</span>
