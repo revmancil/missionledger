@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { useGetBankAccounts, useCreateBankAccount, useDeleteBankAccount, useGetFunds } from "@workspace/api-client-react";
+import { useChartOfAccounts } from "@/hooks/use-chart-of-accounts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -264,6 +265,80 @@ function PlaidLinkButtonWithToken({ account, onSuccess }: { account: any; onSucc
         <><Link2 className="w-3 h-3 mr-1" /> Link Bank via Plaid</>
       )}
     </Button>
+  );
+}
+
+/** Pick which Chart of Accounts ASSET (cash) row this bank register updates — e.g. link RBFCU to 1015. */
+function BankGlAccountLink({
+  account,
+  onSaved,
+}: {
+  account: {
+    id: string;
+    name: string;
+    accountType: string;
+    lastFour?: string | null;
+    currentBalance: number;
+    glAccountId?: string | null;
+    isActive?: boolean;
+  };
+  onSaved: () => void;
+}) {
+  const { data: coa = [], isLoading } = useChartOfAccounts();
+  const [saving, setSaving] = useState(false);
+
+  const assets = coa
+    .filter((a) => a.type === "ASSET" && a.isActive)
+    .sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
+
+  async function saveGlLink(e: React.ChangeEvent<HTMLSelectElement>) {
+    const v = e.target.value;
+    const glAccountId = v === "" ? null : v;
+    setSaving(true);
+    try {
+      const res = await authJsonFetch(`/api/bank-accounts/${account.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: account.name,
+          accountType: account.accountType,
+          currentBalance: account.currentBalance,
+          lastFour: account.lastFour ?? null,
+          glAccountId,
+          isActive: account.isActive !== false,
+        }),
+      });
+      const j = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(j.error || "Could not save link");
+      toast.success("Chart of Accounts link saved.");
+      onSaved();
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Could not save link");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="mt-3 pt-3 border-t border-border/60 space-y-1.5">
+      <Label className="text-xs font-medium">Linked GL account (Chart of Accounts)</Label>
+      <select
+        className="flex h-9 w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs"
+        disabled={isLoading || saving}
+        value={account.glAccountId ?? ""}
+        onChange={saveGlLink}
+      >
+        <option value="">— Select cash account (e.g. 1015) —</option>
+        {assets.map((a) => (
+          <option key={a.id} value={a.id}>
+            {a.code} — {a.name}
+          </option>
+        ))}
+      </select>
+      <p className="text-[10px] text-muted-foreground leading-snug">
+        Choose the same asset account you use on the chart for this bank so the register and general ledger stay in sync.
+      </p>
+    </div>
   );
 }
 
@@ -570,6 +645,13 @@ export default function BankAccountsPage() {
                     {formatCurrency(account.currentBalance)}
                   </p>
                 </div>
+                <BankGlAccountLink
+                  account={account}
+                  onSaved={() => {
+                    refreshAccounts();
+                    queryClient.invalidateQueries({ queryKey: ["chart-of-accounts"] });
+                  }}
+                />
                 <div className="mt-3 flex flex-col gap-2">
                   <div className="flex gap-2 flex-wrap">
                     <span className={`inline-flex items-center px-2 py-1 rounded-md text-xs font-medium ${account.isActive ? "bg-emerald-100 text-emerald-700" : "bg-muted text-muted-foreground"}`}>
