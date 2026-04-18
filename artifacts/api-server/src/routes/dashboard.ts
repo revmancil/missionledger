@@ -44,7 +44,7 @@ router.get("/", requireAuth, async (req, res) => {
       activeBudgets,
       allBudgetLines,
     ] = await Promise.all([
-      db.select({ id: bankAccounts.id, name: bankAccounts.name }).from(bankAccounts)
+      db.select({ id: bankAccounts.id, name: bankAccounts.name, currentBalance: bankAccounts.currentBalance }).from(bankAccounts)
         .where(eq(bankAccounts.companyId, companyId)),
       db.select({ id: chartOfAccounts.id, code: chartOfAccounts.code, name: chartOfAccounts.name, isActive: chartOfAccounts.isActive, type: chartOfAccounts.type })
         .from(chartOfAccounts)
@@ -67,17 +67,8 @@ router.get("/", requireAuth, async (req, res) => {
 
     const activeTx = allTx.filter((t) => !t.isVoid);
 
-    // ── KPI 1: Total Cash — computed from actual bank register transactions ──
-    // (bank_accounts.currentBalance lags behind; summing non-void transactions
-    //  gives the real current balance per account)
-    const txBalByBank = new Map<string, number>();
-    for (const ba of allBankAccounts) txBalByBank.set(ba.id, 0);
-    for (const t of activeTx) {
-      if (!t.bankAccountId) continue;
-      const cur = txBalByBank.get(t.bankAccountId) ?? 0;
-      txBalByBank.set(t.bankAccountId, cur + (t.type === "CREDIT" ? t.amount : -t.amount));
-    }
-    const totalCash = [...txBalByBank.values()].reduce((s, b) => s + b, 0);
+    // ── KPI 1: Total Cash — use currentBalance which includes transactions + JE GL entries ──
+    const totalCash = allBankAccounts.reduce((s, ba) => s + (Number(ba.currentBalance) || 0), 0);
 
     // ── KPI 2: Net Monthly Income (this month) ───────────────────────────────
     const monthStart = new Date(thisYear, thisMonth, 1);
