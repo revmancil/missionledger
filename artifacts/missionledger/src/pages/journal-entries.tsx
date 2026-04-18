@@ -41,6 +41,7 @@ import {
   History,
   ChevronDown,
   ChevronRight,
+  Ban,
 } from "lucide-react";
 import { cn, formatCurrency, formatDate } from "@/lib/utils";
 
@@ -653,6 +654,8 @@ function HistoryPanel({
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [repostingId, setRepostingId] = useState<string | null>(null);
+  const [voidingId, setVoidingId] = useState<string | null>(null);
+  const [confirmVoidId, setConfirmVoidId] = useState<string | null>(null);
 
   const handleRepost = async (id: string) => {
     setRepostingId(id);
@@ -669,6 +672,25 @@ function HistoryPanel({
       toast.error("Failed to re-post journal entry");
     } finally {
       setRepostingId(null);
+    }
+  };
+
+  const handleVoid = async (id: string) => {
+    setVoidingId(id);
+    try {
+      const res = await api(`${BASE}api/journal-entries/${id}/void`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        toast.success("Journal entry voided");
+        onRefresh();
+      } else {
+        toast.error(data?.error ?? "Failed to void journal entry");
+      }
+    } catch {
+      toast.error("Failed to void journal entry");
+    } finally {
+      setVoidingId(null);
+      setConfirmVoidId(null);
     }
   };
 
@@ -767,19 +789,34 @@ function HistoryPanel({
                       <TableCell>
                         <div className="flex items-center gap-1">
                           {st === "POSTED" && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 w-7 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
-                              title="Regenerate GL entries"
-                              disabled={repostingId === entry.id}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleRepost(entry.id);
-                              }}
-                            >
-                              <RotateCcw className={cn("w-3.5 h-3.5", repostingId === entry.id && "animate-spin")} />
-                            </Button>
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 w-7 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                                title="Regenerate GL entries"
+                                disabled={repostingId === entry.id}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleRepost(entry.id);
+                                }}
+                              >
+                                <RotateCcw className={cn("w-3.5 h-3.5", repostingId === entry.id && "animate-spin")} />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 w-7 p-0 text-orange-600 hover:text-orange-700 hover:bg-orange-50"
+                                title="Void journal entry"
+                                disabled={voidingId === entry.id}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setConfirmVoidId(entry.id);
+                                }}
+                              >
+                                <Ban className="w-3.5 h-3.5" />
+                              </Button>
+                            </>
                           )}
                           {canDelete && (
                             <Button
@@ -832,6 +869,30 @@ function HistoryPanel({
               })}
             </TableBody>
           </Table>
+
+          {/* Void confirmation dialog */}
+          <Dialog open={!!confirmVoidId} onOpenChange={(open) => { if (!open) setConfirmVoidId(null); }}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Void Journal Entry</DialogTitle>
+                <DialogDescription>
+                  This will void the journal entry and reverse all of its GL entries. The entry will remain in history as Void. This action cannot be undone.
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setConfirmVoidId(null)}>
+                  Cancel
+                </Button>
+                <Button
+                  variant="destructive"
+                  disabled={!!voidingId}
+                  onClick={() => confirmVoidId && handleVoid(confirmVoidId)}
+                >
+                  {voidingId ? "Voiding…" : "Void Entry"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
 
           {/* Delete confirmation dialog */}
           <Dialog open={!!confirmDeleteId} onOpenChange={(open) => { if (!open) setConfirmDeleteId(null); }}>
