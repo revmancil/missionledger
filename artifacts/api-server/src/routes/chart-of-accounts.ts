@@ -182,23 +182,26 @@ router.get("/", requireAuth, async (req, res) => {
       .where(eq(chartOfAccounts.companyId, companyId))
       .orderBy(asc(chartOfAccounts.sortOrder), asc(chartOfAccounts.code));
 
-    // Aggregate balances from gl_entries per account
+    // Aggregate balances from gl_entries per account — same void-JE guard as balance sheet / reports
+    // so asset, liability, and equity lines match Statement of Financial Position.
     const balanceRows = await db.execute(sql`
       SELECT
-        account_id,
-        SUM(CASE WHEN entry_type = 'DEBIT'  THEN amount ELSE 0 END) AS total_debits,
-        SUM(CASE WHEN entry_type = 'CREDIT' THEN amount ELSE 0 END) AS total_credits
-      FROM gl_entries
-      WHERE company_id = ${companyId}
-        AND (is_void IS NULL OR is_void = false)
-      GROUP BY account_id
+        g.account_id AS account_id,
+        SUM(CASE WHEN g.entry_type = 'DEBIT'  THEN g.amount ELSE 0 END) AS total_debits,
+        SUM(CASE WHEN g.entry_type = 'CREDIT' THEN g.amount ELSE 0 END) AS total_credits
+      FROM gl_entries g
+      LEFT JOIN journal_entries je ON je.id = g.journal_entry_id AND je.status <> 'VOID'
+      WHERE g.company_id = ${companyId}
+        AND (g.is_void IS NULL OR g.is_void = false)
+        AND (g.journal_entry_id IS NULL OR je.id IS NOT NULL)
+      GROUP BY g.account_id
     `);
 
     const balanceMap: Record<string, { debits: number; credits: number }> = {};
-    for (const row of (balanceRows as any).rows ?? balanceRows) {
+    for (const row of sqlRows(balanceRows) as { account_id: string; total_debits: unknown; total_credits: unknown }[]) {
       balanceMap[row.account_id] = {
-        debits: parseFloat(row.total_debits ?? "0"),
-        credits: parseFloat(row.total_credits ?? "0"),
+        debits: parseFloat(String(row.total_debits ?? "0")),
+        credits: parseFloat(String(row.total_credits ?? "0")),
       };
     }
 

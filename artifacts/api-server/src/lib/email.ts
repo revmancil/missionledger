@@ -17,6 +17,53 @@ async function send(opts: { to: string; subject: string; html: string }): Promis
   await resend.emails.send({ from: FROM_EMAIL, to: [opts.to], subject: opts.subject, html: opts.html });
 }
 
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/** Sent when an admin adds a new user to an existing organization (distinct from org registration welcome). */
+export async function sendTeamMemberWelcomeEmail(opts: {
+  to: string;
+  organizationName: string;
+  userId: string;
+  loginUrl: string;
+}): Promise<void> {
+  const org = escapeHtml(opts.organizationName);
+  const uid = escapeHtml(opts.userId);
+  const base = escapeHtml(opts.loginUrl);
+  await send({
+    to: opts.to,
+    subject: `You've been added to ${opts.organizationName} on MissionLedger`,
+    html: `
+      <div style="font-family: sans-serif; max-width: 520px; margin: 0 auto; padding: 32px 24px; color: #1a1a2e;">
+        <div style="margin-bottom: 28px;">
+          <span style="font-size: 20px; font-weight: 700; color: #1b3a6b;">MissionLedger</span>
+        </div>
+        <h2 style="font-size: 22px; font-weight: 600; margin: 0 0 12px;">Welcome to the team</h2>
+        <p style="color: #555; line-height: 1.6; margin: 0 0 16px;">
+          <strong>${org}</strong> has created an account for you. Sign in with your <strong>User ID</strong> and the password your administrator set.
+        </p>
+        <p style="color: #555; line-height: 1.6; margin: 0 0 8px;">
+          Your User ID: <strong style="font-family: monospace; color: #1b3a6b;">${uid}</strong>
+        </p>
+        <p style="margin: 20px 0 24px;">
+          <a href="${base}"
+            style="display: inline-block; background: #1b3a6b; color: #fff; text-decoration: none; padding: 12px 28px; border-radius: 6px; font-weight: 600; font-size: 15px;">
+            Open MissionLedger
+          </a>
+        </p>
+        <p style="color: #999; font-size: 13px; margin: 28px 0 0; line-height: 1.5;">
+          If you were not expecting this, you can ignore this email or contact your organization administrator.
+        </p>
+      </div>
+    `,
+  });
+}
+
 export async function sendWelcomeEmail(toEmail: string, orgName: string, trialDays = 14): Promise<void> {
   await send({
     to: toEmail,

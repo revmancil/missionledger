@@ -2,6 +2,8 @@ import { Router } from "express";
 import { db, users, companies, organizationUsers, pool } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, requireAdmin, hashPassword } from "../lib/auth";
+import { sendTeamMemberWelcomeEmail } from "../lib/email";
+import { getPublicFrontendBase } from "../lib/frontendUrl";
 
 const router = Router();
 
@@ -185,6 +187,22 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
       isPrimary: legacyRole === "MASTER_ADMIN",
       isActive: true,
     }).onConflictDoNothing();
+
+    const emailStr = String(created.email ?? "");
+    const isPlaceholderEmail = emailStr.endsWith("@local.missionledger");
+    if (!isPlaceholderEmail && emailStr.includes("@")) {
+      const [co] = await db
+        .select({ name: companies.name })
+        .from(companies)
+        .where(eq(companies.id, companyId))
+        .limit(1);
+      sendTeamMemberWelcomeEmail({
+        to: emailStr,
+        organizationName: co?.name ?? "Your organization",
+        userId: created.userId,
+        loginUrl: getPublicFrontendBase(req),
+      }).catch((err) => console.error("Team welcome email failed:", err));
+    }
 
     res.status(201).json({
       id: created.id,

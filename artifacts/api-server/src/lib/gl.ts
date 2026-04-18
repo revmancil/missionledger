@@ -221,6 +221,24 @@ export async function generateGlEntries(
       .where(eq(transactionSplits.transactionId, txId))
       .orderBy(transactionSplits.sortOrder);
 
+    // Cash line: use header fund, or when every categorized split shares one fund, tag cash with that fund too.
+    let bankFundId: string | null = tx.fundId ?? null;
+    let bankFundName: string | null = txFundName;
+    const splitLineFunds = splits
+      .filter((sp) => sp.chartAccountId)
+      .map((sp) => (sp as { fundId?: string | null }).fundId ?? tx.fundId ?? null)
+      .filter((id): id is string => id != null && String(id).length > 0);
+    const uniqueSplitFunds = [...new Set(splitLineFunds)];
+    if (uniqueSplitFunds.length === 1) {
+      bankFundId = uniqueSplitFunds[0];
+      if (bankFundId !== tx.fundId) {
+        const [bf] = await db.select({ name: funds.name }).from(funds).where(eq(funds.id, bankFundId));
+        bankFundName = bf?.name ?? null;
+      } else {
+        bankFundName = txFundName;
+      }
+    }
+
     // Bank gets the NET amount (transaction.amount)
     if (bankCoa) {
       const bankEntryType = tx.type === "CREDIT" ? "DEBIT" : "CREDIT";
@@ -232,8 +250,8 @@ export async function generateGlEntries(
         entryType: bankEntryType,
         amount: Math.abs(tx.amount),
         description: tx.payee,
-        fundId: tx.fundId ?? null,
-        fundName: txFundName,
+        fundId: bankFundId,
+        fundName: bankFundName,
         functionalType: null,
       });
     }
