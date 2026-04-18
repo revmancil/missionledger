@@ -30,17 +30,47 @@ function mapUiRoleToLegacy(role: string | null | undefined): "MASTER_ADMIN" | "A
 }
 
 async function isPrimaryAdmin(userId: string, companyId: string): Promise<boolean> {
-  const [row] = await db
+  // Primary check: explicit isPrimary flag in organization_users
+  const [ouRow] = await db
     .select({ id: organizationUsers.id })
     .from(organizationUsers)
     .where(and(eq(organizationUsers.userId, userId), eq(organizationUsers.companyId, companyId), eq(organizationUsers.isPrimary, true)))
     .limit(1);
-  return !!row;
+  if (ouRow) return true;
+
+  // Fallback: users.role = 'MASTER_ADMIN' covers legacy accounts that pre-date the
+  // organization_users table or whose ou row has isPrimary = false due to a data gap.
+  const [uRow] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(and(eq(users.id, userId), eq(users.companyId, companyId), eq(users.role, "MASTER_ADMIN")))
+    .limit(1);
+  return !!uRow;
 }
 
 async function countPrimaryAdmins(companyId: string): Promise<number> {
+  // Count org_users rows marked as primary, plus any MASTER_ADMIN users who have no
+  // org_users row (legacy accounts pre-dating that table).
   const { rows } = await pool.query(
-    `SELECT COUNT(*) AS cnt FROM organization_users WHERE company_id = $1 AND is_primary = true AND is_active = true`,
+    `SELECT COUNT(*) AS cnt
+     FROM (
+       SELECT ou.user_id
+         FROM organization_users ou
+        WHERE ou.company_id = $1
+          AND ou.is_primary = true
+          AND ou.is_active  = true
+       UNION
+       SELECT u.id
+         FROM users u
+        WHERE u.company_id = $1
+          AND u.role        = 'MASTER_ADMIN'
+          AND u.is_active   = true
+          AND NOT EXISTS (
+                SELECT 1 FROM organization_users ou2
+                 WHERE ou2.user_id   = u.id
+                   AND ou2.company_id = $1
+              )
+     ) sub`,
     [companyId]
   );
   return parseInt(rows[0]?.cnt ?? "0", 10);

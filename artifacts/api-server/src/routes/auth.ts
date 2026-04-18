@@ -143,6 +143,18 @@ router.post("/login", async (req, res) => {
 
     const effectiveRole = orgMembership?.role ?? user.role;
 
+    // Self-heal: ensure an organization_users row exists for this user so that
+    // isPrimary-based checks work even for accounts created before that table existed.
+    if (!orgMembership) {
+      await db.insert(organizationUsers).values({
+        userId: user.id,
+        companyId: company.id,
+        role: effectiveRole as any,
+        isPrimary: effectiveRole === "MASTER_ADMIN",
+        isActive: true,
+      }).onConflictDoNothing();
+    }
+
     const authUser: AuthUser = {
       id: user.id,
       userId: user.userId,
