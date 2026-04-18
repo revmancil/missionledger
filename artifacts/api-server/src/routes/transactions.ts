@@ -2,6 +2,7 @@ import { Router, type Request } from "express";
 import {
   db, transactions, transactionSplits, chartOfAccounts,
   bankAccounts, funds, vendors, companies, journalEntryLines, donations,
+  glEntries, journalEntries,
 } from "@workspace/db";
 import { eq, and, inArray, sql, ne } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
@@ -343,12 +344,93 @@ router.get("/", requireAuth, async (req, res) => {
     const lookups = await getLookups(companyId);
     const closedUntil = await getClosedUntil(companyId);
 
+    const serialized: any[] = all.map((tx) => ({
+      ...serializeTx(tx, splitsByTx[tx.id] ?? [], lookups),
+      isClosed: isInClosedPeriod(tx.date, closedUntil),
+      source: "TRANSACTION",
+    }));
+
+    // Merge JE GL entries that hit the selected bank account's GL account
+    if (bankAccountId) {
+      const [bank] = await db
+        .select({ glAccountId: bankAccounts.glAccountId })
+        .from(bankAccounts)
+        .where(and(eq(bankAccounts.id, bankAccountId as string), eq(bankAccounts.companyId, companyId)));
+
+      if (bank?.glAccountId) {
+        // Fetch GL entries from JEs hitting this bank's GL account
+        const jeGlRows = await db
+          .select({
+            id: glEntries.id,
+            date: glEntries.date,
+            amount: glEntries.amount,
+            entryType: glEntries.entryType,
+            description: glEntries.description,
+            journalEntryId: glEntries.journalEntryId,
+            fundId: glEntries.fundId,
+            fundName: glEntries.fundName,
+            createdAt: glEntries.createdAt,
+          })
+          .from(glEntries)
+          .where(
+            and(
+              eq(glEntries.accountId, bank.glAccountId),
+              eq(glEntries.companyId, companyId),
+              eq(glEntries.sourceType, "MANUAL_JE"),
+              eq(glEntries.isVoid, false),
+            )
+          );
+
+        // Resolve JE entry numbers for display
+        const jeIds = [...new Set(jeGlRows.map(r => r.journalEntryId).filter(Boolean) as string[])];
+        const jeMap: Record<string, string> = {};
+        if (jeIds.length > 0) {
+          const jeList = await db
+            .select({ id: journalEntries.id, entryNumber: journalEntries.entryNumber, description: journalEntries.description })
+            .from(journalEntries)
+            .where(inArray(journalEntries.id, jeIds));
+          for (const je of jeList) jeMap[je.id] = je.entryNumber;
+        }
+
+        // Map each GL entry to a transaction-compatible row
+        for (const gl of jeGlRows) {
+          const jeNumber = gl.journalEntryId ? (jeMap[gl.journalEntryId] ?? null) : null;
+          serialized.push({
+            id: `gl-${gl.id}`,
+            date: gl.date instanceof Date ? gl.date.toISOString() : gl.date,
+            payee: gl.description || "Journal Entry",
+            amount: gl.amount,
+            type: gl.entryType as "DEBIT" | "CREDIT",
+            status: "CLEARED",
+            checkNumber: null,
+            referenceNumber: jeNumber,
+            memo: gl.description || null,
+            isVoid: false,
+            isSplit: false,
+            isClosed: isInClosedPeriod(gl.date, closedUntil),
+            journalEntryId: gl.journalEntryId ?? null,
+            bankAccountId: bankAccountId as string,
+            chartAccount: null,
+            fund: gl.fundId ? { id: gl.fundId, name: gl.fundName ?? "" } : null,
+            bankAccount: null,
+            vendor: null,
+            splits: [],
+            source: "JOURNAL_ENTRY",
+            createdAt: gl.createdAt instanceof Date ? gl.createdAt.toISOString() : gl.createdAt,
+          });
+        }
+
+        // Re-sort: newest date first, then by createdAt
+        serialized.sort((a, b) => {
+          const d = new Date(b.date).getTime() - new Date(a.date).getTime();
+          return d !== 0 ? d : new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        });
+      }
+    }
+
     const payload = {
       closedUntil: toIsoStringOrNull(closedUntil),
-      transactions: all.map((tx) => ({
-        ...serializeTx(tx, splitsByTx[tx.id] ?? [], lookups),
-        isClosed: isInClosedPeriod(tx.date, closedUntil),
-      })),
+      transactions: serialized,
     };
     res.setHeader("Content-Type", "application/json; charset=utf-8");
     res.send(stringifyJsonForApi(payload));

@@ -98,6 +98,7 @@ interface Transaction {
   fund: Fund | null; bankAccount: BankAccount | null; vendor: Vendor | null;
   splits: Array<{ id: string; chartAccountId: string | null; vendorId: string | null; amount: number; memo: string | null; chartAccount: ChartAccount | null; vendor: Vendor | null; }>;
   runningBalance?: number;
+  source?: "TRANSACTION" | "JOURNAL_ENTRY";
 }
 type StatusFilter = "ALL" | "UNCLEARED" | "CLEARED" | "RECONCILED" | "VOID";
 
@@ -1277,7 +1278,13 @@ export default function BankRegisterPage() {
                               <FileText className="h-4 w-4" />
                             </button>
                           )}
-                          {tx.isClosed ? (
+                          {tx.source === "JOURNAL_ENTRY" ? (
+                            // JE-sourced rows are read-only — managed from the Journal Entries page
+                            <span title="Posted from Journal Entry — edit on the Journal Entries page"
+                              className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-indigo-50 text-indigo-600 border border-indigo-100">
+                              JE
+                            </span>
+                          ) : tx.isClosed ? (
                             <span title={`Period locked through ${closedUntil ? format(parseISO(closedUntil), "MM/dd/yyyy") : ""}`}
                               className="p-1 text-amber-500">
                               <Lock className="h-4 w-4" />
