@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { formatCurrency } from "@/lib/utils";
-import { Plus, Trash2, Banknote, CreditCard, Link2, Link2Off, RefreshCw, ArrowLeftRight } from "lucide-react";
+import { Plus, Trash2, Banknote, CreditCard, Link2, Link2Off, RefreshCw, ArrowLeftRight, Building2 } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
