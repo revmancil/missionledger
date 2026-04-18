@@ -101,6 +101,12 @@ router.post("/transfer", requireAuth, requireAdmin, async (req, res) => {
         error: "Inter-bank transfers require both linked GL accounts to be ASSET (cash) accounts.",
       });
     }
+    if (fromBank.glAccountId === toBank.glAccountId) {
+      return res.status(400).json({
+        error:
+          "Both banks are linked to the same chart account. Link each bank to a different cash account so the transfer posts to the right GL lines.",
+      });
+    }
 
     const txDate = new Date(`${String(date).slice(0, 10)}T12:00:00.000Z`);
     const closedUntil = await getClosedUntil(companyId);

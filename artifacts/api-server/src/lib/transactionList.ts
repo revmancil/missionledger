@@ -36,6 +36,7 @@ function normalizeSplitRow(r: Record<string, unknown>): any {
   return {
     ...r,
     vendorId: r.vendorId ?? null,
+    fundId: r.fundId ?? null,
     memo: r.memo ?? null,
     functionalType: r.functionalType ?? null,
     sortOrder: typeof r.sortOrder === "number" ? r.sortOrder : 0,
@@ -106,6 +107,13 @@ const splitRowBase = {
 } as const;
 
 const splitRowWithVendor = {
+  ...splitRowBase,
+  vendorId: transactionSplits.vendorId,
+  fundId: transactionSplits.fundId,
+} as const;
+
+/** Legacy DBs without `fund_id` on transaction_splits. */
+const splitRowWithVendorNoFund = {
   ...splitRowBase,
   vendorId: transactionSplits.vendorId,
 } as const;
@@ -184,10 +192,11 @@ async function selectSplitsChunkRaw(chunk: string[]): Promise<any[]> {
 async function selectSplitsForChunk(chunk: string[]): Promise<any[]> {
   // Try minimal column sets early: many prod DBs omit vendor_id, memo, functional_type, or sort_order.
   const attempts: Array<
-    | { kind: "drizzle"; sel: typeof splitRowWithVendor; order: ReturnType<typeof asc>[] }
+    | { kind: "drizzle"; sel: typeof splitRowWithVendor | typeof splitRowWithVendorNoFund | typeof splitRowBase | typeof splitNoFunctional | typeof splitNoMemoWithSort | typeof splitNoSortOrder | typeof splitMinimal; order: ReturnType<typeof asc>[] }
     | { kind: "raw" }
   > = [
   { kind: "drizzle", sel: splitRowWithVendor, order: [txIdAsc, sortAsc] },
+  { kind: "drizzle", sel: splitRowWithVendorNoFund, order: [txIdAsc, sortAsc] },
   { kind: "drizzle", sel: splitRowBase, order: [txIdAsc, sortAsc] },
   { kind: "drizzle", sel: splitNoFunctional, order: [txIdAsc, sortAsc] },
   { kind: "drizzle", sel: splitNoMemoWithSort, order: [txIdAsc, sortAsc] },

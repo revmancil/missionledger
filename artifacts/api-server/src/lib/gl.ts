@@ -139,6 +139,7 @@ export async function generateGlEntries(
 
   // 6. Resolve bank account's COA entry
   let bankCoa: (typeof allCoa)[0] | null = null;
+  let bankHadGlLink = false;
 
   if (tx.bankAccountId) {
     const [bank] = await db
@@ -147,12 +148,19 @@ export async function generateGlEntries(
       .where(eq(bankAccounts.id, tx.bankAccountId));
 
     if (bank?.glAccountId) {
+      bankHadGlLink = true;
       bankCoa = coaById[bank.glAccountId] ?? null;
+      if (!bankCoa) {
+        console.error(
+          `[GL] bank_accounts.gl_account_id ${bank.glAccountId} not found in chart_of_accounts — tx=${txId}. Fix the bank→GL link.`
+        );
+        return;
+      }
     }
   }
 
-  // Fallback: 1010 → 1000 → first ASSET
-  if (!bankCoa) {
+  // Fallback only when the bank record has no GL link (legacy / uncategorized registers)
+  if (!bankCoa && !bankHadGlLink) {
     bankCoa =
       coaByCode["1010"] ??
       coaByCode["1000"] ??
@@ -165,6 +173,12 @@ export async function generateGlEntries(
   // ── Simple transaction ────────────────────────────────────────────────────
   if (!tx.isSplit) {
     const catCoa = tx.chartAccountId ? coaById[tx.chartAccountId] ?? null : null;
+    if (tx.chartAccountId && !catCoa) {
+      console.error(
+        `[GL] transactions.chart_account_id ${tx.chartAccountId} not found in chart_of_accounts — tx=${txId}`
+      );
+      return;
+    }
 
     // Bank side (no functional type)
     if (bankCoa) {

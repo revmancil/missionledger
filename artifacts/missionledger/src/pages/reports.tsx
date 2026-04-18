@@ -196,10 +196,7 @@ export default function ReportsPage() {
     const d = new Date(Date.UTC(y, m, 0));
     return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
   }
-  const now = new Date();
-  const [bsAsOfDate, setBsAsOfDate] = useState(
-    endOfMonth(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`)
-  );
+  const [bsAsOfDate, setBsAsOfDate] = useState(`${currentYear}-12-31`);
   const bsQueryDate = bsAsOfDate;
 
   // Transaction register extra filters
@@ -245,6 +242,7 @@ export default function ReportsPage() {
 
   const handleApply = () => {
     setApplied({ startDate, endDate });
+    setBsAsOfDate(endDate);
     setAppliedSearch({ search, minAmount: minAmt, maxAmount: maxAmt });
   };
 
@@ -252,6 +250,7 @@ export default function ReportsPage() {
     setStartDate(start);
     setEndDate(end);
     setApplied({ startDate: start, endDate: end });
+    setBsAsOfDate(end);
   };
 
   const today = new Date();
@@ -793,6 +792,10 @@ export default function ReportsPage() {
     : null;
 
   const bs = balanceSheet as any;
+  const balanceSheetAsOfYmd =
+    bs && typeof bs.asOfDate === "string" && /^(\d{4})-(\d{2})-(\d{2})$/.test(bs.asOfDate)
+      ? bs.asOfDate
+      : bsQueryDate;
 
   return (
     <AppLayout title="Financial Reports">
@@ -999,9 +1002,9 @@ export default function ReportsPage() {
                     <div className="flex items-center justify-between">
                       <div>
                         <CardTitle className="text-base">Statement of Financial Position</CardTitle>
-                        <p className="text-xs text-muted-foreground mt-0.5">As of {formatDate(bsQueryDate)}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">As of {formatDate(balanceSheetAsOfYmd)}</p>
                         <p className="text-[11px] text-muted-foreground/90 leading-snug mt-1">
-                          Includes general ledger through this date. Set as-of on or after your opening balance date if totals look too low.
+                          GL balances through this date (same basis as Chart of Accounts → account ledger). Use Apply or YTD so this as-of matches your period end, or set the date here. Bank register totals can differ until activity is categorized and posted to GL.
                         </p>
                       </div>
                       <div className="flex items-center gap-2">

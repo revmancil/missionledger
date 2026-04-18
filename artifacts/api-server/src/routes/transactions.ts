@@ -155,6 +155,9 @@ function serializeTx(
       vendor: s.vendorId
         ? serializeNestedEntity(vendorMap[s.vendorId] as Record<string, unknown>)
         : null,
+      fund: s.fundId
+        ? serializeNestedEntity(fundMap[s.fundId] as Record<string, unknown>)
+        : null,
     })),
   };
 }
@@ -902,6 +905,7 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
             companyId,
             chartAccountId: s.chartAccountId ?? null,
             vendorId: s.vendorId ?? null,
+            fundId: s.fundId ?? null,
             amount: s.amount,
             memo: s.memo ?? null,
             functionalType: s.functionalType ?? null,
