@@ -350,51 +350,60 @@ router.get("/", requireAuth, async (req, res) => {
       source: "TRANSACTION",
     }));
 
-    // Merge JE GL entries that hit the selected bank account's GL account
-    if (bankAccountId) {
-      const [bank] = await db
-        .select({ glAccountId: bankAccounts.glAccountId })
-        .from(bankAccounts)
-        .where(and(eq(bankAccounts.id, bankAccountId as string), eq(bankAccounts.companyId, companyId)));
+    // Merge JE GL entries for all bank accounts (register filters client-side by bank)
+    const allBanks = await db
+      .select({ id: bankAccounts.id, glAccountId: bankAccounts.glAccountId })
+      .from(bankAccounts)
+      .where(eq(bankAccounts.companyId, companyId));
 
-      if (bank?.glAccountId) {
-        // Fetch GL entries from JEs hitting this bank's GL account
-        const jeGlRows = await db
-          .select({
-            id: glEntries.id,
-            date: glEntries.date,
-            amount: glEntries.amount,
-            entryType: glEntries.entryType,
-            description: glEntries.description,
-            journalEntryId: glEntries.journalEntryId,
-            fundId: glEntries.fundId,
-            fundName: glEntries.fundName,
-            createdAt: glEntries.createdAt,
-          })
-          .from(glEntries)
-          .where(
-            and(
-              eq(glEntries.accountId, bank.glAccountId),
-              eq(glEntries.companyId, companyId),
-              eq(glEntries.sourceType, "MANUAL_JE"),
-              eq(glEntries.isVoid, false),
-            )
-          );
+    // Build glAccountId → bankAccountId map for all banks that have a GL account linked
+    const glToBankMap: Record<string, string> = {};
+    for (const b of allBanks) {
+      if (b.glAccountId) glToBankMap[b.glAccountId] = b.id;
+    }
 
+    if (Object.keys(glToBankMap).length > 0) {
+      // Fetch all MANUAL_JE GL entries that hit any bank's GL account
+      const jeGlRows = await db
+        .select({
+          id: glEntries.id,
+          date: glEntries.date,
+          amount: glEntries.amount,
+          entryType: glEntries.entryType,
+          description: glEntries.description,
+          journalEntryId: glEntries.journalEntryId,
+          accountId: glEntries.accountId,
+          fundId: glEntries.fundId,
+          fundName: glEntries.fundName,
+          createdAt: glEntries.createdAt,
+        })
+        .from(glEntries)
+        .where(
+          and(
+            eq(glEntries.companyId, companyId),
+            eq(glEntries.sourceType, "MANUAL_JE"),
+            eq(glEntries.isVoid, false),
+          )
+        );
+
+      // Only keep rows that hit a known bank GL account
+      const bankJeRows = jeGlRows.filter(r => glToBankMap[r.accountId]);
+
+      if (bankJeRows.length > 0) {
         // Resolve JE entry numbers for display
-        const jeIds = [...new Set(jeGlRows.map(r => r.journalEntryId).filter(Boolean) as string[])];
+        const jeIds = [...new Set(bankJeRows.map(r => r.journalEntryId).filter(Boolean) as string[])];
         const jeMap: Record<string, string> = {};
         if (jeIds.length > 0) {
           const jeList = await db
-            .select({ id: journalEntries.id, entryNumber: journalEntries.entryNumber, description: journalEntries.description })
+            .select({ id: journalEntries.id, entryNumber: journalEntries.entryNumber })
             .from(journalEntries)
             .where(inArray(journalEntries.id, jeIds));
           for (const je of jeList) jeMap[je.id] = je.entryNumber;
         }
 
-        // Map each GL entry to a transaction-compatible row
-        for (const gl of jeGlRows) {
+        for (const gl of bankJeRows) {
           const jeNumber = gl.journalEntryId ? (jeMap[gl.journalEntryId] ?? null) : null;
+          const bankId = glToBankMap[gl.accountId];
           serialized.push({
             id: `gl-${gl.id}`,
             date: gl.date instanceof Date ? gl.date.toISOString() : gl.date,
@@ -409,7 +418,7 @@ router.get("/", requireAuth, async (req, res) => {
             isSplit: false,
             isClosed: isInClosedPeriod(gl.date, closedUntil),
             journalEntryId: gl.journalEntryId ?? null,
-            bankAccountId: bankAccountId as string,
+            bankAccountId: bankId,
             chartAccount: null,
             fund: gl.fundId ? { id: gl.fundId, name: gl.fundName ?? "" } : null,
             bankAccount: null,
