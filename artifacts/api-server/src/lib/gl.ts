@@ -118,6 +118,9 @@ export async function generateGlEntries(
   // Generating TRANSACTION GL here would duplicate or distort the ledger (e.g. trial-balance /sync).
   if (tx.journalEntryId) return;
 
+  // 3c. Mirror leg of an inter-bank transfer — GL is posted on the paired transaction only.
+  if (tx.excludeFromGl) return;
+
   // 4. Resolve fund name (denormalised onto entries)
   let txFundName: string | null = null;
   if (tx.fundId) {

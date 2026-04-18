@@ -1,14 +1,15 @@
 import { useState, useCallback, useEffect } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
-import { useGetBankAccounts, useCreateBankAccount, useDeleteBankAccount } from "@workspace/api-client-react";
+import { useGetBankAccounts, useCreateBankAccount, useDeleteBankAccount, useGetFunds } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { formatCurrency } from "@/lib/utils";
-import { Plus, Trash2, Banknote, CreditCard, Link2, Link2Off, RefreshCw, Building2 } from "lucide-react";
+import { Plus, Trash2, Banknote, CreditCard, Link2, Link2Off, RefreshCw, ArrowLeftRight } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 import { usePlaidLink } from "react-plaid-link";
 import { useQueryClient } from "@tanstack/react-query";
 import { authJsonFetch } from "@/lib/auth-fetch";
@@ -266,12 +267,191 @@ function PlaidLinkButtonWithToken({ account, onSuccess }: { account: any; onSucc
   );
 }
 
+function TransferBetweenBanksDialog({
+  bankAccounts,
+  open,
+  onOpenChange,
+  onSuccess,
+}: {
+  bankAccounts: Array<{ id: string; name: string; glAccountId?: string | null }>;
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  onSuccess: () => void;
+}) {
+  const { data: funds = [] } = useGetFunds();
+  const today = new Date().toISOString().slice(0, 10);
+  const [fromId, setFromId] = useState("");
+  const [toId, setToId] = useState("");
+  const [amount, setAmount] = useState("");
+  const [dateStr, setDateStr] = useState(today);
+  const [memo, setMemo] = useState("");
+  const [fundId, setFundId] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const fromBank = bankAccounts.find((b) => b.id === fromId);
+  const toBank = bankAccounts.find((b) => b.id === toId);
+  const glLinked = !!(fromBank?.glAccountId && toBank?.glAccountId);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!fromId || !toId || fromId === toId) {
+      toast.error("Choose two different bank accounts.");
+      return;
+    }
+    const amt = parseFloat(amount);
+    if (!Number.isFinite(amt) || amt <= 0) {
+      toast.error("Enter a positive amount.");
+      return;
+    }
+    if (!glLinked) {
+      toast.error("Both accounts must have a linked GL cash account (Chart of Accounts).");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const res = await authJsonFetch("/api/bank-accounts/transfer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fromBankAccountId: fromId,
+          toBankAccountId: toId,
+          amount: amt,
+          date: dateStr,
+          memo: memo.trim() || undefined,
+          fundId: fundId || undefined,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error((json as { error?: string }).error || "Transfer failed");
+      toast.success((json as { message?: string }).message ?? "Transfer recorded.");
+      onSuccess();
+      onOpenChange(false);
+      setAmount("");
+      setMemo("");
+      setFundId("");
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Transfer failed");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[440px]">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <ArrowLeftRight className="w-4 h-4" />
+            Transfer between bank accounts
+          </DialogTitle>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-3 pt-2">
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            Moves cash on the general ledger from one linked cash account to another and adds matching lines in both bank registers.
+            Each bank must be linked to an ASSET account on the Chart of Accounts (e.g. 1010, 1020).
+          </p>
+          <div className="space-y-1">
+            <Label htmlFor="xfer-from">From</Label>
+            <select
+              id="xfer-from"
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              value={fromId}
+              onChange={(e) => setFromId(e.target.value)}
+              required
+            >
+              <option value="">Select account…</option>
+              {bankAccounts.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                  {!b.glAccountId ? " (no GL link)" : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="xfer-to">To</Label>
+            <select
+              id="xfer-to"
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              value={toId}
+              onChange={(e) => setToId(e.target.value)}
+              required
+            >
+              <option value="">Select account…</option>
+              {bankAccounts.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                  {!b.glAccountId ? " (no GL link)" : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label htmlFor="xfer-amt">Amount</Label>
+              <Input
+                id="xfer-amt"
+                type="number"
+                step="0.01"
+                min="0.01"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                required
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="xfer-date">Date</Label>
+              <Input id="xfer-date" type="date" value={dateStr} onChange={(e) => setDateStr(e.target.value)} required />
+            </div>
+          </div>
+          {(funds as { id: string; name: string }[]).length > 0 && (
+            <div className="space-y-1">
+              <Label htmlFor="xfer-fund">Fund (optional)</Label>
+              <select
+                id="xfer-fund"
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                value={fundId}
+                onChange={(e) => setFundId(e.target.value)}
+              >
+                <option value="">—</option>
+                {(funds as { id: string; name: string }[]).map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          <div className="space-y-1">
+            <Label htmlFor="xfer-memo">Memo (optional)</Label>
+            <Input id="xfer-memo" value={memo} onChange={(e) => setMemo(e.target.value)} placeholder="e.g. Open RBFCU account" />
+          </div>
+          {fromBank && toBank && !glLinked && (
+            <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-2 py-1.5">
+              Link both banks to cash accounts on the Chart of Accounts before transferring.
+            </p>
+          )}
+          <div className="flex justify-end gap-2 pt-2">
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={submitting || !glLinked}>
+              {submitting ? "Recording…" : "Record transfer"}
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function BankAccountsPage() {
   const queryClient = useQueryClient();
   const { data: bankAccounts = [], isLoading } = useGetBankAccounts();
   const createBankAccount = useCreateBankAccount();
   const deleteBankAccount = useDeleteBankAccount();
   const [open, setOpen] = useState(false);
+  const [transferOpen, setTransferOpen] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -300,7 +480,20 @@ export default function BankAccountsPage() {
 
   return (
     <AppLayout title="Bank Accounts">
-      <div className="flex justify-end mb-6">
+      <div className="flex justify-end gap-2 mb-6 flex-wrap">
+        <TransferBetweenBanksDialog
+          bankAccounts={bankAccounts as { id: string; name: string; glAccountId?: string | null }[]}
+          open={transferOpen}
+          onOpenChange={setTransferOpen}
+          onSuccess={() => {
+            refreshAccounts();
+            queryClient.invalidateQueries({ queryKey: ["/api/transactions"] });
+          }}
+        />
+        <Button variant="outline" className="shadow-sm" onClick={() => setTransferOpen(true)}>
+          <ArrowLeftRight className="w-4 h-4 mr-2" />
+          Transfer between banks
+        </Button>
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
             <Button className="shadow-md shadow-primary/20"><Plus className="w-4 h-4 mr-2" /> Add Account</Button>

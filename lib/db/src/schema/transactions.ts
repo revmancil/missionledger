@@ -27,6 +27,10 @@ export const transactions = pgTable("transactions", {
   donorName: text("donor_name"),
   functionalType: text("functional_type"), // 990 tag: PROGRAM_SERVICE | MANAGEMENT_GENERAL | FUNDRAISING
   transactionFingerprint: text("transaction_fingerprint"), // duplicate-detection: "{amount}_{date}_{payee}"
+  /** When true, GL is not generated for this row (paired with a transfer leg that owns the double-entry). */
+  excludeFromGl: boolean("exclude_from_gl").notNull().default(false),
+  /** Other bank-register transaction id for a two-leg inter-account transfer. */
+  transferPairTransactionId: text("transfer_pair_transaction_id"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

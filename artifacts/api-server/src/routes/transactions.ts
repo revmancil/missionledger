@@ -993,21 +993,38 @@ router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
       });
     }
 
-    const [updated] = await db
+    const pairId = existing.transferPairTransactionId;
+    const idsToVoid = pairId ? [existing.id, pairId] : [existing.id];
+
+    // GL is only posted on the non–excludeFromGl leg of a bank transfer pair
+    const glSourceId =
+      existing.excludeFromGl && pairId ? pairId : existing.id;
+
+    const updatedRows = await db
       .update(transactions)
       .set({ isVoid: true, status: "VOID", updatedAt: new Date() })
-      .where(and(eq(transactions.id, req.params.id), eq(transactions.companyId, companyId)))
+      .where(and(eq(transactions.companyId, companyId), inArray(transactions.id, idsToVoid)))
       .returning();
-    if (!updated) return res.status(404).json({ error: "Not found" });
+    if (!updatedRows.length) return res.status(404).json({ error: "Not found" });
 
-    // Void the GL entries for this transaction
-    voidGlEntries(req.params.id, companyId).catch((e) =>
+    voidGlEntries(glSourceId, companyId).catch((e) =>
       console.error("[GL] void error:", e)
     );
-    // Keep bank account balance in sync
-    recomputeBankBalance(existing.bankAccountId, companyId).catch((e) =>
-      console.error("[Balance] delete sync error:", e)
-    );
+
+    const bankIds = new Set<string>();
+    if (existing.bankAccountId) bankIds.add(existing.bankAccountId);
+    if (pairId) {
+      const [sib] = await db
+        .select()
+        .from(transactions)
+        .where(and(eq(transactions.id, pairId), eq(transactions.companyId, companyId)));
+      if (sib?.bankAccountId) bankIds.add(sib.bankAccountId);
+    }
+    for (const bid of bankIds) {
+      recomputeBankBalance(bid, companyId).catch((e) =>
+        console.error("[Balance] delete sync error:", e)
+      );
+    }
 
     const { id: userId3, email: userEmail3, name: userName3 } = (req as any).user;
     logAudit({
