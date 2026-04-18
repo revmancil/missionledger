@@ -141,54 +141,42 @@ router.get("/balance-sheet", requireAuth, async (req, res) => {
       ORDER BY c.sort_order, c.code
     `);
 
-    // ── 1b. Bank-register override for bank-linked asset accounts ─────────────
-    // For any COA account that is linked to a bank account we compute:
-    //   balance = OB GL net (OPENING_BALANCE source only, posted entries) +
-    //             net of all non-void bank register transactions up to asOfDate
-    // This way ALL imported transactions (categorized or not) are reflected in
-    // the cash balance, not just the three that made it into the GL.
-    const bankRegisterRows = await db.execute(sql`
-      SELECT
-        ba.gl_account_id,
-        ba.name AS bank_account_name,
-        COALESCE((
-          SELECT ROUND((
-            SUM(CASE WHEN g.entry_type = 'DEBIT'  THEN g.amount ELSE 0 END) -
-            SUM(CASE WHEN g.entry_type = 'CREDIT' THEN g.amount ELSE 0 END)
-          )::numeric, 2)
-          FROM gl_entries g
-          JOIN journal_entries je ON je.id = g.journal_entry_id
-          WHERE g.account_id = ba.gl_account_id
-            AND g.company_id = ${companyId}
-            AND g.is_void = false
-            AND je.status = 'POSTED'
-            AND g.source_type = 'OPENING_BALANCE'
-            AND g.date <= ${asOfEnd}
-        ), 0) AS ob_balance,
-        COALESCE((
-          SELECT ROUND((
-            SUM(CASE WHEN t.transaction_type = 'CREDIT' THEN t.amount ELSE 0 END) -
-            SUM(CASE WHEN t.transaction_type = 'DEBIT'  THEN t.amount ELSE 0 END)
-          )::numeric, 2)
-          FROM transactions t
-          WHERE t.bank_account_id = ba.id
-            AND t.is_void = false
-            AND t.payee != 'Opening Balance'
-            AND t.date <= ${asOfEnd}
-        ), 0) AS register_net
-      FROM bank_accounts ba
-      WHERE ba.company_id = ${companyId}
-        AND ba.gl_account_id IS NOT NULL
-    `);
+    // ── 1b. Bank account balances: use currentBalance as single source of truth ──
+    // currentBalance is maintained by recomputeBankBalanceFromTransactions and includes
+    // both register transactions AND manual JE GL entries. This covers all banks —
+    // including those without a linked gl_account_id — so every bank account appears
+    // in the statement with the correct balance.
+    const allBanksResult = await db
+      .select({
+        id: bankAccounts.id,
+        name: bankAccounts.name,
+        glAccountId: bankAccounts.glAccountId,
+        currentBalance: bankAccounts.currentBalance,
+      })
+      .from(bankAccounts)
+      .where(and(eq(bankAccounts.companyId, companyId), eq(bankAccounts.isActive, true)));
 
-    // Build a map: gl_account_id → register-based balance
-    const bankBalanceMap = new Map<string, number>();
-    for (const row of sqlRows(bankRegisterRows) as any[]) {
-      const ob  = parseFloat(row.ob_balance)     || 0;
-      const net = parseFloat(row.register_net)   || 0;
-      const existing = bankBalanceMap.get(row.gl_account_id) || 0;
-      bankBalanceMap.set(row.gl_account_id, existing + ob + net);
+    // COA account IDs that are directly linked to a bank — these will be replaced
+    // in the asset list by the bank's own currentBalance line.
+    const linkedCoaIds = new Set(allBanksResult.filter(b => b.glAccountId).map(b => b.glAccountId!));
+
+    // For unlinked banks, all their GL entries went to the fallback COA account (1010/1000/first ASSET).
+    // Identify that fallback account and exclude it from the COA list to avoid double-counting.
+    const unlinkedBanks = allBanksResult.filter(b => !b.glAccountId);
+    let fallbackCoaId: string | null = null;
+    if (unlinkedBanks.length > 0) {
+      const fallbackRows = await db.execute(sql`
+        SELECT id FROM chart_of_accounts
+        WHERE company_id = ${companyId} AND is_active = true AND coa_type = 'ASSET'
+        ORDER BY CASE code WHEN '1010' THEN 0 WHEN '1000' THEN 1 ELSE 2 END, sort_order ASC
+        LIMIT 1
+      `);
+      fallbackCoaId = (sqlRows(fallbackRows)[0] as any)?.id ?? null;
+      if (fallbackCoaId) linkedCoaIds.add(fallbackCoaId);
     }
+
+    // Set of all COA IDs replaced by bank lines (used to exclude them below)
+    const excludedCoaIds = linkedCoaIds;
 
     // ── 2. Net Assets split by fund type (EQUITY + INCOME/EXPENSE by fund) ───
     // Join GL entries with funds table to get the fund_type for each entry.
@@ -224,19 +212,32 @@ router.get("/balance-sheet", requireAuth, async (req, res) => {
       ORDER BY c.sort_order, c.code
     `);
 
-    // Map asset/liability rows — override GL balance with bank register for bank-linked accounts
+    // Map asset/liability rows — skip COA accounts that are replaced by bank lines
     const assetLiabMapped = sqlRows(assetLiabRows).map((r) => {
+      // Bank-owned COA accounts are replaced below by per-bank currentBalance lines
+      if (r.account_type === "ASSET" && excludedCoaIds.has(r.account_id)) return null;
       const debit  = parseFloat(r.total_debit)  || 0;
       const credit = parseFloat(r.total_credit) || 0;
-      let amount = r.account_type === "ASSET" ? debit - credit : credit - debit;
-      // If this account is linked to a bank account use the register-based balance
-      if (r.account_type === "ASSET" && bankBalanceMap.has(r.account_id)) {
-        amount = bankBalanceMap.get(r.account_id)!;
-      }
-      return { accountId: r.account_id, accountCode: r.account_code, accountName: r.account_name, accountType: r.account_type, amount, isBankLinked: bankBalanceMap.has(r.account_id) };
-    });
+      const amount = r.account_type === "ASSET" ? debit - credit : credit - debit;
+      return { accountId: r.account_id, accountCode: r.account_code, accountName: r.account_name, accountType: r.account_type as string, amount, isBankLinked: false };
+    }).filter((r): r is NonNullable<typeof r> => r !== null);
 
-    const assets      = assetLiabMapped.filter(r => r.accountType === "ASSET"     && r.amount !== 0);
+    // One line per bank account using currentBalance — covers linked AND unlinked banks
+    const bankAssetLines = allBanksResult
+      .map(ba => ({
+        accountId: `bank-${ba.id}`,
+        accountCode: "",
+        accountName: ba.name,
+        accountType: "ASSET",
+        amount: Number(ba.currentBalance) || 0,
+        isBankLinked: true,
+      }))
+      .filter(b => b.amount !== 0);
+
+    const assets      = [
+      ...assetLiabMapped.filter(r => r.accountType === "ASSET"     && r.amount !== 0),
+      ...bankAssetLines,
+    ];
     const liabilities = assetLiabMapped.filter(r => r.accountType === "LIABILITY" && r.amount !== 0);
 
     // Map net asset rows — accumulate by (account, fund_type)

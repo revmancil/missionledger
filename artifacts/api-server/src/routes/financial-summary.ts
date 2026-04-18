@@ -18,8 +18,11 @@ router.get("/", requireAuth, async (req, res) => {
     const ytdStart = new Date(now.getFullYear(), 0, 1);
 
     const [allBankAccounts, allTx, allFunds] = await Promise.all([
-      db.select({ id: bankAccounts.id, name: bankAccounts.name }).from(bankAccounts)
-        .where(eq(bankAccounts.companyId, companyId)),
+      db.select({
+        id: bankAccounts.id,
+        name: bankAccounts.name,
+        currentBalance: bankAccounts.currentBalance,
+      }).from(bankAccounts).where(eq(bankAccounts.companyId, companyId)),
       db.select({
         isVoid: transactions.isVoid,
         bankAccountId: transactions.bankAccountId,
@@ -34,21 +37,14 @@ router.get("/", requireAuth, async (req, res) => {
 
     const activeTx = allTx.filter((t) => !t.isVoid);
 
-    // ── Total cash (sum across all bank accounts) ────────────────────────────
-    const txBalByBank = new Map<string, number>();
-    for (const ba of allBankAccounts) txBalByBank.set(ba.id, 0);
-    for (const t of activeTx) {
-      if (!t.bankAccountId) continue;
-      const cur = txBalByBank.get(t.bankAccountId) ?? 0;
-      txBalByBank.set(t.bankAccountId, cur + (t.type === "CREDIT" ? t.amount : -t.amount));
-    }
-    const totalCash = [...txBalByBank.values()].reduce((s, b) => s + b, 0);
+    // ── Total cash: use currentBalance which includes both transactions and JE GL entries ──
+    const totalCash = allBankAccounts.reduce((s, ba) => s + (Number(ba.currentBalance) || 0), 0);
 
     // ── Per-bank balances ────────────────────────────────────────────────────
     const bankBalances = allBankAccounts.map((ba) => ({
       id: ba.id,
       name: ba.name,
-      balance: Math.round((txBalByBank.get(ba.id) ?? 0) * 100) / 100,
+      balance: Math.round((Number(ba.currentBalance) || 0) * 100) / 100,
     }));
 
     // ── YTD revenue & expenses ───────────────────────────────────────────────
