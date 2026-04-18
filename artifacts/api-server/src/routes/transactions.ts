@@ -1,6 +1,6 @@
 import { Router, type Request } from "express";
 import {
-  db, transactions, transactionSplits, chartOfAccounts,
+  db, transactions, transactionSplits, chartOfAccounts, accounts,
   bankAccounts, funds, vendors, companies, journalEntryLines, donations,
   glEntries, journalEntries,
 } from "@workspace/db";
@@ -356,10 +356,47 @@ router.get("/", requireAuth, async (req, res) => {
       .from(bankAccounts)
       .where(eq(bankAccounts.companyId, companyId));
 
-    // Build glAccountId → bankAccountId map for all banks that have a GL account linked
+    // Build glAccountId → bankAccountId map for all banks
     const glToBankMap: Record<string, string> = {};
+    const banksWithoutGlAccount: { id: string }[] = [];
     for (const b of allBanks) {
-      if (b.glAccountId) glToBankMap[b.glAccountId] = b.id;
+      if (b.glAccountId) {
+        glToBankMap[b.glAccountId] = b.id;
+      } else {
+        banksWithoutGlAccount.push(b);
+      }
+    }
+
+    // For banks without a linked GL account, map ALL ASSET-type account IDs (both COA and
+    // legacy accounts table) that aren't claimed by another bank. This is necessary because:
+    // - New JEs use chart_of_accounts IDs (form fetches /api/chart-of-accounts)
+    // - Old JEs created before the form fix use legacy accounts table IDs
+    // Both produce GL entries with accountId = <that table's UUID>; we must cover both.
+    if (banksWithoutGlAccount.length > 0) {
+      const firstUnlinkedBankId = banksWithoutGlAccount[0].id;
+      const claimedIds = new Set(allBanks.filter(b => b.glAccountId).map(b => b.glAccountId!));
+
+      // COA ASSET accounts
+      const allCoa = await db
+        .select({ id: chartOfAccounts.id, type: chartOfAccounts.type })
+        .from(chartOfAccounts)
+        .where(eq(chartOfAccounts.companyId, companyId));
+      for (const coa of allCoa) {
+        if (coa.type === "ASSET" && !claimedIds.has(coa.id) && !glToBankMap[coa.id]) {
+          glToBankMap[coa.id] = firstUnlinkedBankId;
+        }
+      }
+
+      // Legacy ASSET accounts (for JEs created before the COA migration)
+      const allLegacy = await db
+        .select({ id: accounts.id, type: accounts.type })
+        .from(accounts)
+        .where(eq(accounts.companyId, companyId));
+      for (const a of allLegacy) {
+        if (a.type === "ASSET" && !claimedIds.has(a.id) && !glToBankMap[a.id]) {
+          glToBankMap[a.id] = firstUnlinkedBankId;
+        }
+      }
     }
 
     if (Object.keys(glToBankMap).length > 0) {
