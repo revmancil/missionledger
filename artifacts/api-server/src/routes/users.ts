@@ -221,6 +221,48 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
+// POST /users/:id/send-welcome-email — resend team welcome (same template as on user create)
+router.post("/:id/send-welcome-email", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { companyId } = (req as any).user;
+    const mismatch = assertExpectedCompany(req, companyId);
+    if (mismatch) return res.status(409).json({ error: mismatch });
+
+    const [target] = await db
+      .select()
+      .from(users)
+      .where(and(eq(users.id, req.params.id), eq(users.companyId, companyId)))
+      .limit(1);
+    if (!target) return res.status(404).json({ error: "User not found" });
+
+    const emailStr = String(target.email ?? "");
+    const isPlaceholderEmail = emailStr.endsWith("@local.missionledger");
+    if (isPlaceholderEmail || !emailStr.includes("@")) {
+      return res.status(400).json({
+        error: "This user has no deliverable email. Add a real email address on the account first.",
+      });
+    }
+
+    const [co] = await db
+      .select({ name: companies.name })
+      .from(companies)
+      .where(eq(companies.id, companyId))
+      .limit(1);
+
+    await sendTeamMemberWelcomeEmail({
+      to: emailStr,
+      organizationName: co?.name ?? "Your organization",
+      userId: target.userId,
+      loginUrl: getPublicFrontendBase(req),
+    });
+
+    res.json({ success: true, message: "Welcome email sent." });
+  } catch (error) {
+    console.error("Send welcome email error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId, id: currentUserId } = (req as any).user;

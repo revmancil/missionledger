@@ -5,8 +5,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
+import { Mail } from "lucide-react";
 import { authJsonFetch, readJsonSafe } from "@/lib/auth-fetch";
 import { apiUrl } from "@/lib/api-base";
+
+function hasDeliverableEmail(email: string): boolean {
+  const e = String(email ?? "").trim();
+  return e.includes("@") && !e.endsWith("@local.missionledger");
+}
 
 type UiRole = "PRIMARY_ADMIN" | "ADMIN" | "USER" | "BOARD";
 
@@ -43,6 +49,7 @@ export default function AdminUsersPage() {
   const [saving, setSaving] = useState(false);
   const [companySaving, setCompanySaving] = useState(false);
   const [form, setForm] = useState({ name: "", userId: "", email: "", password: "", role: "USER" as UiRole });
+  const [welcomeSendingId, setWelcomeSendingId] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
@@ -167,6 +174,25 @@ export default function AdminUsersPage() {
     });
     const data = await readJsonSafe<any>(res);
     if (!res.ok) throw new Error(data?.error ?? "Failed to delete user");
+  }
+
+  async function sendWelcomeEmail(userId: string) {
+    setWelcomeSendingId(userId);
+    try {
+      const res = await authJsonFetch(`api/users/${userId}/send-welcome-email`, {
+        method: "POST",
+        headers: {
+          ...(companyInfo?.companyId ? { "x-company-id-expected": companyInfo.companyId } : {}),
+        },
+      });
+      const data = await readJsonSafe<any>(res);
+      if (!res.ok) throw new Error(data?.error ?? "Failed to send email");
+      toast.success(data?.message ?? "Welcome email sent.");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to send welcome email");
+    } finally {
+      setWelcomeSendingId(null);
+    }
   }
 
   async function makePrimary(id: string) {
@@ -321,7 +347,12 @@ export default function AdminUsersPage() {
               {ROLE_OPTIONS.map((r) => <option key={r} value={r}>{r.replace("_", " ")}</option>)}
             </select>
           </div>
-          <Button onClick={createUser} disabled={saving}>{saving ? "Saving..." : "Create User"}</Button>
+          <div className="flex flex-col gap-1">
+            <Button onClick={createUser} disabled={saving}>{saving ? "Saving..." : "Create User"}</Button>
+            <p className="text-xs text-muted-foreground max-w-xl">
+              After creating a user, you can resend the welcome email from the list below if they did not receive it (requires a real email, not the placeholder @local.missionledger).
+            </p>
+          </div>
         </div>
 
         <div className="rounded-xl border border-border bg-card p-4">
@@ -355,6 +386,19 @@ export default function AdminUsersPage() {
                     >
                       {ROLE_OPTIONS.map((r) => <option key={r} value={r}>{r.replace("_", " ")}</option>)}
                     </select>
+                    {hasDeliverableEmail(u.email) && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="gap-1"
+                        disabled={welcomeSendingId === u.id}
+                        onClick={() => void sendWelcomeEmail(u.id)}
+                        title="Send login instructions and app link"
+                      >
+                        <Mail className="h-3.5 w-3.5" />
+                        {welcomeSendingId === u.id ? "Sending…" : "Welcome email"}
+                      </Button>
+                    )}
                     <Button
                       variant="outline"
                       size="sm"
