@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, accounts, chartOfAccounts, journalEntries, journalEntryLines, donations, expenses, budgets, budgetLines, glEntries, funds, transactions, transactionSplits } from "@workspace/db";
+import { db, accounts, bankAccounts, chartOfAccounts, journalEntries, journalEntryLines, donations, expenses, budgets, budgetLines, glEntries, funds, transactions, transactionSplits } from "@workspace/db";
 import { eq, and, gte, lte, inArray, sql, isNotNull, isNull, ne } from "drizzle-orm";
 import { requireAuth } from "../lib/auth";
 import { sqlRows } from "../lib/sqlRows";
@@ -105,6 +105,9 @@ router.get("/profit-loss", requireAuth, async (req, res) => {
 router.get("/balance-sheet", requireAuth, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
+    if (!companyId) {
+      return res.status(400).json({ error: "No organization in session. Refresh the page or sign in again." });
+    }
     const { asOfDate } = req.query;
 
     const asOfParsed = parseAsOfDay(asOfDate);
@@ -301,7 +304,8 @@ router.get("/balance-sheet", requireAuth, async (req, res) => {
       difference: totalAssets - (totalLiabilities + totalNetAssets + unpostedActivity),
     });
   } catch (error) {
-    console.error("Balance sheet error:", error);
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error("Balance sheet error:", msg, error);
     res.status(500).json({ error: "Internal server error" });
   }
 });

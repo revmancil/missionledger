@@ -49,28 +49,23 @@ async function isPrimaryAdmin(userId: string, companyId: string): Promise<boolea
 }
 
 async function countPrimaryAdmins(companyId: string): Promise<number> {
-  // Count org_users rows marked as primary, plus any MASTER_ADMIN users who have no
-  // org_users row (legacy accounts pre-dating that table).
+  // Must match isPrimaryAdmin(): primary if ou.is_primary OR users.role = MASTER_ADMIN
+  // (legacy rows often have MASTER_ADMIN on users while ou.is_primary is false for the prior owner).
   const { rows } = await pool.query(
-    `SELECT COUNT(*) AS cnt
-     FROM (
-       SELECT ou.user_id
-         FROM organization_users ou
-        WHERE ou.company_id = $1
-          AND ou.is_primary = true
-          AND ou.is_active  = true
-       UNION
-       SELECT u.id
-         FROM users u
-        WHERE u.company_id = $1
-          AND u.role        = 'MASTER_ADMIN'
-          AND u.is_active   = true
-          AND NOT EXISTS (
-                SELECT 1 FROM organization_users ou2
-                 WHERE ou2.user_id   = u.id
-                   AND ou2.company_id = $1
+    `SELECT COUNT(DISTINCT u.id) AS cnt
+       FROM users u
+      WHERE u.company_id = $1
+        AND u.is_active = true
+        AND (
+              u.role = 'MASTER_ADMIN'
+           OR EXISTS (
+                SELECT 1 FROM organization_users ou
+                 WHERE ou.user_id = u.id
+                   AND ou.company_id = $1
+                   AND ou.is_primary = true
+                   AND ou.is_active = true
               )
-     ) sub`,
+            )`,
     [companyId]
   );
   return parseInt(rows[0]?.cnt ?? "0", 10);
@@ -131,13 +126,13 @@ router.get("/", requireAuth, requireAdmin, async (req, res) => {
     const { rows } = await pool.query(
       `SELECT
          u.id, u.user_id, u.name, u.email, u.role, u.is_active, u.created_at, u.updated_at,
-         COALESCE(ou.is_primary, false) AS is_primary
+         (COALESCE(ou.is_primary, false) OR u.role = 'MASTER_ADMIN') AS is_primary
        FROM users u
        LEFT JOIN organization_users ou
          ON ou.user_id = u.id
         AND ou.company_id = $1
        WHERE u.company_id = $1
-       ORDER BY ou.is_primary DESC, u.created_at ASC`,
+       ORDER BY (COALESCE(ou.is_primary, false) OR u.role = 'MASTER_ADMIN') DESC, u.created_at ASC`,
       [companyId]
     );
     res.json(
