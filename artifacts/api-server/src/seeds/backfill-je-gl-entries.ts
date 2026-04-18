@@ -40,7 +40,8 @@ export async function backfillJeGlEntries(): Promise<{
   let backfilled = 0;
   let errors = 0;
 
-  // 1. Load all POSTED journal entries (across all companies)
+  // 1. Load all POSTED journal entries (all companies — companyId scoped per-entry below)
+  // NOTE: sub-queries always use entry.companyId so data isolation is maintained per entry.
   const postedEntries = await db
     .select()
     .from(journalEntries)
