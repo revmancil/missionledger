@@ -16,11 +16,14 @@ function normalizeJournalEntryStatus(status: unknown): "DRAFT" | "POSTED" | "VOI
 async function enrichEntry(entry: any, companyId: string) {
   const lines = await db.select().from(journalEntryLines).where(eq(journalEntryLines.journalEntryId, entry.id));
 
-  // Use chartOfAccounts (the GL-backed COA) for correct account resolution
+  // Primary: chart_of_accounts (GL-backed COA — correct table for JE lines)
   const allCoa = await db.select().from(chartOfAccounts).where(eq(chartOfAccounts.companyId, companyId));
   const coaMap = Object.fromEntries(allCoa.map(a => [a.id, a]));
 
-  // Also include fund names on each line
+  // Fallback: legacy accounts table (for any JEs created before the COA migration)
+  const legacyAccts = await db.select().from(accounts).where(eq(accounts.companyId, companyId));
+  const legacyMap = Object.fromEntries(legacyAccts.map(a => [a.id, a]));
+
   const allFunds = await db.select().from(funds).where(eq(funds.companyId, companyId));
   const fundMap = Object.fromEntries(allFunds.map(f => [f.id, f]));
 
@@ -35,7 +38,7 @@ async function enrichEntry(entry: any, companyId: string) {
     lines: lines.map(l => ({
       ...l,
       createdAt: l.createdAt instanceof Date ? l.createdAt.toISOString() : l.createdAt,
-      account: coaMap[l.accountId] || null,
+      account: coaMap[l.accountId] ?? legacyMap[l.accountId] ?? null,
       fund: l.fundId ? (fundMap[l.fundId] || null) : null,
     })),
   };

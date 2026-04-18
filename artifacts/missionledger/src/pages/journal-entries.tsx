@@ -1,6 +1,6 @@
 import { useState, useCallback, useId, useEffect, Fragment } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
-import { useGetAccounts, useGetFunds } from "@workspace/api-client-react";
+import { useGetFunds } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -89,7 +89,13 @@ const FUND_TYPE_LABELS: Record<string, string> = {
 };
 
 export default function JournalEntriesPage() {
-  const { data: allAccounts = [] } = useGetAccounts();
+  const [allAccounts, setAllAccounts] = useState<any[]>([]);
+  useEffect(() => {
+    api(`${BASE}api/chart-of-accounts`)
+      .then(r => r.ok ? r.json() : [])
+      .then(setAllAccounts)
+      .catch(() => {});
+  }, []);
   const { data: allFunds = [] } = useGetFunds();
 
   const [entryDate, setEntryDate] = useState(today());
