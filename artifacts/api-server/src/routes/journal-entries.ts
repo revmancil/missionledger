@@ -211,6 +211,72 @@ router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
+// Shared helper: write GL entries for a journal entry (wipes existing first)
+async function writeGlEntriesForJe(entry: any, companyId: string) {
+  // Delete any existing GL entries for this JE (safe to re-run)
+  await db.delete(glEntries).where(eq(glEntries.journalEntryId, entry.id));
+
+  const lines = await db.select().from(journalEntryLines)
+    .where(eq(journalEntryLines.journalEntryId, entry.id));
+
+  // Look up accounts: prefer chart_of_accounts, fall back to legacy accounts table
+  const allCoa = await db.select().from(chartOfAccounts).where(eq(chartOfAccounts.companyId, companyId));
+  const coaMap = Object.fromEntries(allCoa.map(a => [a.id, { id: a.id, code: a.code, name: a.name }]));
+  const legacyAccts = await db.select().from(accounts).where(eq(accounts.companyId, companyId));
+  const legacyMap = Object.fromEntries(legacyAccts.map(a => [a.id, { id: a.id, code: a.code, name: a.name }]));
+
+  const allFunds = await db.select().from(funds).where(eq(funds.companyId, companyId));
+  const fundMap = Object.fromEntries(allFunds.map(f => [f.id, f]));
+
+  let written = 0;
+  for (const line of lines) {
+    const account = coaMap[line.accountId] ?? legacyMap[line.accountId];
+    if (!account) {
+      console.warn(`[JE post] No account found for accountId=${line.accountId} — line skipped`);
+      continue;
+    }
+    const fund = line.fundId ? fundMap[line.fundId] : null;
+
+    if ((line.debit ?? 0) > 0) {
+      await db.insert(glEntries).values({
+        companyId,
+        journalEntryId: entry.id,
+        sourceType: "MANUAL_JE",
+        accountId: account.id,
+        accountCode: account.code,
+        accountName: account.name,
+        fundId: line.fundId ?? null,
+        fundName: fund?.name ?? null,
+        entryType: "DEBIT",
+        amount: line.debit ?? 0,
+        description: line.description || entry.description,
+        date: entry.date,
+        isVoid: false,
+      });
+      written++;
+    }
+    if ((line.credit ?? 0) > 0) {
+      await db.insert(glEntries).values({
+        companyId,
+        journalEntryId: entry.id,
+        sourceType: "MANUAL_JE",
+        accountId: account.id,
+        accountCode: account.code,
+        accountName: account.name,
+        fundId: line.fundId ?? null,
+        fundName: fund?.name ?? null,
+        entryType: "CREDIT",
+        amount: line.credit ?? 0,
+        description: line.description || entry.description,
+        date: entry.date,
+        isVoid: false,
+      });
+      written++;
+    }
+  }
+  return written;
+}
+
 router.post("/:id/post", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
@@ -218,56 +284,12 @@ router.post("/:id/post", requireAuth, requireAdmin, async (req, res) => {
     const [entry] = await db.select().from(journalEntries)
       .where(and(eq(journalEntries.id, req.params.id), eq(journalEntries.companyId, companyId)));
     if (!entry) return res.status(404).json({ error: "Not found" });
-    if (entry.status === "POSTED") return res.status(400).json({ error: "Already posted" });
+    if (entry.status === "VOID") return res.status(400).json({ error: "Cannot post a voided entry" });
 
-    const lines = await db.select().from(journalEntryLines)
-      .where(eq(journalEntryLines.journalEntryId, entry.id));
-
-    // Must use chartOfAccounts — JE lines store chart_of_accounts IDs, not accounts IDs
-    const allAccounts = await db.select().from(chartOfAccounts).where(eq(chartOfAccounts.companyId, companyId));
-    const accountMap = Object.fromEntries(allAccounts.map(a => [a.id, a]));
-
-    const allFunds = await db.select().from(funds).where(eq(funds.companyId, companyId));
-    const fundMap = Object.fromEntries(allFunds.map(f => [f.id, f]));
-
-    for (const line of lines) {
-      const account = accountMap[line.accountId];
-      if (!account) continue;
-      const fund = line.fundId ? fundMap[line.fundId] : null;
-
-      if ((line.debit ?? 0) > 0) {
-        await db.insert(glEntries).values({
-          companyId,
-          journalEntryId: entry.id,
-          sourceType: "MANUAL_JE",
-          accountId: account.id,
-          accountCode: account.code,
-          accountName: account.name,
-          fundId: line.fundId ?? null,
-          fundName: fund?.name ?? null,
-          entryType: "DEBIT",
-          amount: line.debit ?? 0,
-          description: line.description || entry.description,
-          date: entry.date,
-        });
-      }
-
-      if ((line.credit ?? 0) > 0) {
-        await db.insert(glEntries).values({
-          companyId,
-          journalEntryId: entry.id,
-          sourceType: "MANUAL_JE",
-          accountId: account.id,
-          accountCode: account.code,
-          accountName: account.name,
-          fundId: line.fundId ?? null,
-          fundName: fund?.name ?? null,
-          entryType: "CREDIT",
-          amount: line.credit ?? 0,
-          description: line.description || entry.description,
-          date: entry.date,
-        });
-      }
+    // Write (or regenerate) GL entries — works for both DRAFT→POSTED and re-posting already-POSTED
+    const written = await writeGlEntriesForJe(entry, companyId);
+    if (written === 0) {
+      return res.status(422).json({ error: "No valid account lines found — check that all lines have a recognized account selected." });
     }
 
     const [updated] = await db.update(journalEntries).set({
@@ -286,12 +308,22 @@ router.post("/:id/post", requireAuth, requireAdmin, async (req, res) => {
 router.post("/:id/void", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
+
+    const [existing] = await db.select().from(journalEntries)
+      .where(and(eq(journalEntries.id, req.params.id), eq(journalEntries.companyId, companyId)));
+    if (!existing) return res.status(404).json({ error: "Not found" });
+
+    // Void all GL entries generated by this JE
+    await db.update(glEntries)
+      .set({ isVoid: true, updatedAt: new Date() })
+      .where(and(eq(glEntries.journalEntryId, req.params.id), eq(glEntries.companyId, companyId)));
+
     const [updated] = await db.update(journalEntries).set({
       status: "VOID",
       voidedAt: new Date(),
       updatedAt: new Date(),
-    }).where(and(eq(journalEntries.id, req.params.id), eq(journalEntries.companyId, companyId))).returning();
-    if (!updated) return res.status(404).json({ error: "Not found" });
+    }).where(eq(journalEntries.id, req.params.id)).returning();
+
     res.json(await enrichEntry(updated, companyId));
   } catch (error) {
     res.status(500).json({ error: "Internal server error" });

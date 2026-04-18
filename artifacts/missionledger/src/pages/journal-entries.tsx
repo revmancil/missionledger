@@ -652,6 +652,25 @@ function HistoryPanel({
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [repostingId, setRepostingId] = useState<string | null>(null);
+
+  const handleRepost = async (id: string) => {
+    setRepostingId(id);
+    try {
+      const res = await api(`/api/journal-entries/${id}/post`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error || "Failed to re-post journal entry");
+      } else {
+        toast.success("GL entries regenerated — financials updated");
+        onRefresh();
+      }
+    } catch {
+      toast.error("Failed to re-post journal entry");
+    } finally {
+      setRepostingId(null);
+    }
+  };
 
   const handleDelete = async (id: string) => {
     setDeletingId(id);
@@ -746,19 +765,36 @@ function HistoryPanel({
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        {canDelete && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 w-7 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setConfirmDeleteId(entry.id);
-                            }}
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </Button>
-                        )}
+                        <div className="flex items-center gap-1">
+                          {st === "POSTED" && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 w-7 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                              title="Regenerate GL entries"
+                              disabled={repostingId === entry.id}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleRepost(entry.id);
+                              }}
+                            >
+                              <RotateCcw className={cn("w-3.5 h-3.5", repostingId === entry.id && "animate-spin")} />
+                            </Button>
+                          )}
+                          {canDelete && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 w-7 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setConfirmDeleteId(entry.id);
+                              }}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </Button>
+                          )}
+                        </div>
                       </TableCell>
                     </TableRow>
                     {expandedId === entry.id && (
