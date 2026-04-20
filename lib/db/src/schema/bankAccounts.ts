@@ -13,6 +13,8 @@ export const bankAccounts = pgTable("bank_accounts", {
   isActive: boolean("is_active").notNull().default(true),
   plaidAccessToken: text("plaid_access_token"),
   plaidItemId: text("plaid_item_id"),
+  /** Plaid account_id for this ML row (Item can have checking + savings + money market). */
+  plaidAccountId: text("plaid_account_id"),
   plaidInstitutionName: text("plaid_institution_name"),
   isPlaidLinked: boolean("is_plaid_linked").notNull().default(false),
   plaidLastSyncedAt: timestamp("plaid_last_synced_at"),

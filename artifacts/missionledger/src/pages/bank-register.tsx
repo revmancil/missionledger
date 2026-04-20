@@ -922,12 +922,18 @@ export default function BankRegisterPage() {
       const res = await authJsonFetch(`/api/plaid/sync/${bankAccountId}`, { method: "POST" });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Sync failed");
-      const msg =
+      const totalAcc = json.totalForThisAccount ?? json.total ?? 0;
+      let msg =
         json.imported > 0
           ? `Imported ${json.imported} new transaction${json.imported !== 1 ? "s" : ""}${json.skipped > 0 ? ` (${json.skipped} already existed)` : ""}`
-          : (json.total ?? 0) === 0
-            ? "Plaid returned no transactions for this date range yet (sandbox feeds can take a few minutes)."
-            : `All ${json.total} transaction${json.total !== 1 ? "s" : ""} already in the register`;
+          : totalAcc === 0 && (json.totalFetched ?? 0) > 0
+            ? "No transactions for this account in the sync window, or Plaid has not posted them yet."
+            : totalAcc === 0
+              ? "Plaid returned no transactions for this date range yet (sandbox feeds can take a few minutes)."
+              : `All ${totalAcc} transaction${totalAcc !== 1 ? "s" : ""} already in the register`;
+      if (json.voidedMisattributed > 0) {
+        msg += ` Removed ${json.voidedMisattributed} that belonged to another account at this bank.`;
+      }
       toast.success(msg);
       await loadAll();
     } catch (err: any) {

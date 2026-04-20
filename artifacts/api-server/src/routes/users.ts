@@ -2,7 +2,7 @@ import { Router } from "express";
 import { db, users, companies, organizationUsers, pool } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, requireAdmin, hashPassword } from "../lib/auth";
-import { sendTeamMemberWelcomeEmail } from "../lib/email";
+import { isEmailConfigured, sendTeamMemberWelcomeEmail } from "../lib/email";
 import { getPublicFrontendBase } from "../lib/frontendUrl";
 
 const router = Router();
@@ -227,6 +227,11 @@ router.post("/:id/send-welcome-email", requireAuth, requireAdmin, async (req, re
     const { companyId } = (req as any).user;
     const mismatch = assertExpectedCompany(req, companyId);
     if (mismatch) return res.status(409).json({ error: mismatch });
+    if (!isEmailConfigured()) {
+      return res.status(503).json({
+        error: "Email delivery is not configured on the server (missing RESEND_API_KEY).",
+      });
+    }
 
     const [target] = await db
       .select()
@@ -257,9 +262,13 @@ router.post("/:id/send-welcome-email", requireAuth, requireAdmin, async (req, re
     });
 
     res.json({ success: true, message: "Welcome email sent." });
-  } catch (error) {
+  } catch (error: unknown) {
     console.error("Send welcome email error:", error);
-    res.status(500).json({ error: "Internal server error" });
+    const detail = error instanceof Error ? error.message : "Unknown error";
+    res.status(502).json({
+      error: "Email delivery failed. Check Resend logs and that EMAIL_FROM uses a verified domain.",
+      detail,
+    });
   }
 });
 

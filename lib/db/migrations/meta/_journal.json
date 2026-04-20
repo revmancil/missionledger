@@ -15,6 +15,20 @@
       "when": 1774000000000,
       "tag": "0001_gl_source_type_opening_balance",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1774010000000,
+      "tag": "0002_transaction_transfer",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1774020000000,
+      "tag": "0003_plaid_account_filter",
+      "breakpoints": true
     }
   ]
 }

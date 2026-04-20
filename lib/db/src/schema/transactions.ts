@@ -23,6 +23,8 @@ export const transactions = pgTable("transactions", {
   fundId: text("fund_id"),
   journalEntryId: text("journal_entry_id"),
   plaidTransactionId: text("plaid_transaction_id"),
+  /** Plaid account_id for this row (detect mis-attributed imports when Item has multiple accounts). */
+  plaidSourceAccountId: text("plaid_source_account_id"),
   isVoid: boolean("is_void").notNull().default(false),
   donorName: text("donor_name"),
   functionalType: text("functional_type"), // 990 tag: PROGRAM_SERVICE | MANAGEMENT_GENERAL | FUNDRAISING

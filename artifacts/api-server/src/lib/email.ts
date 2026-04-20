@@ -1,5 +1,6 @@
 import { Resend } from "resend";
 
+/** Prefer EMAIL_FROM: a sender on a domain verified in Resend (required for real delivery). */
 const FROM_EMAIL = process.env.EMAIL_FROM || "MissionLedger <noreply@missionledger.app>";
 
 function getResend(): Resend | null {
@@ -8,13 +9,32 @@ function getResend(): Resend | null {
   return new Resend(key);
 }
 
+export function isEmailConfigured(): boolean {
+  return !!process.env.RESEND_API_KEY;
+}
+
 async function send(opts: { to: string; subject: string; html: string }): Promise<void> {
   const resend = getResend();
   if (!resend) {
     console.log(`📧 [EMAIL — no RESEND_API_KEY configured] To: ${opts.to} | Subject: ${opts.subject}`);
-    return;
+    throw new Error("Email is not configured (RESEND_API_KEY is not set).");
   }
-  await resend.emails.send({ from: FROM_EMAIL, to: [opts.to], subject: opts.subject, html: opts.html });
+  const { data, error } = await resend.emails.send({
+    from: FROM_EMAIL,
+    to: [opts.to],
+    subject: opts.subject,
+    html: opts.html,
+  });
+  if (error) {
+    const msg =
+      typeof error === "object" && error !== null && "message" in error
+        ? String((error as { message: unknown }).message)
+        : JSON.stringify(error);
+    console.error(`[EMAIL] Resend rejected send (to=${opts.to}, from=${FROM_EMAIL}):`, error);
+    throw new Error(msg);
+  }
+  const id = data?.id;
+  if (id) console.log(`[EMAIL] Sent id=${id} to=${opts.to}`);
 }
 
 function escapeHtml(s: string): string {

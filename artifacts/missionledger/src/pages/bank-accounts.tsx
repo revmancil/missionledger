@@ -15,6 +15,22 @@ import { usePlaidLink } from "react-plaid-link";
 import { useQueryClient } from "@tanstack/react-query";
 import { authJsonFetch } from "@/lib/auth-fetch";
 
+/** Map Plaid Link metadata.accounts to the Plaid account_id for this MissionLedger bank row. */
+function resolvePlaidAccountIdFromLinkMetadata(
+  account: { lastFour?: string | null },
+  metadata: { accounts?: Array<{ id: string; mask?: string | null }> } | null | undefined,
+): string | undefined {
+  const accs = metadata?.accounts;
+  if (!accs?.length) return undefined;
+  const mask = String(account.lastFour ?? "").trim();
+  if (mask) {
+    const match = accs.filter((a) => String(a.mask ?? "") === mask);
+    if (match.length === 1) return match[0].id;
+  }
+  if (accs.length === 1) return accs[0].id;
+  return undefined;
+}
+
 function PlaidLinkButton({ account, onSuccess }: { account: any; onSuccess: () => void }) {
   const [linkToken, setLinkToken] = useState<string | null>(null);
   const [loadingToken, setLoadingToken] = useState(false);
@@ -45,6 +61,7 @@ function PlaidLinkButton({ account, onSuccess }: { account: any; onSuccess: () =
           publicToken,
           bankAccountId: account.id,
           institutionName: metadata?.institution?.name || null,
+          plaidAccountId: resolvePlaidAccountIdFromLinkMetadata(account, metadata) ?? undefined,
         }),
       });
       const json = await res.json();
@@ -70,7 +87,11 @@ function PlaidLinkButton({ account, onSuccess }: { account: any; onSuccess: () =
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Sync failed");
-      toast.success(`Synced ${json.imported} transactions from ${account.plaidInstitutionName || "bank"}`);
+      let msg = `Synced ${json.imported} transaction${json.imported !== 1 ? "s" : ""} from ${account.plaidInstitutionName || "bank"}`;
+      if (json.voidedMisattributed > 0) {
+        msg += `. Removed ${json.voidedMisattributed} that belonged to another account at this institution.`;
+      }
+      toast.success(msg);
     } catch (err: any) {
       toast.error(err.message || "Failed to sync transactions");
     } finally {
@@ -172,6 +193,7 @@ function PlaidLinkButtonWithToken({ account, onSuccess }: { account: any; onSucc
           publicToken,
           bankAccountId: account.id,
           institutionName: metadata?.institution?.name || null,
+          plaidAccountId: resolvePlaidAccountIdFromLinkMetadata(account, metadata) ?? undefined,
         }),
       });
       const json = await res.json();
@@ -209,9 +231,16 @@ function PlaidLinkButtonWithToken({ account, onSuccess }: { account: any; onSucc
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Sync failed");
-      const msg = json.imported > 0
-        ? `Imported ${json.imported} new transaction${json.imported !== 1 ? "s" : ""}${json.skipped > 0 ? ` (${json.skipped} already existed)` : ""}`
-        : `All ${json.total} transactions already up to date`;
+      const totalAcc = json.totalForThisAccount ?? json.total ?? 0;
+      let msg =
+        json.imported > 0
+          ? `Imported ${json.imported} new transaction${json.imported !== 1 ? "s" : ""}${json.skipped > 0 ? ` (${json.skipped} already existed)` : ""}`
+          : totalAcc === 0 && (json.totalFetched ?? 0) > 0
+            ? "No transactions for this account in the sync window (other accounts at this bank may have activity)."
+            : `All ${totalAcc} transaction${totalAcc !== 1 ? "s" : ""} already up to date`;
+      if (json.voidedMisattributed > 0) {
+        msg += ` Removed ${json.voidedMisattributed} that were imported for the wrong sub-account.`;
+      }
       toast.success(msg);
     } catch (err: any) {
       toast.error(err.message || "Sync failed");

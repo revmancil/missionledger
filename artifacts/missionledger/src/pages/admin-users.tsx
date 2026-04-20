@@ -186,7 +186,10 @@ export default function AdminUsersPage() {
         },
       });
       const data = await readJsonSafe<any>(res);
-      if (!res.ok) throw new Error(data?.error ?? "Failed to send email");
+      if (!res.ok) {
+        const parts = [data?.error, data?.detail].filter(Boolean);
+        throw new Error(parts.length ? parts.join(": ") : "Failed to send email");
+      }
       toast.success(data?.message ?? "Welcome email sent.");
     } catch (err: any) {
       toast.error(err.message || "Failed to send welcome email");
