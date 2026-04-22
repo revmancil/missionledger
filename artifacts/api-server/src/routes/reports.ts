@@ -78,6 +78,7 @@ router.get("/profit-loss", requireAuth, async (req, res) => {
     const start = range.start;
     const endOfDay = range.end;
 
+    // Statement of Activities: one row per (revenue/expense account × fund).
     const glRows = await db.execute(sql`
       SELECT
         c.id        AS account_id,
@@ -85,24 +86,22 @@ router.get("/profit-loss", requireAuth, async (req, res) => {
         c.name      AS account_name,
         c.coa_type  AS account_type,
         c.sort_order AS sort_order,
+        g.fund_id   AS fund_id,
+        COALESCE(MAX(f.name), MAX(g.fund_name), 'Unassigned') AS fund_name,
         ROUND(COALESCE(SUM(CASE WHEN g.entry_type = 'DEBIT'  THEN g.amount ELSE 0 END), 0)::numeric, 2) AS total_debit,
         ROUND(COALESCE(SUM(CASE WHEN g.entry_type = 'CREDIT' THEN g.amount ELSE 0 END), 0)::numeric, 2) AS total_credit
-      FROM chart_of_accounts c
-      LEFT JOIN gl_entries g
-        ON g.account_id = c.id
-        AND g.company_id = ${companyId}
+      FROM gl_entries g
+      INNER JOIN chart_of_accounts c ON c.id = g.account_id AND c.company_id = g.company_id
+      LEFT JOIN funds f ON f.id = g.fund_id AND f.company_id = ${companyId}
+      LEFT JOIN journal_entries je ON je.id = g.journal_entry_id
+      WHERE g.company_id = ${companyId}
         AND g.is_void = false
         AND g.date >= ${start}
         AND g.date <= ${endOfDay}
-      LEFT JOIN journal_entries je
-        ON je.id = g.journal_entry_id
-        AND je.status != 'VOID'
-      WHERE c.company_id = ${companyId}
-        AND ${sqlCoaActiveOrHasGlInWindow(companyId, { kind: "range", start, end: endOfDay })}
         AND c.coa_type IN ('INCOME', 'EXPENSE')
-        AND (g.id IS NULL OR g.journal_entry_id IS NULL OR je.id IS NOT NULL)
-      GROUP BY c.id, c.code, c.name, c.coa_type, c.sort_order
-      ORDER BY c.sort_order, c.code
+        AND (g.journal_entry_id IS NULL OR (je.id IS NOT NULL AND je.status != 'VOID'))
+      GROUP BY c.id, c.code, c.name, c.coa_type, c.sort_order, g.fund_id
+      ORDER BY c.sort_order, c.code, fund_name
     `);
 
     type PlRow = {
@@ -110,20 +109,25 @@ router.get("/profit-loss", requireAuth, async (req, res) => {
       accountCode: string;
       accountName: string;
       accountType: string;
+      fundId: string | null;
+      fundName: string;
       amount: number;
       gross: number;
       children: never[];
     };
-    const rows: PlRow[] = sqlRows(glRows).map((r) => {
-      const debit  = parseFloat(r.total_debit)  || 0;
-      const credit = parseFloat(r.total_credit) || 0;
+    const rows: PlRow[] = sqlRows(glRows).map((r: Record<string, unknown>) => {
+      const debit  = parseFloat(String(r.total_debit ?? 0))  || 0;
+      const credit = parseFloat(String(r.total_credit ?? 0)) || 0;
       const gross = debit + credit;
-      const amount = r.account_type === "INCOME" ? credit - debit : debit - credit;
+      const accountType = String(r.account_type ?? "");
+      const amount = accountType === "INCOME" ? credit - debit : debit - credit;
       return {
-        accountId:   r.account_id,
-        accountCode: r.account_code,
-        accountName: r.account_name,
-        accountType: r.account_type,
+        accountId:   String(r.account_id),
+        accountCode: String(r.account_code ?? ""),
+        accountName: String(r.account_name ?? ""),
+        accountType,
+        fundId:      r.fund_id != null ? String(r.fund_id) : null,
+        fundName:    String(r.fund_name ?? "Unassigned"),
         amount,
         gross,
         children: [],
@@ -135,6 +139,8 @@ router.get("/profit-loss", requireAuth, async (req, res) => {
       accountCode: r.accountCode,
       accountName: r.accountName,
       accountType: r.accountType,
+      fundId: r.fundId,
+      fundName: r.fundName,
       amount: r.amount,
       children: [] as never[],
     });

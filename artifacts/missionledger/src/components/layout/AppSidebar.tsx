@@ -19,6 +19,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { useState } from "react";
 import { toast } from "sonner";
+import { ChangePasswordDialog } from "@/components/ChangePasswordDialog";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -282,6 +283,9 @@ export function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
           <a href={`${BASE}/terms`} className="hover:text-muted-foreground hover:underline">Terms</a>
           <span>·</span>
           <a href={`${BASE}/privacy`} className="hover:text-muted-foreground hover:underline">Privacy</a>
+        </div>
+        <div className="mb-2">
+          <ChangePasswordDialog />
         </div>
         <Button
           variant="outline"

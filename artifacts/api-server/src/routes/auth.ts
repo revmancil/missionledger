@@ -501,4 +501,43 @@ router.post("/admin-login", async (req, res) => {
   }
 });
 
+// POST /auth/change-password — signed-in user updates password (requires current password)
+router.post("/change-password", requireAuth, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body ?? {};
+    if (!currentPassword || typeof currentPassword !== "string") {
+      return res.status(400).json({ error: "Current password is required." });
+    }
+    if (!newPassword || typeof newPassword !== "string" || newPassword.length < 8) {
+      return res.status(400).json({ error: "New password must be at least 8 characters." });
+    }
+    const userId = (req as any).user?.id as string | undefined;
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const [row] = await db
+      .select({ password: users.password })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+    if (!row) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const valid = await comparePassword(currentPassword, row.password);
+    if (!valid) {
+      return res.status(401).json({ error: "Current password is incorrect." });
+    }
+
+    const hashed = await hashPassword(newPassword);
+    await db.update(users).set({ password: hashed, updatedAt: new Date() }).where(eq(users.id, userId));
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Change password error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 export default router;

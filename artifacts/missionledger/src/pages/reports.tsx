@@ -371,18 +371,23 @@ export default function ReportsPage() {
     doc.setTextColor(0, 0, 0);
     y += 16;
 
-    // Revenue table
+    // Revenue table (includes fund column)
     autoTable(doc, {
       startY: y,
-      head: [["Account Code", "Account Name", "Amount"]],
+      head: [["Account Code", "Account Name", "Fund", "Amount"]],
       body: [
-        ...(pl?.revenue ?? []).map((r: any) => [r.accountCode, r.accountName, formatCurrency(r.amount)]),
-        [{ content: "Total Revenue", colSpan: 2, styles: { fontStyle: "bold" } }, { content: formatCurrency(pl?.totalRevenue ?? 0), styles: { fontStyle: "bold", textColor: [6, 95, 70] } }],
+        ...(pl?.revenue ?? []).map((r: any) => [
+          r.accountCode,
+          r.accountName,
+          r.fundName ?? "—",
+          formatCurrency(r.amount),
+        ]),
+        [{ content: "Total Revenue", colSpan: 3, styles: { fontStyle: "bold" } }, { content: formatCurrency(pl?.totalRevenue ?? 0), styles: { fontStyle: "bold", textColor: [6, 95, 70] } }],
       ],
       theme: "striped",
       headStyles: { fillColor: [30, 64, 108], fontSize: 9 },
       bodyStyles: { fontSize: 9 },
-      columnStyles: { 2: { halign: "right" } },
+      columnStyles: { 3: { halign: "right" } },
       margin: { left: 40, right: 40 },
       didDrawPage: () => {},
     });
@@ -398,15 +403,20 @@ export default function ReportsPage() {
 
     autoTable(doc, {
       startY: y,
-      head: [["Account Code", "Account Name", "Amount"]],
+      head: [["Account Code", "Account Name", "Fund", "Amount"]],
       body: [
-        ...(pl?.expenses ?? []).map((r: any) => [r.accountCode, r.accountName, formatCurrency(r.amount)]),
-        [{ content: "Total Expenses", colSpan: 2, styles: { fontStyle: "bold" } }, { content: formatCurrency(pl?.totalExpenses ?? 0), styles: { fontStyle: "bold", textColor: [180, 40, 20] } }],
+        ...(pl?.expenses ?? []).map((r: any) => [
+          r.accountCode,
+          r.accountName,
+          r.fundName ?? "—",
+          formatCurrency(r.amount),
+        ]),
+        [{ content: "Total Expenses", colSpan: 3, styles: { fontStyle: "bold" } }, { content: formatCurrency(pl?.totalExpenses ?? 0), styles: { fontStyle: "bold", textColor: [180, 40, 20] } }],
       ],
       theme: "striped",
       headStyles: { fillColor: [100, 40, 40], fontSize: 9 },
       bodyStyles: { fontSize: 9 },
-      columnStyles: { 2: { halign: "right" } },
+      columnStyles: { 3: { halign: "right" } },
       margin: { left: 40, right: 40 },
     });
 
@@ -417,7 +427,7 @@ export default function ReportsPage() {
     autoTable(doc, {
       startY: y,
       body: [[
-        { content: "Change in Net Assets", colSpan: 2, styles: { fontStyle: "bold", fontSize: 10 } },
+        { content: "Change in Net Assets", colSpan: 3, styles: { fontStyle: "bold", fontSize: 10 } },
         { content: formatCurrency(Math.abs(ni)) + (ni < 0 ? " (deficit)" : ""), styles: { fontStyle: "bold", fontSize: 10, textColor: ni >= 0 ? [6, 95, 70] : [180, 40, 20], halign: "right" } },
       ]],
       theme: "plain",
@@ -549,6 +559,32 @@ export default function ReportsPage() {
     addPdfFooter(doc);
     doc.save(`financial-statements-${applied.endDate}.pdf`);
   }, [profitLoss, balanceSheet, applied, bsQueryDate]);
+
+  const downloadFinancialCsv = useCallback(() => {
+    const pl = profitLoss as any;
+    if (!pl) return;
+    const esc = (s: string) => `"${String(s ?? "").replace(/"/g, '""')}"`;
+    const rows: string[] = [];
+    rows.push(["Section", "Account Code", "Account Name", "Fund", "Amount"].join(","));
+    for (const r of pl.revenue ?? []) {
+      rows.push(
+        ["Revenue", r.accountCode, esc(r.accountName), esc(r.fundName ?? "—"), Number(r.amount).toFixed(2)].join(","),
+      );
+    }
+    rows.push(["Total Revenue", "", "", "", Number(pl.totalRevenue ?? 0).toFixed(2)].join(","));
+    rows.push("");
+    for (const r of pl.expenses ?? []) {
+      rows.push(
+        ["Expense", r.accountCode, esc(r.accountName), esc(r.fundName ?? "—"), Number(r.amount).toFixed(2)].join(","),
+      );
+    }
+    rows.push(["Total Expenses", "", "", "", Number(pl.totalExpenses ?? 0).toFixed(2)].join(","));
+    rows.push(["Change in Net Assets", "", "", "", Number(pl.netIncome ?? 0).toFixed(2)].join(","));
+    triggerCsvDownload(
+      rows.join("\n"),
+      `statement-of-activities-${pl.startDate ?? applied.startDate}-${pl.endDate ?? applied.endDate}.csv`,
+    );
+  }, [profitLoss, applied.startDate, applied.endDate]);
 
   // General Ledger → CSV (one row per GL entry, grouped by account)
   const downloadGl = useCallback(() => {
@@ -786,7 +822,8 @@ export default function ReportsPage() {
     : tab === "prep990" ? (() => {}) as () => void
     : downloadRegisterPdf;
 
-  const handleDownloadCsv = tab === "gl"      ? downloadGl
+  const handleDownloadCsv = tab === "financial" ? downloadFinancialCsv
+    : tab === "gl"      ? downloadGl
     : tab === "journal" ? downloadJournal
     : tab === "register" ? exportCsv
     : null;
@@ -959,12 +996,23 @@ export default function ReportsPage() {
                     {/* Revenue */}
                     <div>
                       <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Revenue</h4>
+                      {(profitLoss?.revenue ?? []).length > 0 && (
+                        <div className="hidden sm:grid grid-cols-[minmax(0,1fr)_minmax(5rem,7rem)_auto] gap-x-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide pb-1 border-b border-border/50">
+                          <span>Account</span>
+                          <span>Fund</span>
+                          <span className="text-right">Amount</span>
+                        </div>
+                      )}
                       {(profitLoss?.revenue ?? []).length === 0 ? (
                         <p className="text-sm text-muted-foreground">No revenue recorded.</p>
                       ) : (profitLoss?.revenue ?? []).map((r: any) => (
-                        <div key={r.accountId} className="flex justify-between text-sm py-1 border-b border-border/40">
-                          <span className="text-muted-foreground">{r.accountCode} {r.accountName}</span>
-                          <span className="font-medium tabular-nums text-emerald-700">{formatCurrency(r.amount)}</span>
+                        <div
+                          key={`${r.accountId}-${r.fundId ?? "u"}`}
+                          className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(5rem,7rem)_auto] gap-x-3 gap-y-0.5 text-sm py-1 border-b border-border/40 items-baseline"
+                        >
+                          <span className="text-muted-foreground min-w-0">{r.accountCode} {r.accountName}</span>
+                          <span className="text-xs text-muted-foreground sm:text-sm truncate" title={r.fundName ?? ""}>{r.fundName ?? "—"}</span>
+                          <span className="font-medium tabular-nums text-emerald-700 text-right">{formatCurrency(r.amount)}</span>
                         </div>
                       ))}
                       <div className="flex justify-between text-sm font-semibold pt-1.5 mt-1">
@@ -975,12 +1023,23 @@ export default function ReportsPage() {
                     {/* Expenses */}
                     <div>
                       <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Expenses</h4>
+                      {(profitLoss?.expenses ?? []).length > 0 && (
+                        <div className="hidden sm:grid grid-cols-[minmax(0,1fr)_minmax(5rem,7rem)_auto] gap-x-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide pb-1 border-b border-border/50">
+                          <span>Account</span>
+                          <span>Fund</span>
+                          <span className="text-right">Amount</span>
+                        </div>
+                      )}
                       {(profitLoss?.expenses ?? []).length === 0 ? (
                         <p className="text-sm text-muted-foreground">No expenses recorded.</p>
                       ) : (profitLoss?.expenses ?? []).map((r: any) => (
-                        <div key={r.accountId} className="flex justify-between text-sm py-1 border-b border-border/40">
-                          <span className="text-muted-foreground">{r.accountCode} {r.accountName}</span>
-                          <span className="font-medium tabular-nums text-orange-700">{formatCurrency(r.amount)}</span>
+                        <div
+                          key={`${r.accountId}-${r.fundId ?? "u"}`}
+                          className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(5rem,7rem)_auto] gap-x-3 gap-y-0.5 text-sm py-1 border-b border-border/40 items-baseline"
+                        >
+                          <span className="text-muted-foreground min-w-0">{r.accountCode} {r.accountName}</span>
+                          <span className="text-xs text-muted-foreground sm:text-sm truncate" title={r.fundName ?? ""}>{r.fundName ?? "—"}</span>
+                          <span className="font-medium tabular-nums text-orange-700 text-right">{formatCurrency(r.amount)}</span>
                         </div>
                       ))}
                       <div className="flex justify-between text-sm font-semibold pt-1.5 mt-1">

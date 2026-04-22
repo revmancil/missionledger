@@ -215,29 +215,39 @@ async function buildStatementOfActivities(
       )
     );
 
-  const byAccount: Record<string, { code: string; name: string; type: string; debits: number; credits: number }> = {};
+  const byKey: Record<string, { code: string; name: string; type: string; fundId: string | null; fundName: string; debits: number; credits: number }> = {};
 
   for (const e of glRows) {
     const coa = coaMap[e.accountId];
     if (!coa) continue;
     const coaType = coa.type as string;
     if (!["INCOME", "EXPENSE"].includes(coaType)) continue;
-    if (!byAccount[e.accountId]) {
-      byAccount[e.accountId] = { code: e.accountCode, name: e.accountName, type: coaType, debits: 0, credits: 0 };
+    const fundName = e.fundName?.trim() || "Unassigned";
+    const key = `${e.accountId}\t${e.fundId ?? ""}`;
+    if (!byKey[key]) {
+      byKey[key] = {
+        code: e.accountCode,
+        name: e.accountName,
+        type: coaType,
+        fundId: e.fundId ?? null,
+        fundName,
+        debits: 0,
+        credits: 0,
+      };
     }
-    if (e.entryType === "DEBIT") byAccount[e.accountId].debits += e.amount;
-    else byAccount[e.accountId].credits += e.amount;
+    if (e.entryType === "DEBIT") byKey[key].debits += e.amount;
+    else byKey[key].credits += e.amount;
   }
 
-  const income = Object.values(byAccount)
+  const income = Object.values(byKey)
     .filter((a) => a.type === "INCOME")
     .map((a) => ({ ...a, net: a.credits - a.debits }))
-    .sort((a, b) => a.code.localeCompare(b.code));
+    .sort((a, b) => a.code.localeCompare(b.code) || a.fundName.localeCompare(b.fundName));
 
-  const expenses = Object.values(byAccount)
+  const expenses = Object.values(byKey)
     .filter((a) => a.type === "EXPENSE")
     .map((a) => ({ ...a, net: a.debits - a.credits }))
-    .sort((a, b) => a.code.localeCompare(b.code));
+    .sort((a, b) => a.code.localeCompare(b.code) || a.fundName.localeCompare(b.fundName));
 
   const totalIncome = income.reduce((s, a) => s + a.net, 0);
   const totalExpenses = expenses.reduce((s, a) => s + a.net, 0);
