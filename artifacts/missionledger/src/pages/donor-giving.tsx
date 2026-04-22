@@ -1,18 +1,23 @@
-import { useState, useMemo, useRef } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useState, useMemo, useEffect } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, parseISO } from "date-fns";
 import {
   Heart, ChevronDown, ChevronRight, Printer, Download,
-  TrendingUp, Users, Gift, Calendar, Search, X
+  TrendingUp, Users, Gift, Search, X, GitMerge,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
+import { toast } from "sonner";
 
 async function apiFetch(path: string, opts?: RequestInit): Promise<Response> {
   const token = localStorage.getItem("ml_token");
@@ -195,9 +200,122 @@ function downloadStatement(donor: DonorSummary, gifts: GiftRecord[], year: strin
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+/* ─── Merge duplicate donor names (admin) ────────────────────────────────── */
+function MergeDonorsDialog({
+  open,
+  onOpenChange,
+  initialSourceLines,
+  onSuccess,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  initialSourceLines: string;
+  onSuccess: () => void;
+}) {
+  const [targetName, setTargetName] = useState("");
+  const [sourceBlock, setSourceBlock] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setSourceBlock(initialSourceLines);
+      setTargetName("");
+      setSaving(false);
+    }
+  }, [open, initialSourceLines]);
+
+  async function submit() {
+    const sourceNames = sourceBlock
+      .split(/\r?\n/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const t = targetName.trim();
+    if (!t) {
+      toast.error("Enter the donor name to keep.");
+      return;
+    }
+    if (sourceNames.length === 0) {
+      toast.error("Enter at least one other spelling to merge (one per line).");
+      return;
+    }
+    const norm = (s: string) => s.trim().toLowerCase();
+    const filtered = sourceNames.filter((s) => norm(s) !== norm(t));
+    if (filtered.length === 0) {
+      toast.error("Names to merge must differ from the name you are keeping.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await apiFetch(`${BASE}api/donors/merge`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targetName: t, sourceNames: filtered }),
+      });
+      const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      if (!res.ok) {
+        const msg =
+          (typeof body.message === "string" && body.message) ||
+          (typeof body.error === "string" && body.error) ||
+          "Merge failed";
+        toast.error(msg);
+        return;
+      }
+      const tx = typeof body.transactionsUpdated === "number" ? body.transactionsUpdated : 0;
+      const dn = typeof body.donationsUpdated === "number" ? body.donationsUpdated : 0;
+      const pl = typeof body.pledgesUpdated === "number" ? body.pledgesUpdated : 0;
+      toast.success(`Merged into “${t}”: ${tx} bank rows, ${dn} donation lines, ${pl} pledges.`);
+      onOpenChange(false);
+      onSuccess();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Merge donor names</DialogTitle>
+          <DialogDescription>
+            Gifts and pledges stored under the other spellings will point to the name you keep. Ask another admin if you are unsure; large merges are safest after a backup.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3 py-1">
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">Keep this name</label>
+            <Input
+              className="mt-1"
+              value={targetName}
+              onChange={(e) => setTargetName(e.target.value)}
+              placeholder="e.g. Ramona Wharton"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">Merge away (one per line)</label>
+            <Textarea
+              className="mt-1 min-h-[100px] text-sm"
+              value={sourceBlock}
+              onChange={(e) => setSourceBlock(e.target.value)}
+              placeholder={"Ramon Wharton\n…"}
+            />
+          </div>
+        </div>
+        <DialogFooter className="gap-2 sm:gap-0">
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button type="button" onClick={submit} disabled={saving}>
+            {saving ? "Merging…" : "Merge"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 /* ─── Donor Row ─────────────────────────────────────────────────────────── */
 function DonorRow({
-  donor, rank, expanded, onToggle, year, orgName,
+  donor, rank, expanded, onToggle, year, orgName, isAdmin, onMergeFromName,
 }: {
   donor: DonorSummary;
   rank: number;
@@ -205,6 +323,8 @@ function DonorRow({
   onToggle: () => void;
   year: string;
   orgName: string;
+  isAdmin: boolean;
+  onMergeFromName: (name: string) => void;
 }) {
   const { data: history, isLoading } = useDonorHistory(expanded ? donor.donorName : null, year);
 
@@ -230,23 +350,39 @@ function DonorRow({
         <td className="py-3 px-4 hidden md:table-cell text-sm text-muted-foreground">{fmtDate(donor.lastGift)}</td>
         <td className="py-3 px-4 text-right font-semibold text-emerald-700 tabular-nums">{fmt(donor.totalGiven)}</td>
         <td className="py-3 px-4 text-right">
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-7 px-2 text-xs"
-            onClick={(e) => {
-              e.stopPropagation();
-              if (history) {
-                printStatement(donor, history, year, orgName);
-              } else {
-                // Expand the row to load history first, then the user can print from the expanded view
-                onToggle();
-              }
-            }}
-            title={history ? "Print Giving Statement" : "Expand to load statement"}
-          >
-            <Printer className="h-3.5 w-3.5" />
-          </Button>
+          <div className="flex items-center justify-end gap-0.5">
+            {isAdmin && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 px-2 text-xs"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onMergeFromName(donor.donorName);
+                }}
+                title="Merge this name into another"
+              >
+                <GitMerge className="h-3.5 w-3.5" />
+              </Button>
+            )}
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 px-2 text-xs"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (history) {
+                  printStatement(donor, history, year, orgName);
+                } else {
+                  // Expand the row to load history first, then the user can print from the expanded view
+                  onToggle();
+                }
+              }}
+              title={history ? "Print Giving Statement" : "Expand to load statement"}
+            >
+              <Printer className="h-3.5 w-3.5" />
+            </Button>
+          </div>
         </td>
       </tr>
       {expanded && (
@@ -335,7 +471,10 @@ export default function DonorGivingPage() {
   const [year, setYear] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [expandedDonor, setExpandedDonor] = useState<string | null>(null);
+  const [mergeOpen, setMergeOpen] = useState(false);
+  const [mergeSeed, setMergeSeed] = useState("");
 
+  const queryClient = useQueryClient();
   const { data: donors = [], isLoading } = useDonors(year);
   const { data: years = [] } = useDonorYears();
 
@@ -353,6 +492,7 @@ export default function DonorGivingPage() {
 
   const { user } = useAuth();
   const orgName = user?.companyName || "Your Organization";
+  const isAdmin = user?.role === "ADMIN" || user?.role === "MASTER_ADMIN";
 
   function toggleDonor(name: string) {
     setExpandedDonor(prev => prev === name ? null : name);
@@ -374,6 +514,21 @@ export default function DonorGivingPage() {
               </div>
             </div>
             <div className="flex items-center gap-2 shrink-0">
+              {isAdmin && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-1"
+                  onClick={() => {
+                    setMergeSeed("");
+                    setMergeOpen(true);
+                  }}
+                >
+                  <GitMerge className="h-3.5 w-3.5" />
+                  Merge names
+                </Button>
+              )}
               <Select value={year} onValueChange={setYear}>
                 <SelectTrigger className="w-[130px] h-8 text-sm">
                   <SelectValue placeholder="All Years" />
@@ -479,6 +634,11 @@ export default function DonorGivingPage() {
                       onToggle={() => toggleDonor(donor.donorName)}
                       year={year}
                       orgName={orgName}
+                      isAdmin={isAdmin}
+                      onMergeFromName={(name) => {
+                        setMergeSeed(name);
+                        setMergeOpen(true);
+                      }}
                     />
                   ))}
                 </tbody>
@@ -494,6 +654,18 @@ export default function DonorGivingPage() {
           )}
         </div>
       </div>
+
+      <MergeDonorsDialog
+        open={mergeOpen}
+        onOpenChange={setMergeOpen}
+        initialSourceLines={mergeSeed}
+        onSuccess={() => {
+          queryClient.invalidateQueries({ queryKey: ["donors"] });
+          queryClient.invalidateQueries({ queryKey: ["donor-history"] });
+          queryClient.invalidateQueries({ queryKey: ["donor-years"] });
+          setExpandedDonor(null);
+        }}
+      />
     </AppLayout>
   );
 }

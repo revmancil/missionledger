@@ -225,6 +225,81 @@ function VendorCombobox({
   );
 }
 
+/** Searchable donor name field — pick from Donor Giving list or type a new name. */
+function DonorNameCombobox({
+  value, onChange, donorNames, placeholder = "Donor name",
+}: {
+  value: string;
+  onChange: (name: string) => void;
+  donorNames: string[];
+  placeholder?: string;
+}) {
+  const [query, setQuery] = useState(value);
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => { setQuery(value); }, [value]);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return donorNames
+      .filter((n) => !q || n.toLowerCase().includes(q))
+      .slice(0, 20);
+  }, [donorNames, query]);
+
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  return (
+    <div ref={ref} className="relative">
+      <div className="relative">
+        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+        <Input
+          className="pl-8 bg-white border-emerald-200"
+          placeholder={placeholder}
+          value={query}
+          onFocus={() => setOpen(true)}
+          onChange={(e) => {
+            const v = e.target.value;
+            setQuery(v);
+            setOpen(true);
+            onChange(v);
+          }}
+        />
+      </div>
+      {open && (
+        <div className="absolute z-[100] w-full mt-1 bg-white border border-emerald-200 rounded-md shadow-lg max-h-52 overflow-y-auto">
+          {filtered.length === 0 && query.trim() !== "" && (
+            <div className="px-3 py-2 text-sm text-muted-foreground italic">
+              No match — will save as typed
+            </div>
+          )}
+          {filtered.map((n) => (
+            <button
+              key={n}
+              type="button"
+              className="w-full text-left px-3 py-2 text-sm hover:bg-[hsl(160,50%,96%)] transition-colors"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                onChange(n);
+                setQuery(n);
+                setOpen(false);
+              }}
+            >
+              {n}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── COA Combobox (searchable, scrollable, grouped) ────────────────────────────
 const COA_TYPE_ORDER = ["ASSET", "LIABILITY", "EQUITY", "INCOME", "EXPENSE"] as const;
 const COA_TYPE_LABELS: Record<string, string> = {
@@ -532,6 +607,7 @@ export default function BankRegisterPage() {
   const [coaList, setCoaList] = useState<ChartAccount[]>([]);
   const [fundList, setFundList] = useState<Fund[]>([]);
   const [vendorList, setVendorList] = useState<Vendor[]>([]);
+  const [donorNameList, setDonorNameList] = useState<string[]>([]);
   const [txList, setTxList] = useState<Transaction[]>([]);
   const [closedUntil, setClosedUntil] = useState<string | null>(null);
   const [selectedBank, setSelectedBank] = useState<string>("ALL");
@@ -562,11 +638,12 @@ export default function BankRegisterPage() {
     setLoading(true);
     setTransactionsLoadError(null);
     try {
-      const [banksR, coaR, fundsR, vendorsR, txR] = await Promise.all([
+      const [banksR, coaR, fundsR, vendorsR, donorsR, txR] = await Promise.all([
         apiFetch("/api/bank-accounts"),
         apiFetch("/api/chart-of-accounts"),
         apiFetch("/api/funds"),
         apiFetch("/api/vendors"),
+        apiFetch("/api/donors"),
         apiFetch("/api/transactions"),
       ]);
 
@@ -597,6 +674,16 @@ export default function BankRegisterPage() {
         const body = await readJsonSafe(vendorsR);
         logApiFailure("/api/vendors", vendorsR, body);
         loadFailures.push(`Vendors: ${summarizeErrorBody(body, vendorsR.status)}`);
+      }
+      if (donorsR.ok) {
+        const d = await donorsR.json();
+        setDonorNameList(
+          Array.isArray(d) ? d.map((x: { donorName?: string }) => x.donorName).filter(Boolean) as string[] : [],
+        );
+      } else {
+        const body = await readJsonSafe(donorsR);
+        logApiFailure("/api/donors", donorsR, body);
+        loadFailures.push(`Donors: ${summarizeErrorBody(body, donorsR.status)}`);
       }
 
       if (txR.ok) {
@@ -1563,11 +1650,10 @@ export default function BankRegisterPage() {
                     {form.donorLines.map((donor, idx) => (
                       <div key={donor.id} className="grid grid-cols-12 gap-2 items-center">
                         <div className="col-span-12 sm:col-span-4">
-                          <Input
-                            className="bg-white border-emerald-200"
-                            placeholder="Donor name"
+                          <DonorNameCombobox
+                            donorNames={donorNameList}
                             value={donor.donorName}
-                            onChange={(e) => updateDonorLine(idx, "donorName", e.target.value)}
+                            onChange={(name) => updateDonorLine(idx, "donorName", name)}
                           />
                         </div>
                         <div className="col-span-4 sm:col-span-2">

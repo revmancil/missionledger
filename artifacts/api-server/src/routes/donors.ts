@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { requireAuth } from "../lib/auth";
+import { requireAuth, requireAdmin } from "../lib/auth";
 import { pool } from "@workspace/db";
 
 const router = Router();
@@ -86,6 +86,113 @@ router.get("/", requireAuth, async (req, res) => {
 });
 
 /**
+ * GET /api/donors/years
+ * Returns distinct years that have donor activity.
+ * Registered before /:name/history so "years" is not treated as a donor name.
+ */
+router.get("/years", requireAuth, async (req, res) => {
+  try {
+    const { companyId } = (req as any).user;
+    const { rows } = await pool.query(`
+      SELECT DISTINCT EXTRACT(YEAR FROM date)::int AS year
+      FROM (
+        SELECT date FROM transactions
+        WHERE company_id = $1 AND donor_name IS NOT NULL AND donor_name <> '' AND is_void = false
+        UNION ALL
+        SELECT date FROM donations
+        WHERE company_id = $1 AND donor_name IS NOT NULL AND donor_name <> ''
+      ) combined
+      ORDER BY year DESC
+    `, [companyId]);
+    res.json(rows.map(r => r.year));
+  } catch (error: any) {
+    console.error("Get donor years error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/**
+ * POST /api/donors/merge
+ * Rewrites donor_name on transactions, donations, and pledges from each source to targetName (admin).
+ */
+router.post("/merge", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { companyId } = (req as any).user;
+    const body = req.body as { targetName?: string; sourceNames?: unknown };
+    const targetName = typeof body.targetName === "string" ? body.targetName.trim() : "";
+    const rawSources = Array.isArray(body.sourceNames) ? body.sourceNames : [];
+
+    if (!targetName) {
+      res.status(400).json({ error: "VALIDATION", message: "targetName is required" });
+      return;
+    }
+
+    const norm = (s: string) => s.trim().toLowerCase();
+    const targetNorm = norm(targetName);
+    const sourceByNorm = new Map<string, string>();
+
+    for (const item of rawSources) {
+      if (typeof item !== "string") continue;
+      const t = item.trim();
+      if (!t) continue;
+      const k = norm(t);
+      if (k === targetNorm) continue;
+      if (!sourceByNorm.has(k)) sourceByNorm.set(k, t);
+    }
+
+    if (sourceByNorm.size === 0) {
+      res.status(400).json({
+        error: "VALIDATION",
+        message: "At least one source name (different from the target) is required",
+      });
+      return;
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      let transactionsUpdated = 0;
+      let donationsUpdated = 0;
+      let pledgesUpdated = 0;
+
+      for (const [, srcRaw] of sourceByNorm) {
+        const r1 = await client.query(
+          `UPDATE transactions SET donor_name = $1, updated_at = NOW()
+           WHERE company_id = $2 AND donor_name IS NOT NULL AND LOWER(TRIM(donor_name)) = LOWER(TRIM($3))`,
+          [targetName, companyId, srcRaw],
+        );
+        transactionsUpdated += r1.rowCount ?? 0;
+
+        const r2 = await client.query(
+          `UPDATE donations SET donor_name = $1, updated_at = NOW()
+           WHERE company_id = $2 AND LOWER(TRIM(donor_name)) = LOWER(TRIM($3))`,
+          [targetName, companyId, srcRaw],
+        );
+        donationsUpdated += r2.rowCount ?? 0;
+
+        const r3 = await client.query(
+          `UPDATE pledges SET donor_name = $1, updated_at = NOW()
+           WHERE company_id = $2 AND LOWER(TRIM(donor_name)) = LOWER(TRIM($3))`,
+          [targetName, companyId, srcRaw],
+        );
+        pledgesUpdated += r3.rowCount ?? 0;
+      }
+
+      await client.query("COMMIT");
+      res.json({ transactionsUpdated, donationsUpdated, pledgesUpdated });
+    } catch (e) {
+      await client.query("ROLLBACK");
+      throw e;
+    } finally {
+      client.release();
+    }
+  } catch (error: any) {
+    console.error("Merge donors error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/**
  * GET /api/donors/:name/history
  * Returns all gifts for a specific donor (combined from transactions + donations).
  */
@@ -149,31 +256,6 @@ router.get("/:name/history", requireAuth, async (req, res) => {
     })));
   } catch (error: any) {
     console.error("Get donor history error:", error);
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-/**
- * GET /api/donors/years
- * Returns distinct years that have donor activity.
- */
-router.get("/years", requireAuth, async (req, res) => {
-  try {
-    const { companyId } = (req as any).user;
-    const { rows } = await pool.query(`
-      SELECT DISTINCT EXTRACT(YEAR FROM date)::int AS year
-      FROM (
-        SELECT date FROM transactions
-        WHERE company_id = $1 AND donor_name IS NOT NULL AND donor_name <> '' AND is_void = false
-        UNION ALL
-        SELECT date FROM donations
-        WHERE company_id = $1 AND donor_name IS NOT NULL AND donor_name <> ''
-      ) combined
-      ORDER BY year DESC
-    `, [companyId]);
-    res.json(rows.map(r => r.year));
-  } catch (error: any) {
-    console.error("Get donor years error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });
