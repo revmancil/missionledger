@@ -133,21 +133,21 @@ const STRIPE_PLANS = [
     description: "Perfect for small nonprofits and churches just getting started.",
     metadata: { features: "1 bank account|Up to 500 transactions/month|Standard financial reports|Email support|Plaid bank sync", order: "1" },
     monthlyAmount: 2500,
-    yearlyAmount: 19000,
+    yearlyAmount: 24000,
   },
   {
     name: "Professional",
     description: "Full-featured accounting for growing nonprofits.",
     metadata: { features: "5 bank accounts|Unlimited transactions|Advanced reports & analytics|Priority support|Plaid bank sync|Multi-user access|Period close wizard", order: "2", featured: "true" },
     monthlyAmount: 4900,
-    yearlyAmount: 49000,
+    yearlyAmount: 48000,
   },
   {
     name: "Enterprise",
     description: "Unlimited scale for large organizations and networks.",
     metadata: { features: "Unlimited bank accounts|Unlimited transactions|Custom reports|Dedicated support|Plaid bank sync|Unlimited users|Multi-org management|API access", order: "3" },
     monthlyAmount: 9900,
-    yearlyAmount: 99000,
+    yearlyAmount: 96000,
   },
 ];
 
