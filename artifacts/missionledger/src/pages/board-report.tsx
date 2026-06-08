@@ -58,6 +58,102 @@ const PERIOD_OPTIONS: { id: PeriodKind; label: string }[] = [
   { id: "ytd", label: "YTD" },
 ];
 
+const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+function utcYmdToday(): string {
+  const d = new Date();
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+}
+
+function utcMonthEndYmd(year: number, monthIndex0: number): string {
+  const last = new Date(Date.UTC(year, monthIndex0 + 1, 0)).getUTCDate();
+  return `${year}-${String(monthIndex0 + 1).padStart(2, "0")}-${String(last).padStart(2, "0")}`;
+}
+
+function resolveClientPeriod(kind: PeriodKind): { kind: PeriodKind; startDate: string; endDate: string; label: string } {
+  const now = new Date();
+  const y = now.getUTCFullYear();
+  const m = now.getUTCMonth();
+  const today = utcYmdToday();
+
+  if (kind === "month") {
+    const startDate = `${y}-${String(m + 1).padStart(2, "0")}-01`;
+    const endDate = utcMonthEndYmd(y, m) > today ? today : utcMonthEndYmd(y, m);
+    return { kind, startDate, endDate, label: `${MONTH_NAMES[m]} ${y}` };
+  }
+  if (kind === "quarter") {
+    const qStart = Math.floor(m / 3) * 3;
+    const startDate = `${y}-${String(qStart + 1).padStart(2, "0")}-01`;
+    const endDate = utcMonthEndYmd(y, qStart + 2) > today ? today : utcMonthEndYmd(y, qStart + 2);
+    return { kind, startDate, endDate, label: `Q${Math.floor(qStart / 3) + 1} ${y}` };
+  }
+  if (kind === "year") {
+    const endDate = `${y}-12-31` > today ? today : `${y}-12-31`;
+    return { kind, startDate: `${y}-01-01`, endDate, label: `Calendar Year ${y}` };
+  }
+  return { kind: "ytd", startDate: `${y}-01-01`, endDate: today, label: `Year to Date ${y}` };
+}
+
+const EMPTY_PROFIT_LOSS: BoardReport["profitLoss"] = {
+  startDate: "",
+  endDate: "",
+  totalRevenue: 0,
+  totalExpenses: 0,
+  netIncome: 0,
+  topRevenue: [],
+  topExpenses: [],
+};
+
+const EMPTY_BALANCE_SHEET: BoardReport["balanceSheet"] = {
+  asOfDate: utcYmdToday(),
+  totalAssets: 0,
+  totalLiabilities: 0,
+  totalNetAssets: 0,
+  totalUnrestrictedNetAssets: 0,
+  totalRestrictedNetAssets: 0,
+  netIncome: 0,
+  topAssets: [],
+  topLiabilities: [],
+};
+
+/** Normalize API payloads from older servers or partial responses. */
+function normalizeBoardReport(raw: Record<string, unknown>, periodFilter: PeriodKind): BoardReport {
+  const period = (raw.period as BoardReport["period"] | undefined) ?? {
+    year: new Date().getUTCFullYear(),
+    quarter: Math.floor(new Date().getUTCMonth() / 3) + 1,
+    label: `Q${Math.floor(new Date().getUTCMonth() / 3) + 1} ${new Date().getUTCFullYear()}`,
+  };
+  const dateRange = (raw.dateRange as BoardReport["dateRange"] | undefined) ?? resolveClientPeriod(periodFilter);
+  const fh = (raw.financialHealth as Record<string, unknown> | undefined) ?? {};
+  const budget = (fh.budget as BoardReport["financialHealth"]["budget"] | undefined) ?? {
+    total: 0, actual: 0, percent: 0, remaining: 0,
+  };
+
+  return {
+    ...(raw as unknown as BoardReport),
+    dateRange,
+    period,
+    profitLoss: (raw.profitLoss as BoardReport["profitLoss"] | undefined) ?? {
+      ...EMPTY_PROFIT_LOSS,
+      startDate: dateRange.startDate,
+      endDate: dateRange.endDate,
+    },
+    balanceSheet: (raw.balanceSheet as BoardReport["balanceSheet"] | undefined) ?? {
+      ...EMPTY_BALANCE_SHEET,
+      asOfDate: dateRange.endDate,
+    },
+    financialHealth: {
+      totalCash: Number(fh.totalCash ?? 0),
+      periodRevenue: Number(fh.periodRevenue ?? fh.ytdRevenue ?? 0),
+      periodExpenses: Number(fh.periodExpenses ?? fh.ytdExpenses ?? 0),
+      periodNet: Number(fh.periodNet ?? fh.ytdNet ?? 0),
+      periodBurnRate: Number(fh.periodBurnRate ?? fh.ytdBurnRate ?? 0),
+      monthsOfRunway: (fh.monthsOfRunway as number | null | undefined) ?? null,
+      budget,
+    },
+  };
+}
+
 interface BoardReport {
   generatedAt: string;
   dateRange: { kind: PeriodKind; startDate: string; endDate: string; label: string };
@@ -185,11 +281,12 @@ export default function BoardReportPage() {
 
   const { data, isLoading, isError, refetch, isFetching } = useQuery<BoardReport>({
     queryKey,
-    queryFn: () => {
+    queryFn: async () => {
       const p = new URLSearchParams();
       p.set("period", periodFilter);
       if (adminView && isAdmin) p.set("adminView", "true");
-      return apiGet(`api/board-report?${p.toString()}`);
+      const raw = await apiGet(`api/board-report?${p.toString()}`);
+      return normalizeBoardReport(raw as Record<string, unknown>, periodFilter);
     },
   });
 

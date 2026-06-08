@@ -185,7 +185,7 @@ export async function buildHighLevelBalanceSheet(
 
   const totalUnrestrictedNetAssets = round2(unrestrictedEquity + (unrestrictedIncome - unrestrictedExpense));
   const totalRestrictedNetAssets = round2(restrictedEquity + (restrictedIncome - restrictedExpense));
-  netIncome = round2((unrestrictedIncome + restrictedIncome) - (unrestrictedExpense + restrictedExpense));
+  const netIncome = round2((unrestrictedIncome + restrictedIncome) - (unrestrictedExpense + restrictedExpense));
 
   const totalAssets = round2(assets.reduce((s, r) => s + r.amount, 0));
   const totalLiabilities = round2(liabilities.reduce((s, r) => s + r.amount, 0));
