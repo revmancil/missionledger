@@ -18,27 +18,58 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-
-const BASE = import.meta.env.BASE_URL;
+import { authJsonFetch, readJsonSafe } from "@/lib/auth-fetch";
 
 function fmt(n: number) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n);
 }
 
-function apiGet(path: string) {
-  return fetch(`${BASE}${path}`, { credentials: "include" }).then(r => r.ok ? r.json() : r.json().then((e: any) => Promise.reject(e.error)));
+function apiErrorMessage(res: Response, body: { error?: string; message?: string } | null): string {
+  const msg = body?.message || body?.error;
+  if (res.status === 401) return "You are not signed in. Please log in and try again.";
+  if (res.status === 403) {
+    if (msg === "READ_ONLY_ROLE") return body?.message || "Your role is read-only.";
+    if (msg === "Forbidden") return "You don't have permission to manage budgets. An admin role is required.";
+  }
+  return msg || "Request failed";
 }
-function apiPost(path: string, body: any) {
-  return fetch(`${BASE}${path}`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
-    .then(r => r.ok ? r.json() : r.json().then((e: any) => Promise.reject(e.error)));
+
+async function apiGet(path: string) {
+  const res = await authJsonFetch(path);
+  if (!res.ok) throw new Error(apiErrorMessage(res, await readJsonSafe(res)));
+  return res.json();
 }
-function apiPut(path: string, body: any) {
-  return fetch(`${BASE}${path}`, { method: "PUT", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
-    .then(r => r.ok ? r.json() : r.json().then((e: any) => Promise.reject(e.error)));
+
+async function apiPost(path: string, body: unknown) {
+  const res = await authJsonFetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(apiErrorMessage(res, await readJsonSafe(res)));
+  return res.json();
 }
-function apiDelete(path: string) {
-  return fetch(`${BASE}${path}`, { method: "DELETE", credentials: "include" })
-    .then(r => r.ok ? r.json() : r.json().then((e: any) => Promise.reject(e.error)));
+
+async function apiPut(path: string, body: unknown) {
+  const res = await authJsonFetch(path, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(apiErrorMessage(res, await readJsonSafe(res)));
+  return res.json();
+}
+
+async function apiDelete(path: string) {
+  const res = await authJsonFetch(path, { method: "DELETE" });
+  if (!res.ok) throw new Error(apiErrorMessage(res, await readJsonSafe(res)));
+  return res.json();
+}
+
+function mutationErrorMessage(e: unknown, fallback: string): string {
+  if (e instanceof Error && e.message) return e.message;
+  if (typeof e === "string" && e) return e;
+  return fallback;
 }
 
 interface BudgetSummary {
@@ -111,14 +142,14 @@ export default function BudgetPage() {
       setCreateOpen(false);
       toast.success("Budget created");
     },
-    onError: (e: any) => toast.error(e ?? "Failed to create budget"),
+    onError: (e: unknown) => toast.error(mutationErrorMessage(e, "Failed to create budget")),
   });
 
   const toggleActive = useMutation({
     mutationFn: ({ id, isActive }: { id: string; isActive: boolean }) =>
       apiPut(`api/budgets/${id}`, { isActive }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["budgets"] }),
-    onError: (e: any) => toast.error(e ?? "Failed to update"),
+    onError: (e: unknown) => toast.error(mutationErrorMessage(e, "Failed to update")),
   });
 
   const deleteBudget = useMutation({
@@ -129,7 +160,7 @@ export default function BudgetPage() {
       setDeleteBudgetId(null);
       toast.success("Budget deleted");
     },
-    onError: (e: any) => toast.error(e ?? "Failed to delete"),
+    onError: (e: unknown) => toast.error(mutationErrorMessage(e, "Failed to delete")),
   });
 
   const addLine = useMutation({
@@ -140,7 +171,7 @@ export default function BudgetPage() {
       setAddLineOpen(false);
       toast.success("Line item added");
     },
-    onError: (e: any) => toast.error(e ?? "Failed to add line"),
+    onError: (e: unknown) => toast.error(mutationErrorMessage(e, "Failed to add line")),
   });
 
   const updateLine = useMutation({
@@ -151,7 +182,7 @@ export default function BudgetPage() {
       qc.invalidateQueries({ queryKey: ["budgets"] });
       setEditingLineId(null);
     },
-    onError: (e: any) => toast.error(e ?? "Failed to update"),
+    onError: (e: unknown) => toast.error(mutationErrorMessage(e, "Failed to update")),
   });
 
   const deleteLine = useMutation({
@@ -162,7 +193,7 @@ export default function BudgetPage() {
       setDeleteLineId(null);
       toast.success("Line item removed");
     },
-    onError: (e: any) => toast.error(e ?? "Failed to delete"),
+    onError: (e: unknown) => toast.error(mutationErrorMessage(e, "Failed to delete")),
   });
 
   const totalBudgeted = lines.reduce((s, l) => s + l.amount, 0);
