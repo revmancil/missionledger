@@ -1,4 +1,4 @@
-import { pgTable, text, numeric, integer, boolean, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, text, numeric, integer, boolean, timestamp, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -20,6 +20,8 @@ export const budgetLines = pgTable("budget_lines", {
   companyId: text("company_id").notNull(),
   accountId: text("account_id").notNull(),
   amount: numeric("amount", { precision: 15, scale: 2, mode: "number" }).notNull().default(0).$type<number>(),
+  /** Monthly budget amounts; length matches months in parent budget period. Annual total = sum. */
+  monthlyAmounts: jsonb("monthly_amounts").$type<number[] | null>(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

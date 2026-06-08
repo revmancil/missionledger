@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import {
   Plus, Trash2, CheckCircle2, Circle, DollarSign,
-  TrendingUp, TrendingDown, ChevronRight, Edit2, X, Check,
+  TrendingUp, TrendingDown, ChevronRight, Edit2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -83,15 +83,104 @@ interface BudgetSummary {
   lineCount: number;
 }
 
+interface BudgetMonth {
+  key: string;
+  label: string;
+}
+
 interface BudgetLine {
   id: string;
   accountId: string;
   amount: number;
+  monthlyAmounts: number[];
+  monthlyActuals: number[];
   actual: number;
   remaining: number;
   percent: number;
   overBudget: boolean;
   account: { id: string; code: string; name: string; type: string } | null;
+}
+
+interface BudgetLinesResponse {
+  months: BudgetMonth[];
+  lines: BudgetLine[];
+}
+
+function sumMonthly(values: number[]): number {
+  return Math.round(values.reduce((s, v) => s + (Number(v) || 0), 0) * 100) / 100;
+}
+
+function emptyMonthly(monthCount: number): string[] {
+  return Array(monthCount).fill("0");
+}
+
+function MonthlyAmountGrid({
+  months,
+  values,
+  onChange,
+  disabled,
+}: {
+  months: BudgetMonth[];
+  values: string[];
+  onChange: (next: string[]) => void;
+  disabled?: boolean;
+}) {
+  const annualTotal = sumMonthly(values.map((v) => parseFloat(v) || 0));
+
+  function setAt(index: number, raw: string) {
+    const next = [...values];
+    next[index] = raw;
+    onChange(next);
+  }
+
+  function spreadEvenly(annual: number) {
+    if (months.length === 0) return;
+    const even = Math.round((annual / months.length) * 100) / 100;
+    const next = Array(months.length).fill(String(even));
+    const diff = Math.round((annual - even * months.length) * 100) / 100;
+    if (diff !== 0) next[months.length - 1] = String(Math.round((even + diff) * 100) / 100);
+    onChange(next);
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs text-muted-foreground">Enter an amount for each month. The annual total is the sum.</p>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={disabled || months.length === 0}
+          onClick={() => {
+            const current = sumMonthly(values.map((v) => parseFloat(v) || 0));
+            spreadEvenly(current > 0 ? current : 0);
+          }}
+        >
+          Spread evenly
+        </Button>
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-64 overflow-y-auto pr-1">
+        {months.map((m, i) => (
+          <div key={m.key} className="space-y-1">
+            <label className="text-[11px] font-medium text-muted-foreground">{m.label}</label>
+            <Input
+              type="number"
+              min="0"
+              step="0.01"
+              value={values[i] ?? "0"}
+              disabled={disabled}
+              onChange={(e) => setAt(i, e.target.value)}
+              className="h-8 text-sm"
+            />
+          </div>
+        ))}
+      </div>
+      <div className="flex items-center justify-between rounded-lg bg-muted/50 px-3 py-2 text-sm">
+        <span className="font-medium text-muted-foreground">Annual total</span>
+        <span className="font-semibold">{fmt(annualTotal)}</span>
+      </div>
+    </div>
+  );
 }
 
 interface CoaAccount {
@@ -108,8 +197,10 @@ export default function BudgetPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [addLineOpen, setAddLineOpen] = useState(false);
   const [deleteBudgetId, setDeleteBudgetId] = useState<string | null>(null);
-  const [editingLineId, setEditingLineId] = useState<string | null>(null);
-  const [editAmount, setEditAmount] = useState("");
+  const [editLine, setEditLine] = useState<BudgetLine | null>(null);
+  const [editMonthly, setEditMonthly] = useState<string[]>([]);
+  const [addMonthly, setAddMonthly] = useState<string[]>([]);
+  const [showMonthlyGrid, setShowMonthlyGrid] = useState(false);
   const [deleteLineId, setDeleteLineId] = useState<string | null>(null);
 
   const { data: budgetList = [], isLoading: loadingList } = useQuery<BudgetSummary[]>({
@@ -119,11 +210,14 @@ export default function BudgetPage() {
 
   const selectedBudget = budgetList.find(b => b.id === selectedId) ?? null;
 
-  const { data: lines = [], isLoading: loadingLines } = useQuery<BudgetLine[]>({
+  const { data: lineData, isLoading: loadingLines } = useQuery<BudgetLinesResponse>({
     queryKey: ["budget-lines", selectedId],
     queryFn: () => apiGet(`api/budgets/${selectedId}/lines`),
     enabled: !!selectedId,
   });
+
+  const budgetMonths = lineData?.months ?? [];
+  const lines = lineData?.lines ?? [];
 
   const { data: coaAll = [] } = useQuery<CoaAccount[]>({
     queryKey: ["coa"],
@@ -175,12 +269,13 @@ export default function BudgetPage() {
   });
 
   const updateLine = useMutation({
-    mutationFn: ({ lineId, amount }: { lineId: string; amount: number }) =>
-      apiPut(`api/budgets/${selectedId}/lines/${lineId}`, { amount }),
+    mutationFn: ({ lineId, monthlyAmounts }: { lineId: string; monthlyAmounts: number[] }) =>
+      apiPut(`api/budgets/${selectedId}/lines/${lineId}`, { monthlyAmounts }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["budget-lines", selectedId] });
       qc.invalidateQueries({ queryKey: ["budgets"] });
-      setEditingLineId(null);
+      setEditLine(null);
+      toast.success("Budget line updated");
     },
     onError: (e: unknown) => toast.error(mutationErrorMessage(e, "Failed to update")),
   });
@@ -213,24 +308,42 @@ export default function BudgetPage() {
     });
   }
 
+  function openAddLine() {
+    setAddMonthly(emptyMonthly(budgetMonths.length || 12));
+    setAddLineOpen(true);
+  }
+
   function handleAddLineSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
+    const monthlyAmounts = addMonthly.map((v) => parseFloat(v) || 0);
+    if (monthlyAmounts.some((v) => v < 0)) {
+      toast.error("Monthly amounts cannot be negative");
+      return;
+    }
     addLine.mutate({
       accountId: fd.get("accountId"),
-      amount: parseFloat(fd.get("amount") as string),
+      monthlyAmounts,
     });
   }
 
   function startEdit(line: BudgetLine) {
-    setEditingLineId(line.id);
-    setEditAmount(String(line.amount));
+    setEditLine(line);
+    setEditMonthly(
+      line.monthlyAmounts.length > 0
+        ? line.monthlyAmounts.map((v) => String(v))
+        : emptyMonthly(budgetMonths.length || 12),
+    );
   }
 
-  function saveEdit(lineId: string) {
-    const val = parseFloat(editAmount);
-    if (isNaN(val) || val < 0) { toast.error("Enter a valid amount"); return; }
-    updateLine.mutate({ lineId, amount: val });
+  function saveEdit() {
+    if (!editLine) return;
+    const monthlyAmounts = editMonthly.map((v) => parseFloat(v) || 0);
+    if (monthlyAmounts.some((v) => v < 0)) {
+      toast.error("Monthly amounts cannot be negative");
+      return;
+    }
+    updateLine.mutate({ lineId: editLine.id, monthlyAmounts });
   }
 
   const currentYear = new Date().getFullYear();
@@ -370,9 +483,16 @@ export default function BudgetPage() {
             <div className="rounded-xl border bg-card overflow-hidden flex flex-col">
               <div className="flex items-center justify-between px-5 py-4 border-b">
                 <h3 className="font-semibold text-sm">Budget Lines</h3>
-                <Button size="sm" onClick={() => setAddLineOpen(true)}>
-                  <Plus className="w-4 h-4 mr-1" /> Add Line
-                </Button>
+                <div className="flex items-center gap-2">
+                  {lines.length > 0 && budgetMonths.length > 0 && (
+                    <Button size="sm" variant="outline" onClick={() => setShowMonthlyGrid((v) => !v)}>
+                      {showMonthlyGrid ? "Hide monthly grid" : "Show monthly grid"}
+                    </Button>
+                  )}
+                  <Button size="sm" onClick={openAddLine}>
+                    <Plus className="w-4 h-4 mr-1" /> Add Line
+                  </Button>
+                </div>
               </div>
 
               {loadingLines && (
@@ -382,7 +502,7 @@ export default function BudgetPage() {
               {!loadingLines && lines.length === 0 && (
                 <div className="py-12 text-center">
                   <p className="text-muted-foreground text-sm mb-3">No line items yet</p>
-                  <Button size="sm" variant="outline" onClick={() => setAddLineOpen(true)}>
+                  <Button size="sm" variant="outline" onClick={openAddLine}>
                     <Plus className="w-4 h-4 mr-1" /> Add First Line
                   </Button>
                 </div>
@@ -394,7 +514,7 @@ export default function BudgetPage() {
                     <thead>
                       <tr className="border-b bg-muted/30">
                         <th className="text-left px-4 py-2.5 font-medium text-muted-foreground text-xs">Account</th>
-                        <th className="text-right px-4 py-2.5 font-medium text-muted-foreground text-xs">Budgeted</th>
+                        <th className="text-right px-4 py-2.5 font-medium text-muted-foreground text-xs">Annual Budget</th>
                         <th className="text-right px-4 py-2.5 font-medium text-muted-foreground text-xs">Actual</th>
                         <th className="text-right px-4 py-2.5 font-medium text-muted-foreground text-xs">Remaining</th>
                         <th className="px-4 py-2.5 font-medium text-muted-foreground text-xs min-w-[120px]">Used</th>
@@ -413,39 +533,13 @@ export default function BudgetPage() {
                             )}
                           </td>
                           <td className="px-4 py-3 text-right">
-                            {editingLineId === line.id ? (
-                              <div className="flex items-center justify-end gap-1">
-                                <Input
-                                  type="number"
-                                  value={editAmount}
-                                  onChange={e => setEditAmount(e.target.value)}
-                                  className="w-28 h-7 text-right text-sm"
-                                  autoFocus
-                                  onKeyDown={e => {
-                                    if (e.key === "Enter") saveEdit(line.id);
-                                    if (e.key === "Escape") setEditingLineId(null);
-                                  }}
-                                />
-                                <button
-                                  onClick={() => saveEdit(line.id)}
-                                  className="text-green-600 hover:text-green-700 p-0.5"
-                                  disabled={updateLine.isPending}
-                                >
-                                  <Check className="w-4 h-4" />
-                                </button>
-                                <button onClick={() => setEditingLineId(null)} className="text-muted-foreground hover:text-foreground p-0.5">
-                                  <X className="w-4 h-4" />
-                                </button>
-                              </div>
-                            ) : (
-                              <button
-                                onClick={() => startEdit(line)}
-                                className="group flex items-center gap-1 ml-auto hover:text-primary transition-colors"
-                              >
-                                <span className="font-medium">{fmt(line.amount)}</span>
-                                <Edit2 className="w-3 h-3 opacity-60 shrink-0" />
-                              </button>
-                            )}
+                            <button
+                              onClick={() => startEdit(line)}
+                              className="group flex items-center gap-1 ml-auto hover:text-primary transition-colors"
+                            >
+                              <span className="font-medium">{fmt(line.amount)}</span>
+                              <Edit2 className="w-3 h-3 opacity-60 shrink-0" />
+                            </button>
                           </td>
                           <td className="px-4 py-3 text-right text-muted-foreground">{fmt(line.actual)}</td>
                           <td className={cn("px-4 py-3 text-right font-medium", line.remaining < 0 ? "text-red-600" : "text-green-600")}>
@@ -494,6 +588,48 @@ export default function BudgetPage() {
                           </div>
                         </td>
                         <td />
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              )}
+
+              {showMonthlyGrid && lines.length > 0 && budgetMonths.length > 0 && (
+                <div className="border-t overflow-x-auto">
+                  <table className="w-full text-xs min-w-[720px]">
+                    <thead>
+                      <tr className="border-b bg-muted/20">
+                        <th className="text-left px-4 py-2 font-medium text-muted-foreground sticky left-0 bg-muted/20">Account</th>
+                        {budgetMonths.map((m) => (
+                          <th key={m.key} className="text-right px-2 py-2 font-medium text-muted-foreground whitespace-nowrap">{m.label}</th>
+                        ))}
+                        <th className="text-right px-4 py-2 font-medium text-muted-foreground">Annual</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {lines.map((line) => (
+                        <tr key={`monthly-${line.id}`} className="hover:bg-muted/10">
+                          <td className="px-4 py-2 font-medium sticky left-0 bg-card whitespace-nowrap">
+                            {line.account ? `${line.account.code}` : line.accountId}
+                          </td>
+                          {budgetMonths.map((m, i) => (
+                            <td key={`${line.id}-${m.key}`} className="px-2 py-2 text-right tabular-nums text-muted-foreground">
+                              {fmt(line.monthlyAmounts[i] ?? 0)}
+                            </td>
+                          ))}
+                          <td className="px-4 py-2 text-right font-semibold">{fmt(line.amount)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="border-t bg-muted/20 font-semibold">
+                        <td className="px-4 py-2 sticky left-0 bg-muted/20">Monthly totals</td>
+                        {budgetMonths.map((m, i) => (
+                          <td key={`total-${m.key}`} className="px-2 py-2 text-right">
+                            {fmt(lines.reduce((s, l) => s + (l.monthlyAmounts[i] ?? 0), 0))}
+                          </td>
+                        ))}
+                        <td className="px-4 py-2 text-right">{fmt(totalBudgeted)}</td>
                       </tr>
                     </tfoot>
                   </table>
@@ -548,7 +684,7 @@ export default function BudgetPage() {
 
       {/* ── Add Line Item Dialog ─────────────────────────────────────── */}
       <Dialog open={addLineOpen} onOpenChange={setAddLineOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Add Budget Line</DialogTitle></DialogHeader>
           <form onSubmit={handleAddLineSubmit} className="space-y-4 pt-2">
             <div className="space-y-1.5">
@@ -571,10 +707,15 @@ export default function BudgetPage() {
                 <p className="text-xs text-muted-foreground">All active accounts are already in this budget.</p>
               )}
             </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">Budgeted Amount</label>
-              <Input name="amount" type="number" required min="0" step="0.01" placeholder="0.00" />
-            </div>
+            <MonthlyAmountGrid
+              months={budgetMonths.length > 0 ? budgetMonths : Array.from({ length: 12 }, (_, i) => ({
+                key: `m${i}`,
+                label: `Month ${i + 1}`,
+              }))}
+              values={addMonthly}
+              onChange={setAddMonthly}
+              disabled={addLine.isPending}
+            />
             <div className="flex justify-end gap-2 pt-2">
               <Button type="button" variant="outline" onClick={() => setAddLineOpen(false)}>Cancel</Button>
               <Button type="submit" disabled={addLine.isPending || coaOptions.length === 0}>
@@ -582,6 +723,33 @@ export default function BudgetPage() {
               </Button>
             </div>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Edit Monthly Amounts Dialog ──────────────────────────────── */}
+      <Dialog open={!!editLine} onOpenChange={(open) => !open && setEditLine(null)}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              Monthly budget — {editLine?.account ? `${editLine.account.code} – ${editLine.account.name}` : "Account"}
+            </DialogTitle>
+          </DialogHeader>
+          {editLine && (
+            <div className="space-y-4 pt-2">
+              <MonthlyAmountGrid
+                months={budgetMonths}
+                values={editMonthly}
+                onChange={setEditMonthly}
+                disabled={updateLine.isPending}
+              />
+              <div className="flex justify-end gap-2">
+                <Button type="button" variant="outline" onClick={() => setEditLine(null)}>Cancel</Button>
+                <Button onClick={saveEdit} disabled={updateLine.isPending}>
+                  {updateLine.isPending ? "Saving…" : "Save"}
+                </Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 

@@ -761,6 +761,15 @@ async function ensureSchema() {
     console.error("Schema migration error (numeric conversion):", err.message);
   }
 
+  try {
+    await pool.query(
+      "ALTER TABLE budget_lines ADD COLUMN IF NOT EXISTS monthly_amounts jsonb",
+    );
+    console.log("Schema check: budget_lines.monthly_amounts OK");
+  } catch (err: any) {
+    console.error("Schema migration error (budget_lines.monthly_amounts):", err.message);
+  }
+
   // ── Repair GL imbalances caused by float→numeric rounding ─────────────────
   // When real (float32) values are converted to numeric(15,2), entries that share
   // the same source_id (journal entry) can round asymmetrically and break the
