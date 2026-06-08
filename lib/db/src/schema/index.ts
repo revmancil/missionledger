@@ -21,3 +21,4 @@ export * from "./financialSnapshots";
 export * from "./organizationUsers";
 export * from "./helpMessages";
 export * from "./passwordResetTokens";
+export * from "./boardGovernance";

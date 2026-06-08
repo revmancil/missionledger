@@ -4,7 +4,7 @@ import {
   HandHeart, LogOut, BarChart3, Building,
   Banknote, ClipboardList, RefreshCcw, Wand2, Scale, CalendarCheck,
   ChevronDown, ArrowLeftRight, Shield, AlertTriangle, CheckCircle2,
-  CreditCard, PenLine, X, Heart, Target, SlidersHorizontal,
+  CreditCard, PenLine, X, Heart, Target, SlidersHorizontal, Presentation,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
@@ -28,6 +28,7 @@ const navGroups = [
     label: "Main",
     items: [
       { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+      { href: "/board-report", label: "Board Report", icon: Presentation },
       { href: "/reports", label: "Reports", icon: BarChart3 },
       { href: "/custom-reports", label: "Custom Reports", icon: SlidersHorizontal },
       { href: "/budget", label: "Budget Manager", icon: Target },
@@ -81,6 +82,7 @@ export function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
   const isBoardRole = user?.role === "OFFICER";
   const boardAllowed = new Set([
     "/dashboard",
+    "/board-report",
     "/reports",
     "/custom-reports",
     "/budget",

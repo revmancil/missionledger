@@ -770,6 +770,68 @@ async function ensureSchema() {
     console.error("Schema migration error (budget_lines.monthly_amounts):", err.message);
   }
 
+  try {
+    await pool.query(`
+      DO $$ BEGIN
+        CREATE TYPE risk_status AS ENUM ('GREEN', 'YELLOW', 'RED');
+      EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+    `);
+    await pool.query(`
+      DO $$ BEGIN
+        CREATE TYPE committee_type AS ENUM ('FINANCE', 'AUDIT', 'GOVERNANCE', 'EXECUTIVE', 'PROGRAM', 'OTHER');
+      EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS program_metrics (
+        id TEXT PRIMARY KEY NOT NULL,
+        company_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        description TEXT,
+        period_year INTEGER NOT NULL,
+        period_quarter INTEGER NOT NULL,
+        target_value NUMERIC(15,2) NOT NULL DEFAULT 0,
+        actual_value NUMERIC(15,2) NOT NULL DEFAULT 0,
+        unit TEXT,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      )
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS strategic_risks (
+        id TEXT PRIMARY KEY NOT NULL,
+        company_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT,
+        status risk_status NOT NULL DEFAULT 'GREEN',
+        owner_name TEXT,
+        review_date TIMESTAMP,
+        mitigation TEXT,
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      )
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS committee_updates (
+        id TEXT PRIMARY KEY NOT NULL,
+        company_id TEXT NOT NULL,
+        committee_type committee_type NOT NULL,
+        title TEXT NOT NULL,
+        body TEXT NOT NULL,
+        meeting_date TIMESTAMP,
+        author_name TEXT NOT NULL,
+        author_email TEXT,
+        is_published BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      )
+    `);
+    console.log("Schema check: board governance tables OK");
+  } catch (err: any) {
+    console.error("Schema migration error (board governance):", err.message);
+  }
+
   // ── Repair GL imbalances caused by float→numeric rounding ─────────────────
   // When real (float32) values are converted to numeric(15,2), entries that share
   // the same source_id (journal entry) can round asymmetrically and break the

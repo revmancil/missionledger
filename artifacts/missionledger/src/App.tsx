@@ -38,6 +38,7 @@ import AdminLoginPage from "@/pages/admin/login";
 import AdminGlobalCoaPage from "@/pages/admin/global-coa";
 import AdminAuditLogsPage from "@/pages/admin/audit-logs";
 import BudgetPage from "@/pages/budget";
+import BoardReportPage from "@/pages/board-report";
 import AdminUsersPage from "@/pages/admin-users";
 import GivePage from "@/pages/give";
 import FundLedgerPage from "@/pages/fund-ledger";
@@ -138,6 +139,7 @@ function Router() {
       <Route path="/reports"><SubscriptionGatedRoute component={ReportsPage} /></Route>
       <Route path="/custom-reports"><SubscriptionGatedRoute component={CustomReportsPage} /></Route>
       <Route path="/budget"><SubscriptionGatedRoute component={BudgetPage} /></Route>
+      <Route path="/board-report"><SubscriptionGatedRoute component={BoardReportPage} /></Route>
       <Route path="/donor-giving"><SubscriptionGatedRoute component={DonorGivingPage} /></Route>
       <Route path="/master-admin"><Redirect to="/admin" /></Route>
       <Route path="/billing"><ProtectedRoute component={BillingPage} /></Route>

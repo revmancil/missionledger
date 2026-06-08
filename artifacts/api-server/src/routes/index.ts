@@ -31,6 +31,7 @@ import financialSummaryRouter from "./financial-summary";
 import passwordResetRouter from "./password-reset";
 import customReportsRouter from "./custom-reports";
 import zeffyRouter from "./zeffy";
+import boardReportRouter from "./board-report";
 
 const router: IRouter = Router();
 
@@ -66,5 +67,6 @@ router.use("/financial-summary", financialSummaryRouter);
 router.use("/auth", passwordResetRouter);
 router.use("/custom-reports", customReportsRouter);
 router.use("/zeffy", zeffyRouter);
+router.use("/board-report", boardReportRouter);
 
 export default router;
