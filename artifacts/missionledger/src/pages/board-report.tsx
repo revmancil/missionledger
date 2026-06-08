@@ -223,6 +223,19 @@ export default function BoardReportPage() {
 
   const showAdminTools = isAdmin && adminView;
 
+  function handleDownloadPdf() {
+    try {
+      downloadBoardReportPdf(
+        data,
+        user?.companyName || "Organization",
+        { adminView: showAdminTools },
+      );
+      toast.success("Board report PDF downloaded");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to generate PDF");
+    }
+  }
+
   return (
     <AppLayout title="Board Member Report">
       <div className="space-y-6 max-w-6xl mx-auto">
