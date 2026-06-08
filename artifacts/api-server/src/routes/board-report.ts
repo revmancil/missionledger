@@ -6,7 +6,7 @@ import {
 import { eq, and, desc, asc, inArray } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
 import { toIsoString, toIsoStringOrNull, asDate } from "../lib/safeIso";
-import { parseBoardPeriodKind, resolveBoardPeriod, quarterForYmd, type BoardReportPeriod } from "../lib/boardReportPeriod";
+import { parseBoardPeriodKind, parseBoardPeriodAnchor, resolveBoardPeriod, quarterForYmd, type BoardReportPeriod } from "../lib/boardReportPeriod";
 import { buildHighLevelProfitLoss, buildHighLevelBalanceSheet } from "../lib/boardReportFinancials";
 
 const router = Router();
@@ -276,7 +276,8 @@ router.get("/", requireAuth, async (req, res) => {
     const user = (req as any).user;
     const { companyId, role, name, email } = user;
     const periodKind = parseBoardPeriodKind(req.query.period);
-    const reportPeriod = resolveBoardPeriod(periodKind);
+    const anchor = parseBoardPeriodAnchor(req.query);
+    const reportPeriod = resolveBoardPeriod(periodKind, anchor);
     if (!reportPeriod) return res.status(400).json({ error: "Invalid period" });
 
     const { year, quarter } = quarterForYmd(reportPeriod.endYmd);

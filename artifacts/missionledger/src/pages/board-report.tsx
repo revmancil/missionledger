@@ -11,6 +11,7 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
@@ -60,6 +61,30 @@ const PERIOD_OPTIONS: { id: PeriodKind; label: string }[] = [
 
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
+interface PeriodAnchor {
+  year: number;
+  month: number;
+  quarter: number;
+}
+
+function currentPeriodAnchor(): PeriodAnchor {
+  const now = new Date();
+  return {
+    year: now.getUTCFullYear(),
+    month: now.getUTCMonth() + 1,
+    quarter: Math.floor(now.getUTCMonth() / 3) + 1,
+  };
+}
+
+function buildYearOptions(): number[] {
+  const current = new Date().getUTCFullYear();
+  const years: number[] = [];
+  for (let y = current + 1; y >= current - 20; y--) years.push(y);
+  return years;
+}
+
+const YEAR_OPTIONS = buildYearOptions();
+
 function utcYmdToday(): string {
   const d = new Date();
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
@@ -70,28 +95,37 @@ function utcMonthEndYmd(year: number, monthIndex0: number): string {
   return `${year}-${String(monthIndex0 + 1).padStart(2, "0")}-${String(last).padStart(2, "0")}`;
 }
 
-function resolveClientPeriod(kind: PeriodKind): { kind: PeriodKind; startDate: string; endDate: string; label: string } {
+function resolveClientPeriod(
+  kind: PeriodKind,
+  anchor: PeriodAnchor,
+): { kind: PeriodKind; startDate: string; endDate: string; label: string } {
   const now = new Date();
-  const y = now.getUTCFullYear();
-  const m = now.getUTCMonth();
   const today = utcYmdToday();
+  const y = anchor.year;
+  const m = anchor.month - 1;
 
   if (kind === "month") {
-    const startDate = `${y}-${String(m + 1).padStart(2, "0")}-01`;
+    const startDate = `${y}-${String(anchor.month).padStart(2, "0")}-01`;
     const endDate = utcMonthEndYmd(y, m) > today ? today : utcMonthEndYmd(y, m);
     return { kind, startDate, endDate, label: `${MONTH_NAMES[m]} ${y}` };
   }
   if (kind === "quarter") {
-    const qStart = Math.floor(m / 3) * 3;
+    const qStart = (anchor.quarter - 1) * 3;
     const startDate = `${y}-${String(qStart + 1).padStart(2, "0")}-01`;
     const endDate = utcMonthEndYmd(y, qStart + 2) > today ? today : utcMonthEndYmd(y, qStart + 2);
-    return { kind, startDate, endDate, label: `Q${Math.floor(qStart / 3) + 1} ${y}` };
+    return { kind, startDate, endDate, label: `Q${anchor.quarter} ${y}` };
   }
   if (kind === "year") {
     const endDate = `${y}-12-31` > today ? today : `${y}-12-31`;
     return { kind, startDate: `${y}-01-01`, endDate, label: `Calendar Year ${y}` };
   }
-  return { kind: "ytd", startDate: `${y}-01-01`, endDate: today, label: `Year to Date ${y}` };
+  const endDate = y === now.getUTCFullYear() ? today : (`${y}-12-31` > today ? today : `${y}-12-31`);
+  return {
+    kind: "ytd",
+    startDate: `${y}-01-01`,
+    endDate,
+    label: y === now.getUTCFullYear() ? `Year to Date ${y}` : `Calendar Year ${y}`,
+  };
 }
 
 const EMPTY_PROFIT_LOSS: BoardReport["profitLoss"] = {
@@ -117,13 +151,13 @@ const EMPTY_BALANCE_SHEET: BoardReport["balanceSheet"] = {
 };
 
 /** Normalize API payloads from older servers or partial responses. */
-function normalizeBoardReport(raw: Record<string, unknown>, periodFilter: PeriodKind): BoardReport {
+function normalizeBoardReport(raw: Record<string, unknown>, periodFilter: PeriodKind, anchor: PeriodAnchor): BoardReport {
   const period = (raw.period as BoardReport["period"] | undefined) ?? {
     year: new Date().getUTCFullYear(),
     quarter: Math.floor(new Date().getUTCMonth() / 3) + 1,
     label: `Q${Math.floor(new Date().getUTCMonth() / 3) + 1} ${new Date().getUTCFullYear()}`,
   };
-  const dateRange = (raw.dateRange as BoardReport["dateRange"] | undefined) ?? resolveClientPeriod(periodFilter);
+  const dateRange = (raw.dateRange as BoardReport["dateRange"] | undefined) ?? resolveClientPeriod(periodFilter, anchor);
   const fh = (raw.financialHealth as Record<string, unknown> | undefined) ?? {};
   const budget = (fh.budget as BoardReport["financialHealth"]["budget"] | undefined) ?? {
     total: 0, actual: 0, percent: 0, remaining: 0,
@@ -272,21 +306,25 @@ export default function BoardReportPage() {
   const qc = useQueryClient();
   const isAdmin = user?.role === "ADMIN" || user?.role === "MASTER_ADMIN";
   const [periodFilter, setPeriodFilter] = useState<PeriodKind>("ytd");
+  const [periodAnchor, setPeriodAnchor] = useState<PeriodAnchor>(currentPeriodAnchor);
   const [adminView, setAdminView] = useState(false);
   const [metricDialog, setMetricDialog] = useState(false);
   const [riskDialog, setRiskDialog] = useState(false);
   const [committeeDialog, setCommitteeDialog] = useState(false);
 
-  const queryKey = ["board-report", periodFilter, adminView && isAdmin];
+  const queryKey = ["board-report", periodFilter, periodAnchor.year, periodAnchor.month, periodAnchor.quarter, adminView && isAdmin];
 
   const { data, isLoading, isError, refetch, isFetching } = useQuery<BoardReport>({
     queryKey,
     queryFn: async () => {
       const p = new URLSearchParams();
       p.set("period", periodFilter);
+      p.set("year", String(periodAnchor.year));
+      if (periodFilter === "month") p.set("month", String(periodAnchor.month));
+      if (periodFilter === "quarter") p.set("quarter", String(periodAnchor.quarter));
       if (adminView && isAdmin) p.set("adminView", "true");
       const raw = await apiGet(`api/board-report?${p.toString()}`);
-      return normalizeBoardReport(raw as Record<string, unknown>, periodFilter);
+      return normalizeBoardReport(raw as Record<string, unknown>, periodFilter, periodAnchor);
     },
   });
 
@@ -407,19 +445,67 @@ export default function BoardReportPage() {
         </div>
 
         {/* Period filter */}
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide mr-1">Period</span>
-          {PERIOD_OPTIONS.map((opt) => (
-            <Button
-              key={opt.id}
-              size="sm"
-              variant={periodFilter === opt.id ? "default" : "outline"}
-              onClick={() => setPeriodFilter(opt.id)}
-              disabled={isFetching && periodFilter === opt.id}
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border bg-muted/20 px-4 py-3">
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Period</span>
+          <div className="flex flex-wrap items-center gap-2">
+            {PERIOD_OPTIONS.map((opt) => (
+              <Button
+                key={opt.id}
+                size="sm"
+                variant={periodFilter === opt.id ? "default" : "outline"}
+                onClick={() => setPeriodFilter(opt.id)}
+                disabled={isFetching && periodFilter === opt.id}
+              >
+                {opt.label}
+              </Button>
+            ))}
+          </div>
+          <div className="h-5 w-px bg-border hidden sm:block" />
+          <div className="flex flex-wrap items-center gap-2">
+            <Select
+              value={String(periodAnchor.year)}
+              onValueChange={(v) => setPeriodAnchor((a) => ({ ...a, year: parseInt(v, 10) }))}
             >
-              {opt.label}
-            </Button>
-          ))}
+              <SelectTrigger className="w-[100px] h-8 text-sm bg-background">
+                <SelectValue placeholder="Year" />
+              </SelectTrigger>
+              <SelectContent>
+                {YEAR_OPTIONS.map((y) => (
+                  <SelectItem key={y} value={String(y)}>{y}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {periodFilter === "month" && (
+              <Select
+                value={String(periodAnchor.month)}
+                onValueChange={(v) => setPeriodAnchor((a) => ({ ...a, month: parseInt(v, 10) }))}
+              >
+                <SelectTrigger className="w-[140px] h-8 text-sm bg-background">
+                  <SelectValue placeholder="Month" />
+                </SelectTrigger>
+                <SelectContent>
+                  {MONTH_NAMES.map((name, i) => (
+                    <SelectItem key={name} value={String(i + 1)}>{name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+            {periodFilter === "quarter" && (
+              <Select
+                value={String(periodAnchor.quarter)}
+                onValueChange={(v) => setPeriodAnchor((a) => ({ ...a, quarter: parseInt(v, 10) }))}
+              >
+                <SelectTrigger className="w-[100px] h-8 text-sm bg-background">
+                  <SelectValue placeholder="Quarter" />
+                </SelectTrigger>
+                <SelectContent>
+                  {[1, 2, 3, 4].map((q) => (
+                    <SelectItem key={q} value={String(q)}>Q{q}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
         </div>
 
         {/* Action Required */}
