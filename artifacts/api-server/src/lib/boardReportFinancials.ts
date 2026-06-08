@@ -1,5 +1,7 @@
-import { db, chartOfAccounts, glEntries, journalEntries, funds } from "@workspace/db";
+import { db, chartOfAccounts, glEntries, journalEntries } from "@workspace/db";
 import { eq, and, gte, lte, inArray } from "drizzle-orm";
+import { buildStatementOfFinancialPosition } from "./statementOfFinancialPosition";
+import { bankRegisterBalancesByGlAccount } from "./bankBalance";
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
@@ -131,113 +133,56 @@ export async function buildHighLevelBalanceSheet(
   asOfEnd: Date,
   asOfYmd: string,
 ): Promise<HighLevelBalanceSheet> {
-  const [coaRows, glRows, fundRows, voidJeIds] = await Promise.all([
-    db
-      .select({
-        id: chartOfAccounts.id,
-        code: chartOfAccounts.code,
-        name: chartOfAccounts.name,
-        type: chartOfAccounts.type,
-      })
-      .from(chartOfAccounts)
-      .where(eq(chartOfAccounts.companyId, companyId)),
-    db
-      .select({
-        accountId: glEntries.accountId,
-        fundId: glEntries.fundId,
-        entryType: glEntries.entryType,
-        amount: glEntries.amount,
-        journalEntryId: glEntries.journalEntryId,
-      })
-      .from(glEntries)
-      .where(and(
-        eq(glEntries.companyId, companyId),
-        eq(glEntries.isVoid, false),
-        lte(glEntries.date, asOfEnd),
-      )),
-    db
-      .select({ id: funds.id, fundType: funds.fundType })
-      .from(funds)
-      .where(eq(funds.companyId, companyId)),
-    loadVoidJournalEntryIds(companyId),
+  const [sofp, registerByGl] = await Promise.all([
+    buildStatementOfFinancialPosition(companyId, asOfEnd, asOfYmd),
+    bankRegisterBalancesByGlAccount(companyId, asOfEnd),
   ]);
 
-  const coaMap = new Map(coaRows.map((c) => [c.id, c]));
-  const fundTypeMap = new Map(fundRows.map((f) => [f.id, f.fundType]));
+  const assetById = new Map(sofp.assets.map((a) => [a.accountId, { ...a }]));
 
-  const assetLiabByAccount: Record<string, { code: string; name: string; type: string; debit: number; credit: number }> = {};
-
-  let unrestrictedEquity = 0;
-  let unrestrictedIncome = 0;
-  let unrestrictedExpense = 0;
-  let restrictedEquity = 0;
-  let restrictedIncome = 0;
-  let restrictedExpense = 0;
-
-  for (const g of glRows) {
-    if (isOrphanedGlEntry(g.journalEntryId, voidJeIds)) continue;
-    const coa = coaMap.get(g.accountId);
-    if (!coa) continue;
-
-    const coaType = coa.type;
-    const debit = g.entryType === "DEBIT" ? g.amount : 0;
-    const credit = g.entryType === "CREDIT" ? g.amount : 0;
-
-    if (coaType === "ASSET" || coaType === "LIABILITY") {
-      if (!assetLiabByAccount[g.accountId]) {
-        assetLiabByAccount[g.accountId] = { code: coa.code, name: coa.name, type: coaType, debit: 0, credit: 0 };
-      }
-      assetLiabByAccount[g.accountId].debit += debit;
-      assetLiabByAccount[g.accountId].credit += credit;
-      continue;
-    }
-
-    if (coaType !== "EQUITY" && coaType !== "INCOME" && coaType !== "EXPENSE") continue;
-
-    const fundType = g.fundId ? (fundTypeMap.get(g.fundId) ?? "UNRESTRICTED") : "UNRESTRICTED";
-    const isUnrestricted = fundType === "UNRESTRICTED";
-    const balance = coaType === "EXPENSE" ? debit - credit : credit - debit;
-
-    if (coaType === "EQUITY") {
-      if (isUnrestricted) unrestrictedEquity += balance;
-      else restrictedEquity += balance;
-    } else if (coaType === "INCOME") {
-      if (isUnrestricted) unrestrictedIncome += balance;
-      else restrictedIncome += balance;
-    } else if (coaType === "EXPENSE") {
-      if (isUnrestricted) unrestrictedExpense += balance;
-      else restrictedExpense += balance;
+  for (const [glAccountId, registerBal] of registerByGl) {
+    const existing = assetById.get(glAccountId);
+    if (existing) {
+      existing.amount = round2(registerBal);
     }
   }
 
-  const assets: Array<{ accountCode: string; accountName: string; amount: number }> = [];
-  const liabilities: Array<{ accountCode: string; accountName: string; amount: number }> = [];
-
-  for (const acc of Object.values(assetLiabByAccount)) {
-    const gross = acc.debit + acc.credit;
-    const amount = acc.type === "ASSET" ? acc.debit - acc.credit : acc.credit - acc.debit;
-    if (!hasBalance(amount, gross)) continue;
-    const line = { accountCode: acc.code, accountName: acc.name, amount: round2(amount) };
-    if (acc.type === "ASSET") assets.push(line);
-    else liabilities.push(line);
+  const missingGlIds = [...registerByGl.keys()].filter((id) => !assetById.has(id));
+  if (missingGlIds.length > 0) {
+    const coaRows = await db
+      .select({ id: chartOfAccounts.id, code: chartOfAccounts.code, name: chartOfAccounts.name })
+      .from(chartOfAccounts)
+      .where(and(eq(chartOfAccounts.companyId, companyId), inArray(chartOfAccounts.id, missingGlIds)));
+    for (const coa of coaRows) {
+      const bal = registerByGl.get(coa.id);
+      if (bal == null || Math.abs(bal) < 0.005) continue;
+      assetById.set(coa.id, {
+        accountId: coa.id,
+        accountCode: coa.code,
+        accountName: coa.name,
+        amount: round2(bal),
+      });
+    }
   }
 
-  const totalUnrestrictedNetAssets = round2(unrestrictedEquity + (unrestrictedIncome - unrestrictedExpense));
-  const totalRestrictedNetAssets = round2(restrictedEquity + (restrictedIncome - restrictedExpense));
-  const netIncome = round2((unrestrictedIncome + restrictedIncome) - (unrestrictedExpense + restrictedExpense));
-  const totalAssets = round2(assets.reduce((s, r) => s + r.amount, 0));
-  const totalLiabilities = round2(liabilities.reduce((s, r) => s + r.amount, 0));
-  const totalNetAssets = round2(totalUnrestrictedNetAssets + totalRestrictedNetAssets);
+  const assets = [...assetById.values()];
+  const adjustedTotalAssets = round2(assets.reduce((s, r) => s + r.amount, 0));
+
+  const toTopLine = (lines: Array<{ accountCode: string; accountName: string; amount: number }>) =>
+    [...lines]
+      .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount))
+      .slice(0, 6)
+      .map((r) => ({ accountCode: r.accountCode, accountName: r.accountName, amount: r.amount }));
 
   return {
-    asOfDate: asOfYmd,
-    totalAssets,
-    totalLiabilities,
-    totalNetAssets,
-    totalUnrestrictedNetAssets,
-    totalRestrictedNetAssets,
-    netIncome,
-    topAssets: [...assets].sort((a, b) => b.amount - a.amount).slice(0, 6),
-    topLiabilities: [...liabilities].sort((a, b) => b.amount - a.amount).slice(0, 6),
+    asOfDate: sofp.asOfDate,
+    totalAssets: adjustedTotalAssets,
+    totalLiabilities: sofp.totalLiabilities,
+    totalNetAssets: sofp.totalNetAssets,
+    totalUnrestrictedNetAssets: sofp.totalUnrestrictedNetAssets,
+    totalRestrictedNetAssets: sofp.totalRestrictedNetAssets,
+    netIncome: sofp.netIncome,
+    topAssets: toTopLine(assets),
+    topLiabilities: toTopLine(sofp.liabilities),
   };
 }
