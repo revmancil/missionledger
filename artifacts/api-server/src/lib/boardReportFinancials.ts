@@ -1,6 +1,5 @@
-import { db } from "@workspace/db";
-import { sql } from "drizzle-orm";
-import { sqlRows } from "./sqlRows";
+import { db, chartOfAccounts, glEntries, journalEntries, funds } from "@workspace/db";
+import { eq, and, gte, lte, inArray } from "drizzle-orm";
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
@@ -38,6 +37,18 @@ export interface HighLevelBalanceSheet {
   topLiabilities: Array<{ accountCode: string; accountName: string; amount: number }>;
 }
 
+async function loadVoidJournalEntryIds(companyId: string): Promise<Set<string>> {
+  const rows = await db
+    .select({ id: journalEntries.id })
+    .from(journalEntries)
+    .where(and(eq(journalEntries.companyId, companyId), eq(journalEntries.status, "VOID")));
+  return new Set(rows.map((r) => r.id));
+}
+
+function isOrphanedGlEntry(journalEntryId: string | null, voidJeIds: Set<string>): boolean {
+  return journalEntryId != null && voidJeIds.has(journalEntryId);
+}
+
 export async function buildHighLevelProfitLoss(
   companyId: string,
   start: Date,
@@ -45,42 +56,59 @@ export async function buildHighLevelProfitLoss(
   startYmd: string,
   endYmd: string,
 ): Promise<HighLevelProfitLoss> {
-  const glRows = await db.execute(sql`
-    SELECT
-      c.code AS account_code,
-      c.name AS account_name,
-      c.coa_type AS account_type,
-      ROUND(COALESCE(SUM(CASE WHEN g.entry_type = 'DEBIT'  THEN g.amount ELSE 0 END), 0)::numeric, 2) AS total_debit,
-      ROUND(COALESCE(SUM(CASE WHEN g.entry_type = 'CREDIT' THEN g.amount ELSE 0 END), 0)::numeric, 2) AS total_credit
-    FROM gl_entries g
-    INNER JOIN chart_of_accounts c ON c.id = g.account_id AND c.company_id = g.company_id
-    LEFT JOIN journal_entries je ON je.id = g.journal_entry_id
-    WHERE g.company_id = ${companyId}
-      AND g.is_void = false
-      AND g.date >= ${start}
-      AND g.date <= ${end}
-      AND c.coa_type IN ('INCOME', 'EXPENSE')
-      AND (g.journal_entry_id IS NULL OR (je.id IS NOT NULL AND je.status != 'VOID'))
-    GROUP BY c.code, c.name, c.coa_type, c.sort_order
-    ORDER BY c.sort_order, c.code
-  `);
+  const [coaRows, glRows, voidJeIds] = await Promise.all([
+    db
+      .select({
+        id: chartOfAccounts.id,
+        code: chartOfAccounts.code,
+        name: chartOfAccounts.name,
+        type: chartOfAccounts.type,
+      })
+      .from(chartOfAccounts)
+      .where(and(
+        eq(chartOfAccounts.companyId, companyId),
+        inArray(chartOfAccounts.type, ["INCOME", "EXPENSE"]),
+      )),
+    db
+      .select({
+        accountId: glEntries.accountId,
+        entryType: glEntries.entryType,
+        amount: glEntries.amount,
+        journalEntryId: glEntries.journalEntryId,
+      })
+      .from(glEntries)
+      .where(and(
+        eq(glEntries.companyId, companyId),
+        eq(glEntries.isVoid, false),
+        gte(glEntries.date, start),
+        lte(glEntries.date, end),
+      )),
+    loadVoidJournalEntryIds(companyId),
+  ]);
+
+  const coaMap = new Map(coaRows.map((c) => [c.id, c]));
+  const byAccount: Record<string, { code: string; name: string; type: string; debit: number; credit: number }> = {};
+
+  for (const g of glRows) {
+    if (isOrphanedGlEntry(g.journalEntryId, voidJeIds)) continue;
+    const coa = coaMap.get(g.accountId);
+    if (!coa) continue;
+    if (!byAccount[g.accountId]) {
+      byAccount[g.accountId] = { code: coa.code, name: coa.name, type: coa.type, debit: 0, credit: 0 };
+    }
+    if (g.entryType === "DEBIT") byAccount[g.accountId].debit += g.amount;
+    else byAccount[g.accountId].credit += g.amount;
+  }
 
   const revenue: HighLevelPlLine[] = [];
   const expenses: HighLevelPlLine[] = [];
 
-  for (const r of sqlRows(glRows) as Record<string, unknown>[]) {
-    const debit = parseFloat(String(r.total_debit ?? 0)) || 0;
-    const credit = parseFloat(String(r.total_credit ?? 0)) || 0;
-    const gross = debit + credit;
-    const accountType = String(r.account_type ?? "");
-    const amount = accountType === "INCOME" ? credit - debit : debit - credit;
+  for (const acc of Object.values(byAccount)) {
+    const gross = acc.debit + acc.credit;
+    const amount = acc.type === "INCOME" ? acc.credit - acc.debit : acc.debit - acc.credit;
     if (!hasBalance(amount, gross)) continue;
-    const line = {
-      accountCode: String(r.account_code ?? ""),
-      accountName: String(r.account_name ?? ""),
-      amount: round2(amount),
-    };
-    if (accountType === "INCOME") revenue.push(line);
+    const line = { accountCode: acc.code, accountName: acc.name, amount: round2(amount) };
+    if (acc.type === "INCOME") revenue.push(line);
     else expenses.push(line);
   }
 
@@ -103,74 +131,73 @@ export async function buildHighLevelBalanceSheet(
   asOfEnd: Date,
   asOfYmd: string,
 ): Promise<HighLevelBalanceSheet> {
-  const assetLiabRows = await db.execute(sql`
-    SELECT
-      c.code AS account_code,
-      c.name AS account_name,
-      c.coa_type AS account_type,
-      ROUND(COALESCE(SUM(CASE WHEN g.entry_type = 'DEBIT'  THEN g.amount ELSE 0 END), 0)::numeric, 2) AS total_debit,
-      ROUND(COALESCE(SUM(CASE WHEN g.entry_type = 'CREDIT' THEN g.amount ELSE 0 END), 0)::numeric, 2) AS total_credit
-    FROM chart_of_accounts c
-    LEFT JOIN gl_entries g
-      ON g.account_id = c.id AND g.company_id = ${companyId} AND g.is_void = false AND g.date <= ${asOfEnd}
-    LEFT JOIN journal_entries je ON je.id = g.journal_entry_id AND je.status != 'VOID'
-    WHERE c.company_id = ${companyId}
-      AND c.coa_type IN ('ASSET', 'LIABILITY')
-      AND (g.id IS NULL OR g.journal_entry_id IS NULL OR je.id IS NOT NULL)
-    GROUP BY c.code, c.name, c.coa_type, c.sort_order
-    ORDER BY c.sort_order, c.code
-  `);
+  const [coaRows, glRows, fundRows, voidJeIds] = await Promise.all([
+    db
+      .select({
+        id: chartOfAccounts.id,
+        code: chartOfAccounts.code,
+        name: chartOfAccounts.name,
+        type: chartOfAccounts.type,
+      })
+      .from(chartOfAccounts)
+      .where(eq(chartOfAccounts.companyId, companyId)),
+    db
+      .select({
+        accountId: glEntries.accountId,
+        fundId: glEntries.fundId,
+        entryType: glEntries.entryType,
+        amount: glEntries.amount,
+        journalEntryId: glEntries.journalEntryId,
+      })
+      .from(glEntries)
+      .where(and(
+        eq(glEntries.companyId, companyId),
+        eq(glEntries.isVoid, false),
+        lte(glEntries.date, asOfEnd),
+      )),
+    db
+      .select({ id: funds.id, fundType: funds.fundType })
+      .from(funds)
+      .where(eq(funds.companyId, companyId)),
+    loadVoidJournalEntryIds(companyId),
+  ]);
 
-  const netAssetRows = await db.execute(sql`
-    SELECT
-      c.coa_type AS account_type,
-      COALESCE(f.fund_type::text, 'UNRESTRICTED') AS fund_type,
-      ROUND(COALESCE(SUM(CASE WHEN g.entry_type = 'DEBIT'  THEN g.amount ELSE 0 END), 0)::numeric, 2) AS total_debit,
-      ROUND(COALESCE(SUM(CASE WHEN g.entry_type = 'CREDIT' THEN g.amount ELSE 0 END), 0)::numeric, 2) AS total_credit
-    FROM chart_of_accounts c
-    LEFT JOIN gl_entries g
-      ON g.account_id = c.id AND g.company_id = ${companyId} AND g.is_void = false AND g.date <= ${asOfEnd}
-    LEFT JOIN journal_entries je ON je.id = g.journal_entry_id AND je.status != 'VOID'
-    LEFT JOIN funds f ON f.id = g.fund_id AND f.company_id = ${companyId}
-    WHERE c.company_id = ${companyId}
-      AND c.coa_type IN ('EQUITY', 'INCOME', 'EXPENSE')
-      AND (g.id IS NULL OR g.journal_entry_id IS NULL OR je.id IS NOT NULL)
-    GROUP BY c.coa_type, COALESCE(f.fund_type::text, 'UNRESTRICTED')
-  `);
+  const coaMap = new Map(coaRows.map((c) => [c.id, c]));
+  const fundTypeMap = new Map(fundRows.map((f) => [f.id, f.fundType]));
 
-  const assets: Array<{ accountCode: string; accountName: string; amount: number }> = [];
-  const liabilities: Array<{ accountCode: string; accountName: string; amount: number }> = [];
+  const assetLiabByAccount: Record<string, { code: string; name: string; type: string; debit: number; credit: number }> = {};
 
-  for (const r of sqlRows(assetLiabRows) as Record<string, unknown>[]) {
-    const debit = parseFloat(String(r.total_debit ?? 0)) || 0;
-    const credit = parseFloat(String(r.total_credit ?? 0)) || 0;
-    const gross = debit + credit;
-    const accountType = String(r.account_type ?? "");
-    const amount = accountType === "ASSET" ? debit - credit : credit - debit;
-    if (!hasBalance(amount, gross)) continue;
-    const line = {
-      accountCode: String(r.account_code ?? ""),
-      accountName: String(r.account_name ?? ""),
-      amount: round2(amount),
-    };
-    if (accountType === "ASSET") assets.push(line);
-    else liabilities.push(line);
-  }
-
+  let unrestrictedEquity = 0;
   let unrestrictedIncome = 0;
   let unrestrictedExpense = 0;
+  let restrictedEquity = 0;
   let restrictedIncome = 0;
   let restrictedExpense = 0;
-  let unrestrictedEquity = 0;
-  let restrictedEquity = 0;
 
-  for (const r of sqlRows(netAssetRows) as Record<string, unknown>[]) {
-    const debit = parseFloat(String(r.total_debit ?? 0)) || 0;
-    const credit = parseFloat(String(r.total_credit ?? 0)) || 0;
-    const coaType = String(r.account_type ?? "");
-    const fundType = String(r.fund_type ?? "UNRESTRICTED");
-    const balance = coaType === "EXPENSE" ? debit - credit : credit - debit;
+  for (const g of glRows) {
+    if (isOrphanedGlEntry(g.journalEntryId, voidJeIds)) continue;
+    const coa = coaMap.get(g.accountId);
+    if (!coa) continue;
+
+    const coaType = coa.type;
+    const debit = g.entryType === "DEBIT" ? g.amount : 0;
+    const credit = g.entryType === "CREDIT" ? g.amount : 0;
+
+    if (coaType === "ASSET" || coaType === "LIABILITY") {
+      if (!assetLiabByAccount[g.accountId]) {
+        assetLiabByAccount[g.accountId] = { code: coa.code, name: coa.name, type: coaType, debit: 0, credit: 0 };
+      }
+      assetLiabByAccount[g.accountId].debit += debit;
+      assetLiabByAccount[g.accountId].credit += credit;
+      continue;
+    }
+
+    if (coaType !== "EQUITY" && coaType !== "INCOME" && coaType !== "EXPENSE") continue;
+
+    const fundType = g.fundId ? (fundTypeMap.get(g.fundId) ?? "UNRESTRICTED") : "UNRESTRICTED";
     const isUnrestricted = fundType === "UNRESTRICTED";
+    const balance = coaType === "EXPENSE" ? debit - credit : credit - debit;
+
     if (coaType === "EQUITY") {
       if (isUnrestricted) unrestrictedEquity += balance;
       else restrictedEquity += balance;
@@ -183,10 +210,21 @@ export async function buildHighLevelBalanceSheet(
     }
   }
 
+  const assets: Array<{ accountCode: string; accountName: string; amount: number }> = [];
+  const liabilities: Array<{ accountCode: string; accountName: string; amount: number }> = [];
+
+  for (const acc of Object.values(assetLiabByAccount)) {
+    const gross = acc.debit + acc.credit;
+    const amount = acc.type === "ASSET" ? acc.debit - acc.credit : acc.credit - acc.debit;
+    if (!hasBalance(amount, gross)) continue;
+    const line = { accountCode: acc.code, accountName: acc.name, amount: round2(amount) };
+    if (acc.type === "ASSET") assets.push(line);
+    else liabilities.push(line);
+  }
+
   const totalUnrestrictedNetAssets = round2(unrestrictedEquity + (unrestrictedIncome - unrestrictedExpense));
   const totalRestrictedNetAssets = round2(restrictedEquity + (restrictedIncome - restrictedExpense));
   const netIncome = round2((unrestrictedIncome + restrictedIncome) - (unrestrictedExpense + restrictedExpense));
-
   const totalAssets = round2(assets.reduce((s, r) => s + r.amount, 0));
   const totalLiabilities = round2(liabilities.reduce((s, r) => s + r.amount, 0));
   const totalNetAssets = round2(totalUnrestrictedNetAssets + totalRestrictedNetAssets);

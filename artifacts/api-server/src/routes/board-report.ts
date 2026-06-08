@@ -282,10 +282,8 @@ router.get("/", requireAuth, async (req, res) => {
     const { year, quarter } = quarterForYmd(reportPeriod.endYmd);
     const includeUnpublished = req.query.adminView === "true" && isAdminRole(role);
 
-    const [financial, profitLoss, balanceSheet, metricRows, riskRows, committeeRows] = await Promise.all([
+    const [financial, metricRows, riskRows, committeeRows] = await Promise.all([
       buildFinancialHealth(companyId, reportPeriod),
-      buildHighLevelProfitLoss(companyId, reportPeriod.start, reportPeriod.end, reportPeriod.startYmd, reportPeriod.endYmd),
-      buildHighLevelBalanceSheet(companyId, reportPeriod.end, reportPeriod.endYmd),
       db.select().from(programMetrics)
         .where(and(
           eq(programMetrics.companyId, companyId),
@@ -300,6 +298,38 @@ router.get("/", requireAuth, async (req, res) => {
         .where(eq(committeeUpdates.companyId, companyId))
         .orderBy(desc(committeeUpdates.meetingDate), desc(committeeUpdates.createdAt)),
     ]);
+
+    const emptyProfitLoss = {
+      startDate: reportPeriod.startYmd,
+      endDate: reportPeriod.endYmd,
+      totalRevenue: 0,
+      totalExpenses: 0,
+      netIncome: 0,
+      topRevenue: [] as Array<{ accountCode: string; accountName: string; amount: number }>,
+      topExpenses: [] as Array<{ accountCode: string; accountName: string; amount: number }>,
+    };
+    const emptyBalanceSheet = {
+      asOfDate: reportPeriod.endYmd,
+      totalAssets: 0,
+      totalLiabilities: 0,
+      totalNetAssets: 0,
+      totalUnrestrictedNetAssets: 0,
+      totalRestrictedNetAssets: 0,
+      netIncome: 0,
+      topAssets: [] as Array<{ accountCode: string; accountName: string; amount: number }>,
+      topLiabilities: [] as Array<{ accountCode: string; accountName: string; amount: number }>,
+    };
+
+    let profitLoss = emptyProfitLoss;
+    let balanceSheet = emptyBalanceSheet;
+    try {
+      [profitLoss, balanceSheet] = await Promise.all([
+        buildHighLevelProfitLoss(companyId, reportPeriod.start, reportPeriod.end, reportPeriod.startYmd, reportPeriod.endYmd),
+        buildHighLevelBalanceSheet(companyId, reportPeriod.end, reportPeriod.endYmd),
+      ]);
+    } catch (finErr) {
+      console.error("GET /board-report financial summaries:", finErr);
+    }
 
     const metrics = metricRows.map(serializeMetric);
     const risks = riskRows.map(serializeRisk);
@@ -355,7 +385,7 @@ router.get("/", requireAuth, async (req, res) => {
       committeeUpdates: committeeUpdatesFiltered,
     });
   } catch (err) {
-    console.error("GET /board-report:", err);
+    console.error("GET /board-report:", err instanceof Error ? err.message : err, err);
     res.status(500).json({ error: "Internal server error" });
   }
 });
