@@ -58,6 +58,14 @@ export function asDate(value: unknown): Date | null {
   }
 }
 
+/** True when `value` falls on or before the UTC calendar day `ymd` (YYYY-MM-DD). */
+export function isOnOrBeforeUtcYmd(value: unknown, ymd: string): boolean {
+  const d = asDate(value);
+  const bounds = parseYmdToUtcDayBounds(ymd);
+  if (!d || !bounds) return false;
+  return d.getTime() <= bounds.to.getTime();
+}
+
 /** ISO 8601 for JSON; invalid dates → epoch (never throws). */
 export function toIsoString(value: unknown): string {
   try {

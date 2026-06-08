@@ -5,6 +5,7 @@ import {
 } from "@workspace/db";
 import { eq, and, desc } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
+import { parseYmdToUtcNoon, isOnOrBeforeUtcYmd } from "../lib/safeIso";
 
 function serializeRecon(r: any) {
   return {
@@ -40,7 +41,11 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
     if (!bankAccountId || !statementDate || statementBalance === undefined)
       return res.status(400).json({ error: "bankAccountId, statementDate, statementBalance are required" });
 
-    const stmtDate = new Date(statementDate);
+    const parsedStmt = parseYmdToUtcNoon(statementDate);
+    if (!parsedStmt) {
+      return res.status(400).json({ error: "Invalid statementDate (use YYYY-MM-DD)" });
+    }
+    const stmtDate = parsedStmt.date;
 
     // Opening balance: always use last completed recon's clearedBalance when one exists.
     // Otherwise fall back to the value the user entered (openingBalanceInput).
@@ -84,8 +89,7 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
 
     const eligible = allTx.filter((t) => {
       if (t.isVoid || t.status === "RECONCILED") return false;
-      const d = t.date instanceof Date ? t.date : new Date(t.date);
-      return d <= stmtDate;
+      return isOnOrBeforeUtcYmd(t.date, parsedStmt.ymd);
     });
 
     for (const tx of eligible) {
