@@ -4,7 +4,7 @@ import { format, parseISO } from "date-fns";
 import {
   AlertTriangle, Banknote, Flame, Target, Shield,
   Users, RefreshCw, Plus, Trash2,
-  CheckCircle2, Circle, Eye, EyeOff,
+  CheckCircle2, Circle, Eye, EyeOff, Download,
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { authJsonFetch, readJsonSafe } from "@/lib/auth-fetch";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { downloadBoardReportPdf } from "@/lib/board-report-pdf";
 
 function fmt(n: number) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n);
@@ -245,6 +246,10 @@ export default function BoardReportPage() {
                 {adminView ? "Admin view" : "Board view"}
               </Button>
             )}
+            <Button variant="outline" size="sm" onClick={handleDownloadPdf}>
+              <Download className="w-3.5 h-3.5 mr-1" />
+              Download Board Report
+            </Button>
             <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
               <RefreshCw className={cn("w-3.5 h-3.5 mr-1", isFetching && "animate-spin")} />
               Refresh
