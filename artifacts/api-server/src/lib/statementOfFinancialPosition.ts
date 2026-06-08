@@ -2,6 +2,7 @@ import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { sqlRows } from "./sqlRows";
 import { hasReportBalance, sqlCoaActiveOrHasGlInWindow } from "./reportCoaGlWindow";
+import { mergeBankRegisterIntoCashAssets } from "./bankBalance";
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
@@ -129,16 +130,18 @@ export async function buildStatementOfFinancialPosition(
     }
   }
 
+  const cashAdjustedAssets = await mergeBankRegisterIntoCashAssets(companyId, asOfEnd, assets);
+
   const totalUnrestrictedNetAssets = round2(unrestrictedEquity + (unrestrictedIncome - unrestrictedExpense));
   const totalRestrictedNetAssets = round2(restrictedEquity + (restrictedIncome - restrictedExpense));
   const netIncome = round2((unrestrictedIncome + restrictedIncome) - (unrestrictedExpense + restrictedExpense));
-  const totalAssets = round2(assets.reduce((s, r) => s + r.amount, 0));
+  const totalAssets = round2(cashAdjustedAssets.reduce((s, r) => s + r.amount, 0));
   const totalLiabilities = round2(liabilities.reduce((s, r) => s + r.amount, 0));
   const totalNetAssets = round2(totalUnrestrictedNetAssets + totalRestrictedNetAssets);
 
   return {
     asOfDate: asOfYmd,
-    assets,
+    assets: cashAdjustedAssets,
     liabilities,
     totalAssets,
     totalLiabilities,

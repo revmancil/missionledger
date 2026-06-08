@@ -5,6 +5,7 @@ import { requireAuth } from "../lib/auth";
 import { sqlRows } from "../lib/sqlRows";
 import { parseYmdToUtcDayBounds, utcYmdToday } from "../lib/safeIso";
 import { hasReportBalance, sqlCoaActiveOrHasGlInWindow } from "../lib/reportCoaGlWindow";
+import { mergeBankRegisterIntoCashAssets } from "../lib/bankBalance";
 
 const router = Router();
 
@@ -263,7 +264,7 @@ router.get("/balance-sheet", requireAuth, async (req, res) => {
       return { accountId: r.account_id, accountCode: r.account_code, accountName: r.account_name, amount, gross };
     });
 
-    const assets = assetLiabMapped
+    const assetsFromGl = assetLiabMapped
       .filter((r) => r.accountType === "ASSET" && hasReportBalance(r.amount, r.gross))
       .map((r) => ({
         accountId: r.accountId,
@@ -272,6 +273,14 @@ router.get("/balance-sheet", requireAuth, async (req, res) => {
         accountType: r.accountType,
         amount: r.amount,
       }));
+    const assetsMerged = await mergeBankRegisterIntoCashAssets(companyId, asOfEnd, assetsFromGl);
+    const assets = assetsMerged.map((r) => ({
+      accountId: r.accountId,
+      accountCode: r.accountCode,
+      accountName: r.accountName,
+      accountType: "ASSET" as const,
+      amount: r.amount,
+    }));
     const liabilities = assetLiabMapped
       .filter((r) => r.accountType === "LIABILITY" && hasReportBalance(r.amount, r.gross))
       .map((r) => ({

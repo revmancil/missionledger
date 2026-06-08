@@ -1,6 +1,17 @@
-import { db, bankAccounts, glEntries, chartOfAccounts, accounts } from "@workspace/db";
-import { eq, and, isNull, sql } from "drizzle-orm";
+import { db, bankAccounts, chartOfAccounts, accounts } from "@workspace/db";
+import { eq, and, isNull, sql, inArray } from "drizzle-orm";
 import { firstSqlRow } from "./sqlRows";
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+export type CashAssetLine = {
+  accountId: string;
+  accountCode: string;
+  accountName: string;
+  amount: number;
+};
 
 /**
  * Recompute bank_accounts.current_balance from non-void register transactions.
@@ -29,40 +40,42 @@ export async function recomputeBankBalanceFromTransactions(
 
   let jeBalance = 0;
   if (bank?.glAccountId) {
-    // Bank has an explicit GL account link — sum only entries for that account
     const jeResult = await db.execute(sql`
-      SELECT COALESCE(SUM(CASE WHEN entry_type = 'CREDIT' THEN amount ELSE 0 END), 0)
-           - COALESCE(SUM(CASE WHEN entry_type = 'DEBIT'  THEN amount ELSE 0 END), 0) AS balance
-      FROM gl_entries
-      WHERE account_id = ${bank.glAccountId}
-        AND company_id = ${companyId}
-        AND source_type = 'MANUAL_JE'
-        AND (is_void IS NULL OR is_void = false)
+      SELECT
+        COALESCE(SUM(CASE WHEN g.entry_type = 'DEBIT'  THEN g.amount ELSE 0 END), 0)
+        - COALESCE(SUM(CASE WHEN g.entry_type = 'CREDIT' THEN g.amount ELSE 0 END), 0) AS balance
+      FROM gl_entries g
+      LEFT JOIN journal_entries je ON je.id = g.journal_entry_id AND je.status <> 'VOID'
+      WHERE g.account_id = ${bank.glAccountId}
+        AND g.company_id = ${companyId}
+        AND g.source_type = 'MANUAL_JE'
+        AND g.is_void = false
+        AND (g.journal_entry_id IS NULL OR je.id IS NOT NULL)
     `);
     jeBalance = parseFloat(String((firstSqlRow(jeResult) as { balance?: unknown })?.balance ?? "0")) || 0;
   } else {
-    // Bank has no GL account link — sum MANUAL_JE entries against any ASSET account
-    // (in either chart_of_accounts OR the legacy accounts table) not claimed by another bank.
-    // Legacy account IDs appear in GL entries for JEs created before the COA form fix.
     const jeResult = await db.execute(sql`
-      SELECT COALESCE(SUM(CASE WHEN ge.entry_type = 'CREDIT' THEN ge.amount ELSE 0 END), 0)
-           - COALESCE(SUM(CASE WHEN ge.entry_type = 'DEBIT'  THEN ge.amount ELSE 0 END), 0) AS balance
-      FROM gl_entries ge
-      WHERE ge.company_id = ${companyId}
-        AND ge.source_type = 'MANUAL_JE'
-        AND (ge.is_void IS NULL OR ge.is_void = false)
-        AND ge.account_id NOT IN (
+      SELECT
+        COALESCE(SUM(CASE WHEN g.entry_type = 'DEBIT'  THEN g.amount ELSE 0 END), 0)
+        - COALESCE(SUM(CASE WHEN g.entry_type = 'CREDIT' THEN g.amount ELSE 0 END), 0) AS balance
+      FROM gl_entries g
+      LEFT JOIN journal_entries je ON je.id = g.journal_entry_id AND je.status <> 'VOID'
+      WHERE g.company_id = ${companyId}
+        AND g.source_type = 'MANUAL_JE'
+        AND g.is_void = false
+        AND (g.journal_entry_id IS NULL OR je.id IS NOT NULL)
+        AND g.account_id NOT IN (
           SELECT gl_account_id FROM bank_accounts
           WHERE company_id = ${companyId} AND gl_account_id IS NOT NULL
         )
         AND (
           EXISTS (
             SELECT 1 FROM chart_of_accounts coa
-            WHERE coa.id = ge.account_id AND coa.company_id = ${companyId} AND coa.coa_type = 'ASSET'
+            WHERE coa.id = g.account_id AND coa.company_id = ${companyId} AND coa.coa_type = 'ASSET'
           )
           OR EXISTS (
             SELECT 1 FROM accounts a
-            WHERE a.id = ge.account_id AND a.company_id = ${companyId} AND a.type = 'ASSET'
+            WHERE a.id = g.account_id AND a.company_id = ${companyId} AND a.type = 'ASSET'
           )
         )
     `);
@@ -182,4 +195,47 @@ export async function bankRegisterBalancesByGlAccount(
     out.set(bank.glAccountId, balance);
   }
   return out;
+}
+
+/**
+ * Replace bank-linked cash asset lines with register balances as-of the report date.
+ * Bank statements and reconciliation use the register; raw GL on cash can drift when
+ * opening-balance JE rows and transaction GL are both present or categories are pending.
+ */
+export async function mergeBankRegisterIntoCashAssets<T extends CashAssetLine>(
+  companyId: string,
+  asOfEnd: Date,
+  assets: T[],
+): Promise<T[]> {
+  const registerByGl = await bankRegisterBalancesByGlAccount(companyId, asOfEnd);
+  if (registerByGl.size === 0) return assets;
+
+  const byId = new Map(assets.map((a) => [a.accountId, { ...a }]));
+
+  for (const [glAccountId, registerBal] of registerByGl) {
+    const row = byId.get(glAccountId);
+    if (row) {
+      row.amount = round2(registerBal);
+    }
+  }
+
+  const missingGlIds = [...registerByGl.keys()].filter((id) => !byId.has(id));
+  if (missingGlIds.length > 0) {
+    const coaRows = await db
+      .select({ id: chartOfAccounts.id, code: chartOfAccounts.code, name: chartOfAccounts.name })
+      .from(chartOfAccounts)
+      .where(and(eq(chartOfAccounts.companyId, companyId), inArray(chartOfAccounts.id, missingGlIds)));
+    for (const coa of coaRows) {
+      const bal = registerByGl.get(coa.id);
+      if (bal == null || Math.abs(bal) < 0.005) continue;
+      byId.set(coa.id, {
+        accountId: coa.id,
+        accountCode: coa.code,
+        accountName: coa.name,
+        amount: round2(bal),
+      } as T);
+    }
+  }
+
+  return [...byId.values()];
 }

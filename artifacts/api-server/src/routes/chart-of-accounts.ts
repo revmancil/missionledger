@@ -2,8 +2,9 @@ import { Router } from "express";
 import { db, chartOfAccounts } from "@workspace/db";
 import { eq, asc, sql, and } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
-import { toIsoString } from "../lib/safeIso";
+import { toIsoString, parseYmdToUtcDayBounds, utcYmdToday } from "../lib/safeIso";
 import { sqlRows } from "../lib/sqlRows";
+import { bankRegisterBalancesByGlAccount } from "../lib/bankBalance";
 import {
   equityNetAssetBucketKey,
   operationalNetByEquityAccountCode,
@@ -242,9 +243,20 @@ router.get("/", requireAuth, async (req, res) => {
       };
     });
 
+    const todayBounds = parseYmdToUtcDayBounds(utcYmdToday());
+    const registerByGl = todayBounds
+      ? await bankRegisterBalancesByGlAccount(companyId, todayBounds.to)
+      : new Map<string, number>();
+    const withBalancesGl = withBalancesFirst.map((row) => {
+      if (String(row.type ?? "").toUpperCase() !== "ASSET") return row;
+      const registerBal = registerByGl.get(row.id);
+      if (registerBal == null) return row;
+      return { ...row, balance: registerBal };
+    });
+
     type DetailKey = "3100" | "3200" | "3300";
     const detailRollup: Partial<Record<DetailKey, { balance: number; fundActivity: number }>> = {};
-    for (const row of withBalancesFirst) {
+    for (const row of withBalancesGl) {
       if (String(row.type ?? "").toUpperCase() !== "EQUITY") continue;
       const bucket = equityNetAssetBucketKey({
         code: String(row.code ?? ""),
@@ -262,7 +274,7 @@ router.get("/", requireAuth, async (req, res) => {
       detailRollup["3300"]
     );
 
-    const withBalances = withBalancesFirst.map((row) => {
+    const withBalances = withBalancesGl.map((row) => {
       if (String(row.type ?? "").toUpperCase() !== "EQUITY") return row;
       if (String(row.code ?? "").trim() !== "3000") return row;
 

@@ -1,7 +1,6 @@
 import { db, chartOfAccounts, glEntries, journalEntries } from "@workspace/db";
 import { eq, and, gte, lte, inArray } from "drizzle-orm";
 import { buildStatementOfFinancialPosition } from "./statementOfFinancialPosition";
-import { bankRegisterBalancesByGlAccount } from "./bankBalance";
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
@@ -133,40 +132,7 @@ export async function buildHighLevelBalanceSheet(
   asOfEnd: Date,
   asOfYmd: string,
 ): Promise<HighLevelBalanceSheet> {
-  const [sofp, registerByGl] = await Promise.all([
-    buildStatementOfFinancialPosition(companyId, asOfEnd, asOfYmd),
-    bankRegisterBalancesByGlAccount(companyId, asOfEnd),
-  ]);
-
-  const assetById = new Map(sofp.assets.map((a) => [a.accountId, { ...a }]));
-
-  for (const [glAccountId, registerBal] of registerByGl) {
-    const existing = assetById.get(glAccountId);
-    if (existing) {
-      existing.amount = round2(registerBal);
-    }
-  }
-
-  const missingGlIds = [...registerByGl.keys()].filter((id) => !assetById.has(id));
-  if (missingGlIds.length > 0) {
-    const coaRows = await db
-      .select({ id: chartOfAccounts.id, code: chartOfAccounts.code, name: chartOfAccounts.name })
-      .from(chartOfAccounts)
-      .where(and(eq(chartOfAccounts.companyId, companyId), inArray(chartOfAccounts.id, missingGlIds)));
-    for (const coa of coaRows) {
-      const bal = registerByGl.get(coa.id);
-      if (bal == null || Math.abs(bal) < 0.005) continue;
-      assetById.set(coa.id, {
-        accountId: coa.id,
-        accountCode: coa.code,
-        accountName: coa.name,
-        amount: round2(bal),
-      });
-    }
-  }
-
-  const assets = [...assetById.values()];
-  const adjustedTotalAssets = round2(assets.reduce((s, r) => s + r.amount, 0));
+  const sofp = await buildStatementOfFinancialPosition(companyId, asOfEnd, asOfYmd);
 
   const toTopLine = (lines: Array<{ accountCode: string; accountName: string; amount: number }>) =>
     [...lines]
@@ -176,13 +142,13 @@ export async function buildHighLevelBalanceSheet(
 
   return {
     asOfDate: sofp.asOfDate,
-    totalAssets: adjustedTotalAssets,
+    totalAssets: sofp.totalAssets,
     totalLiabilities: sofp.totalLiabilities,
     totalNetAssets: sofp.totalNetAssets,
     totalUnrestrictedNetAssets: sofp.totalUnrestrictedNetAssets,
     totalRestrictedNetAssets: sofp.totalRestrictedNetAssets,
     netIncome: sofp.netIncome,
-    topAssets: toTopLine(assets),
+    topAssets: toTopLine(sofp.assets),
     topLiabilities: toTopLine(sofp.liabilities),
   };
 }
