@@ -5,6 +5,7 @@ import {
   AlertTriangle, Banknote, Flame, Target, Shield,
   Users, RefreshCw, Plus, Trash2,
   CheckCircle2, Circle, Eye, EyeOff, Download,
+  BarChart3, Scale,
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
@@ -48,10 +49,39 @@ async function apiMutate(path: string, method: string, body?: unknown) {
 
 type RiskStatus = "GREEN" | "YELLOW" | "RED";
 type CommitteeType = "FINANCE" | "AUDIT" | "GOVERNANCE" | "EXECUTIVE" | "PROGRAM" | "OTHER";
+type PeriodKind = "month" | "quarter" | "year" | "ytd";
+
+const PERIOD_OPTIONS: { id: PeriodKind; label: string }[] = [
+  { id: "month", label: "Month" },
+  { id: "quarter", label: "Quarter" },
+  { id: "year", label: "Year" },
+  { id: "ytd", label: "YTD" },
+];
 
 interface BoardReport {
   generatedAt: string;
+  dateRange: { kind: PeriodKind; startDate: string; endDate: string; label: string };
   period: { year: number; quarter: number; label: string };
+  profitLoss: {
+    startDate: string;
+    endDate: string;
+    totalRevenue: number;
+    totalExpenses: number;
+    netIncome: number;
+    topRevenue: Array<{ accountCode: string; accountName: string; amount: number }>;
+    topExpenses: Array<{ accountCode: string; accountName: string; amount: number }>;
+  };
+  balanceSheet: {
+    asOfDate: string;
+    totalAssets: number;
+    totalLiabilities: number;
+    totalNetAssets: number;
+    totalUnrestrictedNetAssets: number;
+    totalRestrictedNetAssets: number;
+    netIncome: number;
+    topAssets: Array<{ accountCode: string; accountName: string; amount: number }>;
+    topLiabilities: Array<{ accountCode: string; accountName: string; amount: number }>;
+  };
   viewer: { role: string; isAdmin: boolean; isBoardMember: boolean; name: string | null };
   actionRequired: Array<{
     id: string;
@@ -62,10 +92,10 @@ interface BoardReport {
   }>;
   financialHealth: {
     totalCash: number;
-    ytdRevenue: number;
-    ytdExpenses: number;
-    ytdNet: number;
-    ytdBurnRate: number;
+    periodRevenue: number;
+    periodExpenses: number;
+    periodNet: number;
+    periodBurnRate: number;
     monthsOfRunway: number | null;
     budget: { total: number; actual: number; percent: number; remaining: number };
   };
@@ -145,16 +175,22 @@ export default function BoardReportPage() {
   const { user } = useAuth();
   const qc = useQueryClient();
   const isAdmin = user?.role === "ADMIN" || user?.role === "MASTER_ADMIN";
+  const [periodFilter, setPeriodFilter] = useState<PeriodKind>("ytd");
   const [adminView, setAdminView] = useState(false);
   const [metricDialog, setMetricDialog] = useState(false);
   const [riskDialog, setRiskDialog] = useState(false);
   const [committeeDialog, setCommitteeDialog] = useState(false);
 
-  const queryKey = ["board-report", adminView && isAdmin];
+  const queryKey = ["board-report", periodFilter, adminView && isAdmin];
 
   const { data, isLoading, isError, refetch, isFetching } = useQuery<BoardReport>({
     queryKey,
-    queryFn: () => apiGet(`api/board-report${adminView && isAdmin ? "?adminView=true" : ""}`),
+    queryFn: () => {
+      const p = new URLSearchParams();
+      p.set("period", periodFilter);
+      if (adminView && isAdmin) p.set("adminView", "true");
+      return apiGet(`api/board-report?${p.toString()}`);
+    },
   });
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ["board-report"] });
@@ -244,10 +280,13 @@ export default function BoardReportPage() {
           <div>
             <h1 className="text-2xl font-bold text-[hsl(210,60%,25%)]">Board Member Report</h1>
             <p className="text-sm text-muted-foreground mt-1">
-              {data.period.label} · Updated {format(parseISO(data.generatedAt), "MMM d, yyyy h:mm a")}
+              {data.dateRange.label} · {data.dateRange.startDate} – {data.dateRange.endDate}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Updated {format(parseISO(data.generatedAt), "MMM d, yyyy h:mm a")}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             {isAdmin && (
               <Button
                 variant="outline"
@@ -268,6 +307,22 @@ export default function BoardReportPage() {
               Refresh
             </Button>
           </div>
+        </div>
+
+        {/* Period filter */}
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide mr-1">Period</span>
+          {PERIOD_OPTIONS.map((opt) => (
+            <Button
+              key={opt.id}
+              size="sm"
+              variant={periodFilter === opt.id ? "default" : "outline"}
+              onClick={() => setPeriodFilter(opt.id)}
+              disabled={isFetching && periodFilter === opt.id}
+            >
+              {opt.label}
+            </Button>
+          ))}
         </div>
 
         {/* Action Required */}
@@ -306,6 +361,116 @@ export default function BoardReportPage() {
           )}
         </div>
 
+        {/* High-level P&L */}
+        <SectionCard title="Statement of Activities (Summary)" icon={BarChart3}>
+          <div className="grid sm:grid-cols-3 gap-3 mb-5">
+            <div className="rounded-lg bg-emerald-50 border border-emerald-100 p-4">
+              <div className="text-xs text-emerald-700">Total Revenue</div>
+              <div className="text-xl font-bold text-emerald-800 mt-1">{fmt(data.profitLoss.totalRevenue)}</div>
+            </div>
+            <div className="rounded-lg bg-red-50 border border-red-100 p-4">
+              <div className="text-xs text-red-700">Total Expenses</div>
+              <div className="text-xl font-bold text-red-800 mt-1">{fmt(data.profitLoss.totalExpenses)}</div>
+            </div>
+            <div className={cn(
+              "rounded-lg border p-4",
+              data.profitLoss.netIncome >= 0 ? "bg-blue-50 border-blue-100" : "bg-amber-50 border-amber-100",
+            )}>
+              <div className="text-xs text-muted-foreground">Net Income</div>
+              <div className="text-xl font-bold mt-1">{fmt(data.profitLoss.netIncome)}</div>
+            </div>
+          </div>
+          <div className="grid md:grid-cols-2 gap-4">
+            <div>
+              <h3 className="text-xs font-semibold text-muted-foreground uppercase mb-2">Top Revenue</h3>
+              {data.profitLoss.topRevenue.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No revenue in this period.</p>
+              ) : (
+                <ul className="space-y-1.5">
+                  {data.profitLoss.topRevenue.map((r) => (
+                    <li key={r.accountCode} className="flex justify-between text-sm gap-2">
+                      <span className="truncate">{r.accountCode} – {r.accountName}</span>
+                      <span className="font-medium shrink-0">{fmt(r.amount)}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <div>
+              <h3 className="text-xs font-semibold text-muted-foreground uppercase mb-2">Top Expenses</h3>
+              {data.profitLoss.topExpenses.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No expenses in this period.</p>
+              ) : (
+                <ul className="space-y-1.5">
+                  {data.profitLoss.topExpenses.map((r) => (
+                    <li key={r.accountCode} className="flex justify-between text-sm gap-2">
+                      <span className="truncate">{r.accountCode} – {r.accountName}</span>
+                      <span className="font-medium shrink-0">{fmt(r.amount)}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        </SectionCard>
+
+        {/* High-level Balance Sheet */}
+        <SectionCard title="Statement of Financial Position (Summary)" icon={Scale}>
+          <p className="text-xs text-muted-foreground mb-4">As of {data.balanceSheet.asOfDate}</p>
+          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+            <div className="rounded-lg bg-muted/50 p-4">
+              <div className="text-xs text-muted-foreground">Total Assets</div>
+              <div className="text-lg font-bold mt-1">{fmt(data.balanceSheet.totalAssets)}</div>
+            </div>
+            <div className="rounded-lg bg-muted/50 p-4">
+              <div className="text-xs text-muted-foreground">Total Liabilities</div>
+              <div className="text-lg font-bold mt-1">{fmt(data.balanceSheet.totalLiabilities)}</div>
+            </div>
+            <div className="rounded-lg bg-muted/50 p-4">
+              <div className="text-xs text-muted-foreground">Net Assets</div>
+              <div className="text-lg font-bold mt-1">{fmt(data.balanceSheet.totalNetAssets)}</div>
+            </div>
+            <div className="rounded-lg bg-muted/50 p-4">
+              <div className="text-xs text-muted-foreground">Unrestricted / Restricted</div>
+              <div className="text-sm font-semibold mt-1">
+                {fmt(data.balanceSheet.totalUnrestrictedNetAssets)} / {fmt(data.balanceSheet.totalRestrictedNetAssets)}
+              </div>
+            </div>
+          </div>
+          <div className="grid md:grid-cols-2 gap-4">
+            <div>
+              <h3 className="text-xs font-semibold text-muted-foreground uppercase mb-2">Top Assets</h3>
+              {data.balanceSheet.topAssets.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No asset balances.</p>
+              ) : (
+                <ul className="space-y-1.5">
+                  {data.balanceSheet.topAssets.map((r) => (
+                    <li key={r.accountCode} className="flex justify-between text-sm gap-2">
+                      <span className="truncate">{r.accountCode} – {r.accountName}</span>
+                      <span className="font-medium shrink-0">{fmt(r.amount)}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <div>
+              <h3 className="text-xs font-semibold text-muted-foreground uppercase mb-2">Top Liabilities</h3>
+              {data.balanceSheet.topLiabilities.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No liability balances.</p>
+              ) : (
+                <ul className="space-y-1.5">
+                  {data.balanceSheet.topLiabilities.map((r) => (
+                    <li key={r.accountCode} className="flex justify-between text-sm gap-2">
+                      <span className="truncate">{r.accountCode} – {r.accountName}</span>
+                      <span className="font-medium shrink-0">{fmt(r.amount)}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        </SectionCard>
+
         {/* Financial Health */}
         <SectionCard title="Financial Health" icon={Banknote}>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
@@ -314,14 +479,14 @@ export default function BoardReportPage() {
               <div className="text-xl font-bold mt-1">{fmt(data.financialHealth.totalCash)}</div>
             </div>
             <div className="rounded-lg bg-muted/50 p-4">
-              <div className="text-xs text-muted-foreground">YTD Revenue</div>
-              <div className="text-lg font-semibold mt-1 text-emerald-700">{fmt(data.financialHealth.ytdRevenue)}</div>
+              <div className="text-xs text-muted-foreground">Period Revenue</div>
+              <div className="text-lg font-semibold mt-1 text-emerald-700">{fmt(data.financialHealth.periodRevenue)}</div>
             </div>
             <div className="rounded-lg bg-muted/50 p-4">
               <div className="text-xs text-muted-foreground flex items-center gap-1">
-                <Flame className="w-3 h-3" /> YTD Burn Rate
+                <Flame className="w-3 h-3" /> Avg. Burn Rate
               </div>
-              <div className="text-lg font-semibold mt-1">{fmt(data.financialHealth.ytdBurnRate)}/mo</div>
+              <div className="text-lg font-semibold mt-1">{fmt(data.financialHealth.periodBurnRate)}/mo</div>
             </div>
             <div className="rounded-lg bg-muted/50 p-4">
               <div className="text-xs text-muted-foreground">Est. Runway</div>

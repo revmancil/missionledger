@@ -7,7 +7,25 @@ type CommitteeType = "FINANCE" | "AUDIT" | "GOVERNANCE" | "EXECUTIVE" | "PROGRAM
 
 export interface BoardReportPdfData {
   generatedAt: string;
+  dateRange: { label: string; startDate: string; endDate: string };
   period: { year: number; quarter: number; label: string };
+  profitLoss: {
+    totalRevenue: number;
+    totalExpenses: number;
+    netIncome: number;
+    topRevenue: Array<{ accountCode: string; accountName: string; amount: number }>;
+    topExpenses: Array<{ accountCode: string; accountName: string; amount: number }>;
+  };
+  balanceSheet: {
+    asOfDate: string;
+    totalAssets: number;
+    totalLiabilities: number;
+    totalNetAssets: number;
+    totalUnrestrictedNetAssets: number;
+    totalRestrictedNetAssets: number;
+    topAssets: Array<{ accountCode: string; accountName: string; amount: number }>;
+    topLiabilities: Array<{ accountCode: string; accountName: string; amount: number }>;
+  };
   actionRequired: Array<{
     id: string;
     severity: "high" | "medium" | "low";
@@ -17,10 +35,10 @@ export interface BoardReportPdfData {
   }>;
   financialHealth: {
     totalCash: number;
-    ytdRevenue: number;
-    ytdExpenses: number;
-    ytdNet: number;
-    ytdBurnRate: number;
+    periodRevenue: number;
+    periodExpenses: number;
+    periodNet: number;
+    periodBurnRate: number;
     monthsOfRunway: number | null;
     budget: { total: number; actual: number; percent: number; remaining: number };
   };
@@ -135,8 +153,8 @@ export function downloadBoardReportPdf(
   const generated = parseISO(data.generatedAt);
   const monthYear = format(generated, "MMMM yyyy");
   const reportTitle = `Board Member Report: ${monthYear}`;
-  const viewNote = options?.adminView ? " · Admin view (includes unpublished items)" : " · Board view";
-  const subtitle = `${data.period.label}${viewNote} · Report date ${format(generated, "MMM d, yyyy")}`;
+  const viewNote = options?.adminView ? " · Admin view" : " · Board view";
+  const subtitle = `${data.dateRange.label} (${data.dateRange.startDate} – ${data.dateRange.endDate})${viewNote}`;
 
   const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "letter" });
   const W = doc.internal.pageSize.getWidth();
@@ -196,6 +214,66 @@ export function downloadBoardReportPdf(
     y = lastTableY(doc) + 18;
   }
 
+  // ── Statement of Activities (Summary) ───────────────────────────────────────
+  y = sectionTitle(doc, "Statement of Activities (Summary)", y);
+  autoTable(doc, {
+    startY: y,
+    head: [["", "Amount"]],
+    body: [
+      ["Total Revenue", formatCurrency(data.profitLoss.totalRevenue)],
+      ["Total Expenses", formatCurrency(data.profitLoss.totalExpenses)],
+      [{ content: "Net Income", styles: { fontStyle: "bold" } }, { content: formatCurrency(data.profitLoss.netIncome), styles: { fontStyle: "bold" } }],
+    ],
+    theme: "striped",
+    headStyles: { fillColor: NAVY, fontSize: 9 },
+    bodyStyles: { fontSize: 9 },
+    columnStyles: { 1: { halign: "right" } },
+    margin: { left: MARGIN, right: MARGIN },
+  });
+  y = lastTableY(doc) + 8;
+  if (data.profitLoss.topRevenue.length > 0 || data.profitLoss.topExpenses.length > 0) {
+    autoTable(doc, {
+      startY: y,
+      head: [["Top Revenue Accounts", "Amount", "Top Expense Accounts", "Amount"]],
+      body: Array.from({ length: Math.max(data.profitLoss.topRevenue.length, data.profitLoss.topExpenses.length, 1) }).map((_, i) => {
+        const rev = data.profitLoss.topRevenue[i];
+        const exp = data.profitLoss.topExpenses[i];
+        return [
+          rev ? `${rev.accountCode} ${rev.accountName}` : "",
+          rev ? formatCurrency(rev.amount) : "",
+          exp ? `${exp.accountCode} ${exp.accountName}` : "",
+          exp ? formatCurrency(exp.amount) : "",
+        ];
+      }),
+      theme: "striped",
+      headStyles: { fillColor: NAVY, fontSize: 8 },
+      bodyStyles: { fontSize: 8 },
+      columnStyles: { 1: { halign: "right" }, 3: { halign: "right" } },
+      margin: { left: MARGIN, right: MARGIN },
+    });
+    y = lastTableY(doc) + 18;
+  }
+
+  // ── Balance Sheet (Summary) ───────────────────────────────────────────────
+  y = sectionTitle(doc, `Statement of Financial Position — As of ${data.balanceSheet.asOfDate}`, y);
+  autoTable(doc, {
+    startY: y,
+    head: [["", "Amount"]],
+    body: [
+      ["Total Assets", formatCurrency(data.balanceSheet.totalAssets)],
+      ["Total Liabilities", formatCurrency(data.balanceSheet.totalLiabilities)],
+      ["Total Net Assets", formatCurrency(data.balanceSheet.totalNetAssets)],
+      ["Unrestricted Net Assets", formatCurrency(data.balanceSheet.totalUnrestrictedNetAssets)],
+      ["Restricted Net Assets", formatCurrency(data.balanceSheet.totalRestrictedNetAssets)],
+    ],
+    theme: "striped",
+    headStyles: { fillColor: NAVY, fontSize: 9 },
+    bodyStyles: { fontSize: 9 },
+    columnStyles: { 1: { halign: "right" } },
+    margin: { left: MARGIN, right: MARGIN },
+  });
+  y = lastTableY(doc) + 18;
+
   // ── Financial Health ────────────────────────────────────────────────────────
   y = sectionTitle(doc, "Financial Health", y);
 
@@ -204,10 +282,10 @@ export function downloadBoardReportPdf(
     head: [["Metric", "Amount"]],
     body: [
       ["Cash Position", formatCurrency(data.financialHealth.totalCash)],
-      ["YTD Revenue", formatCurrency(data.financialHealth.ytdRevenue)],
-      ["YTD Expenses", formatCurrency(data.financialHealth.ytdExpenses)],
-      ["YTD Net", formatCurrency(data.financialHealth.ytdNet)],
-      ["Monthly Burn Rate (avg.)", `${formatCurrency(data.financialHealth.ytdBurnRate)}/mo`],
+      ["Period Revenue", formatCurrency(data.financialHealth.periodRevenue)],
+      ["Period Expenses", formatCurrency(data.financialHealth.periodExpenses)],
+      ["Period Net", formatCurrency(data.financialHealth.periodNet)],
+      ["Monthly Burn Rate (avg.)", `${formatCurrency(data.financialHealth.periodBurnRate)}/mo`],
       [
         "Estimated Cash Runway",
         data.financialHealth.monthsOfRunway != null

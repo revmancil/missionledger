@@ -6,16 +6,13 @@ import {
 import { eq, and, desc, asc, inArray } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
 import { toIsoString, toIsoStringOrNull, asDate } from "../lib/safeIso";
+import { parseBoardPeriodKind, resolveBoardPeriod, quarterForYmd, type BoardReportPeriod } from "../lib/boardReportPeriod";
+import { buildHighLevelProfitLoss, buildHighLevelBalanceSheet } from "../lib/boardReportFinancials";
 
 const router = Router();
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
-}
-
-function currentQuarter(): { year: number; quarter: number } {
-  const now = new Date();
-  return { year: now.getFullYear(), quarter: Math.floor(now.getMonth() / 3) + 1 };
 }
 
 function isAdminRole(role: string | undefined): boolean {
@@ -74,10 +71,14 @@ function serializeCommittee(row: typeof committeeUpdates.$inferSelect) {
   };
 }
 
-async function buildFinancialHealth(companyId: string) {
-  const now = new Date();
-  const ytdStart = new Date(now.getFullYear(), 0, 1);
-  const monthsElapsed = Math.max(now.getMonth() + 1, 1);
+async function buildFinancialHealth(companyId: string, period: BoardReportPeriod) {
+  const periodStart = period.start;
+  const periodEnd = period.end;
+  const monthsElapsed = Math.max(
+    (periodEnd.getUTCFullYear() - periodStart.getUTCFullYear()) * 12
+      + (periodEnd.getUTCMonth() - periodStart.getUTCMonth()) + 1,
+    1,
+  );
 
   const [banks, allTx, activeBudgetRows, budgetLineRows] = await Promise.all([
     db.select({ currentBalance: bankAccounts.currentBalance }).from(bankAccounts)
@@ -99,14 +100,14 @@ async function buildFinancialHealth(companyId: string) {
   const totalCash = round2(banks.reduce((s, b) => s + (Number(b.currentBalance) || 0), 0));
   const activeTx = allTx.filter((t) => !t.isVoid);
 
-  const ytdTx = activeTx.filter((t) => {
+  const periodTx = activeTx.filter((t) => {
     const d = asDate(t.date);
-    return d && d >= ytdStart;
+    return d && d >= periodStart && d <= periodEnd;
   });
-  const ytdRevenue = round2(ytdTx.filter((t) => t.type === "CREDIT").reduce((s, t) => s + t.amount, 0));
-  const ytdExpenses = round2(ytdTx.filter((t) => t.type === "DEBIT").reduce((s, t) => s + t.amount, 0));
-  const ytdBurnRate = round2(ytdExpenses / monthsElapsed);
-  const monthsOfRunway = ytdBurnRate > 0 ? round2(totalCash / ytdBurnRate) : null;
+  const periodRevenue = round2(periodTx.filter((t) => t.type === "CREDIT").reduce((s, t) => s + t.amount, 0));
+  const periodExpenses = round2(periodTx.filter((t) => t.type === "DEBIT").reduce((s, t) => s + t.amount, 0));
+  const periodBurnRate = round2(periodExpenses / monthsElapsed);
+  const monthsOfRunway = periodBurnRate > 0 ? round2(totalCash / periodBurnRate) : null;
 
   let budgetTotal = 0;
   let budgetActual = 0;
@@ -117,15 +118,17 @@ async function buildFinancialHealth(companyId: string) {
     const activeBudget = activeBudgetRows[0];
     const lines = budgetLineRows.filter((l) => l.budgetId === activeBudget.id);
     budgetTotal = round2(lines.reduce((s, l) => s + (l.amount ?? 0), 0));
-    const budgetStart = asDate(activeBudget.startDate) ?? ytdStart;
-    const budgetEnd = asDate(activeBudget.endDate) ?? now;
+    const budgetStart = asDate(activeBudget.startDate) ?? periodStart;
+    const budgetEnd = asDate(activeBudget.endDate) ?? periodEnd;
+    const rangeStart = budgetStart > periodStart ? budgetStart : periodStart;
+    const rangeEnd = budgetEnd < periodEnd ? budgetEnd : periodEnd;
 
-    const periodTx = activeTx.filter((t) => {
+    const budgetTx = activeTx.filter((t) => {
       const d = asDate(t.date);
-      return d && d >= budgetStart && d <= budgetEnd && t.type === "DEBIT";
+      return d && d >= rangeStart && d <= rangeEnd && t.type === "DEBIT";
     });
 
-    const splitParents = periodTx.filter((t) => t.isSplit).map((t) => t.id);
+    const splitParents = budgetTx.filter((t) => t.isSplit).map((t) => t.id);
     let splits: typeof transactionSplits.$inferSelect[] = [];
     if (splitParents.length > 0) {
       splits = await db.select().from(transactionSplits)
@@ -136,7 +139,7 @@ async function buildFinancialHealth(companyId: string) {
     }
 
     const actualByAccount: Record<string, number> = {};
-    for (const t of periodTx) {
+    for (const t of budgetTx) {
       if (!t.isSplit && t.chartAccountId) {
         actualByAccount[t.chartAccountId] = (actualByAccount[t.chartAccountId] ?? 0) + t.amount;
       }
@@ -165,10 +168,10 @@ async function buildFinancialHealth(companyId: string) {
 
   return {
     totalCash,
-    ytdRevenue,
-    ytdExpenses,
-    ytdNet: round2(ytdRevenue - ytdExpenses),
-    ytdBurnRate,
+    periodRevenue,
+    periodExpenses,
+    periodNet: round2(periodRevenue - periodExpenses),
+    periodBurnRate,
     monthsOfRunway,
     budget: {
       total: budgetTotal,
@@ -204,7 +207,7 @@ function buildActionItems(input: {
       id: "budget-over",
       severity: "high",
       title: "Budget exceeded",
-      description: `YTD spending is at ${input.financial.budget.percent}% of the active annual budget.`,
+      description: `Period spending is at ${input.financial.budget.percent}% of the active annual budget.`,
       category: "financial",
     });
   } else if (input.financial.budget.percent >= 90) {
@@ -272,11 +275,17 @@ router.get("/", requireAuth, async (req, res) => {
   try {
     const user = (req as any).user;
     const { companyId, role, name, email } = user;
-    const { year, quarter } = currentQuarter();
+    const periodKind = parseBoardPeriodKind(req.query.period);
+    const reportPeriod = resolveBoardPeriod(periodKind);
+    if (!reportPeriod) return res.status(400).json({ error: "Invalid period" });
+
+    const { year, quarter } = quarterForYmd(reportPeriod.endYmd);
     const includeUnpublished = req.query.adminView === "true" && isAdminRole(role);
 
-    const [financial, metricRows, riskRows, committeeRows] = await Promise.all([
-      buildFinancialHealth(companyId),
+    const [financial, profitLoss, balanceSheet, metricRows, riskRows, committeeRows] = await Promise.all([
+      buildFinancialHealth(companyId, reportPeriod),
+      buildHighLevelProfitLoss(companyId, reportPeriod.start, reportPeriod.end, reportPeriod.startYmd, reportPeriod.endYmd),
+      buildHighLevelBalanceSheet(companyId, reportPeriod.end, reportPeriod.endYmd),
       db.select().from(programMetrics)
         .where(and(
           eq(programMetrics.companyId, companyId),
@@ -295,14 +304,26 @@ router.get("/", requireAuth, async (req, res) => {
     const metrics = metricRows.map(serializeMetric);
     const risks = riskRows.map(serializeRisk);
     const committeeUpdatesFiltered = committeeRows
-      .filter((c) => includeUnpublished || c.isPublished)
+      .filter((c) => {
+        const d = asDate(c.meetingDate) ?? asDate(c.createdAt);
+        if (!d || d < reportPeriod.start || d > reportPeriod.end) return false;
+        return includeUnpublished || c.isPublished;
+      })
       .map(serializeCommittee);
 
     const actionRequired = buildActionItems({ financial, risks, metrics });
 
     res.json({
       generatedAt: new Date().toISOString(),
+      dateRange: {
+        kind: reportPeriod.kind,
+        startDate: reportPeriod.startYmd,
+        endDate: reportPeriod.endYmd,
+        label: reportPeriod.label,
+      },
       period: { year, quarter, label: `Q${quarter} ${year}` },
+      profitLoss,
+      balanceSheet,
       viewer: {
         role,
         isAdmin: isAdminRole(role),
