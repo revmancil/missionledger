@@ -4,7 +4,7 @@ import { eq, asc, sql, and } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
 import { toIsoString, parseYmdToUtcDayBounds, utcYmdToday } from "../lib/safeIso";
 import { sqlRows } from "../lib/sqlRows";
-import { bankRegisterBalancesByGlAccount } from "../lib/bankBalance";
+import { bankRegisterBalancesByGlAccount, normAccountId } from "../lib/bankBalance";
 import {
   equityNetAssetBucketKey,
   operationalNetByEquityAccountCode,
@@ -244,12 +244,15 @@ router.get("/", requireAuth, async (req, res) => {
     });
 
     const todayBounds = parseYmdToUtcDayBounds(utcYmdToday());
-    const registerByGl = todayBounds
+    const registerByGlRaw = todayBounds
       ? await bankRegisterBalancesByGlAccount(companyId, todayBounds.to)
       : new Map<string, number>();
+    const registerByGl = new Map(
+      [...registerByGlRaw].map(([id, bal]) => [normAccountId(id), bal] as const),
+    );
     const withBalancesGl = withBalancesFirst.map((row) => {
       if (String(row.type ?? "").toUpperCase() !== "ASSET") return row;
-      const registerBal = registerByGl.get(row.id);
+      const registerBal = registerByGl.get(normAccountId(row.id));
       if (registerBal == null) return row;
       return { ...row, balance: registerBal };
     });

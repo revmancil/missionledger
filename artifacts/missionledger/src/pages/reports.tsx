@@ -196,8 +196,9 @@ export default function ReportsPage() {
     const d = new Date(Date.UTC(y, m, 0));
     return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
   }
-  const [bsAsOfDate, setBsAsOfDate] = useState(`${currentYear}-12-31`);
-  const bsQueryDate = bsAsOfDate;
+  /** When null, balance sheet as-of follows the applied period end date. */
+  const [bsAsOfOverride, setBsAsOfOverride] = useState<string | null>(null);
+  const bsQueryDate = bsAsOfOverride ?? applied.endDate;
 
   // Transaction register extra filters
   const [search, setSearch]       = useState("");
@@ -242,7 +243,7 @@ export default function ReportsPage() {
 
   const handleApply = () => {
     setApplied({ startDate, endDate });
-    setBsAsOfDate(endDate);
+    setBsAsOfOverride(null);
     setAppliedSearch({ search, minAmount: minAmt, maxAmount: maxAmt });
   };
 
@@ -250,7 +251,7 @@ export default function ReportsPage() {
     setStartDate(start);
     setEndDate(end);
     setApplied({ startDate: start, endDate: end });
-    setBsAsOfDate(end);
+    setBsAsOfOverride(null);
   };
 
   const today = new Date();
@@ -1063,15 +1064,15 @@ export default function ReportsPage() {
                         <CardTitle className="text-base">Statement of Financial Position</CardTitle>
                         <p className="text-xs text-muted-foreground mt-0.5">As of {formatDate(balanceSheetAsOfYmd)}</p>
                         <p className="text-[11px] text-muted-foreground/90 leading-snug mt-1">
-                          GL balances through this date (same basis as Chart of Accounts → account ledger). Use Apply or YTD so this as-of matches your period end, or set the date here. Bank register totals can differ until activity is categorized and posted to GL.
+                          As-of matches your applied period end unless you pick a different date below. Bank-linked cash accounts use register balances through this date; other assets and liabilities use GL.
                         </p>
                       </div>
                       <div className="flex items-center gap-2">
                         <Input
                           type="date"
-                          value={bsAsOfDate}
+                          value={bsAsOfOverride ?? applied.endDate}
                           onChange={e => {
-                            if (e.target.value) setBsAsOfDate(e.target.value);
+                            if (e.target.value) setBsAsOfOverride(e.target.value);
                           }}
                           className="w-36 h-7 text-xs"
                         />

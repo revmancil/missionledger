@@ -1,6 +1,6 @@
 import { Router } from "express";
 import {
-  db, budgets, budgetLines, chartOfAccounts, transactions, transactionSplits,
+  db, budgets, budgetLines, chartOfAccounts, funds, transactions, transactionSplits,
 } from "@workspace/db";
 import { eq, and, desc, asc, gte, lte, inArray } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
@@ -16,6 +16,10 @@ import {
 
 const router = Router();
 
+function budgetLineActualKey(accountId: string, fundId: string | null | undefined): string {
+  return `${accountId}::${fundId ?? ""}`;
+}
+
 function resolveLineMonthlyAmounts(
   stored: unknown,
   annualAmount: number,
@@ -26,7 +30,7 @@ function resolveLineMonthlyAmounts(
   return normalizeMonthlyAmounts(parsed, periods.length, annualAmount);
 }
 
-async function computeActualsByAccountMonth(
+async function computeActualsByAccountFundMonth(
   companyId: string,
   start: Date,
   end: Date,
@@ -50,16 +54,16 @@ async function computeActualsByAccountMonth(
   const txById = Object.fromEntries(txRows.map((t) => [t.id, t]));
   const out: Record<string, Record<string, number>> = {};
 
-  const add = (accountId: string, monthKey: string, value: number) => {
-    if (!out[accountId]) out[accountId] = {};
-    out[accountId][monthKey] = roundMoney((out[accountId][monthKey] ?? 0) + value);
+  const add = (lineKey: string, monthKey: string, value: number) => {
+    if (!out[lineKey]) out[lineKey] = {};
+    out[lineKey][monthKey] = roundMoney((out[lineKey][monthKey] ?? 0) + value);
   };
 
   for (const t of txRows) {
     if (t.isSplit || !t.chartAccountId) continue;
     const mk = utcMonthKey(t.date);
     if (!mk) continue;
-    add(t.chartAccountId, mk, Number(t.amount));
+    add(budgetLineActualKey(t.chartAccountId, t.fundId), mk, Number(t.amount));
   }
 
   for (const s of splitRows) {
@@ -68,7 +72,11 @@ async function computeActualsByAccountMonth(
     if (!parent) continue;
     const mk = utcMonthKey(parent.date);
     if (!mk) continue;
-    add(s.chartAccountId, mk, Math.abs(Number(s.amount)));
+    add(
+      budgetLineActualKey(s.chartAccountId, s.fundId ?? parent.fundId),
+      mk,
+      Math.abs(Number(s.amount)),
+    );
   }
 
   return out;
@@ -235,18 +243,23 @@ router.get("/:id/lines", requireAuth, async (req, res) => {
       .where(eq(budgetLines.budgetId, id))
       .orderBy(asc(budgetLines.createdAt));
 
-    const allCoa = await db.select().from(chartOfAccounts)
-      .where(eq(chartOfAccounts.companyId, companyId));
+    const [allCoa, allFunds] = await Promise.all([
+      db.select().from(chartOfAccounts).where(eq(chartOfAccounts.companyId, companyId)),
+      db.select().from(funds).where(eq(funds.companyId, companyId)),
+    ]);
     const coaMap = Object.fromEntries(allCoa.map(c => [c.id, c]));
+    const fundMap = Object.fromEntries(allFunds.map(f => [f.id, f]));
 
     const start = budget.startDate;
     const end = budget.endDate;
     const periods = buildBudgetMonthPeriods(budget.startDate, budget.endDate);
-    const actualByAccountMonth = await computeActualsByAccountMonth(companyId, start, end);
+    const actualByLineMonth = await computeActualsByAccountFundMonth(companyId, start, end);
 
     const enriched = lines.map((l) => {
       const account = coaMap[l.accountId] ?? null;
-      return enrichBudgetLine(l, account, periods, actualByAccountMonth[l.accountId] ?? {});
+      const fund = l.fundId ? fundMap[l.fundId] ?? null : null;
+      const lineKey = budgetLineActualKey(l.accountId, l.fundId);
+      return enrichBudgetLine(l, account, fund, periods, actualByLineMonth[lineKey] ?? {});
     });
 
     res.json({
@@ -264,18 +277,26 @@ router.post("/:id/lines", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
     const { id } = req.params;
-    const { accountId, amount, monthlyAmounts } = req.body ?? {};
-    if (!accountId || (amount === undefined && monthlyAmounts === undefined))
-      return res.status(400).json({ error: "accountId and monthlyAmounts (or amount) required" });
+    const { accountId, fundId, amount, monthlyAmounts } = req.body ?? {};
+    if (!accountId || !fundId || (amount === undefined && monthlyAmounts === undefined))
+      return res.status(400).json({ error: "accountId, fundId, and monthlyAmounts (or amount) required" });
 
     const [budget] = await db.select().from(budgets)
       .where(and(eq(budgets.id, id), eq(budgets.companyId, companyId)));
     if (!budget) return res.status(404).json({ error: "Budget not found" });
 
+    const [fund] = await db.select().from(funds)
+      .where(and(eq(funds.id, fundId), eq(funds.companyId, companyId)));
+    if (!fund) return res.status(400).json({ error: "Fund not found" });
+
     const existing = await db.select().from(budgetLines)
-      .where(and(eq(budgetLines.budgetId, id), eq(budgetLines.accountId, accountId)));
+      .where(and(
+        eq(budgetLines.budgetId, id),
+        eq(budgetLines.accountId, accountId),
+        eq(budgetLines.fundId, fundId),
+      ));
     if (existing.length > 0)
-      return res.status(409).json({ error: "This account already has a budget line" });
+      return res.status(409).json({ error: "This account and fund already have a budget line" });
 
     const periods = buildBudgetMonthPeriods(budget.startDate, budget.endDate);
     const normalizedMonthly = monthlyAmounts !== undefined
@@ -287,13 +308,14 @@ router.post("/:id/lines", requireAuth, requireAdmin, async (req, res) => {
       budgetId: id,
       companyId,
       accountId,
+      fundId,
       amount: totalAmount,
       monthlyAmounts: normalizedMonthly,
     }).returning();
 
     const [account] = await db.select().from(chartOfAccounts).where(eq(chartOfAccounts.id, accountId));
     res.status(201).json(
-      enrichBudgetLine(line, account ?? null, periods, {}),
+      enrichBudgetLine(line, account ?? null, fund, periods, {}),
     );
   } catch (err) {
     console.error("POST /budgets/:id/lines:", err);

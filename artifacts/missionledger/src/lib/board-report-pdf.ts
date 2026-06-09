@@ -26,6 +26,11 @@ export interface BoardReportPdfData {
     topAssets: Array<{ accountCode: string; accountName: string; amount: number }>;
     topLiabilities: Array<{ accountCode: string; accountName: string; amount: number }>;
   };
+  fundBalances: {
+    asOfDate: string;
+    total: number;
+    items: Array<{ fundId: string; fundName: string; fundType: string; balance: number }>;
+  };
   actionRequired: Array<{
     id: string;
     severity: "high" | "medium" | "low";
@@ -88,6 +93,13 @@ const RISK_LABELS: Record<RiskStatus, string> = {
   GREEN: "On Track",
   YELLOW: "Watch",
   RED: "Action Needed",
+};
+
+const FUND_TYPE_LABELS: Record<string, string> = {
+  UNRESTRICTED: "Unrestricted",
+  RESTRICTED_TEMP: "Temp. Restricted",
+  RESTRICTED_PERM: "Perm. Restricted",
+  BOARD_DESIGNATED: "Board Designated",
 };
 
 function formatCurrency(n: number): string {
@@ -273,6 +285,40 @@ export function downloadBoardReportPdf(
     margin: { left: MARGIN, right: MARGIN },
   });
   y = lastTableY(doc) + 18;
+
+  // ── Fund Balances ───────────────────────────────────────────────────────────
+  y = sectionTitle(doc, `Fund Balances — As of ${data.fundBalances.asOfDate}`, y);
+  if (data.fundBalances.items.length === 0) {
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    doc.setTextColor(60, 60, 60);
+    doc.text("No funds configured.", MARGIN, y);
+    doc.setTextColor(0, 0, 0);
+    y += 20;
+  } else {
+    autoTable(doc, {
+      startY: y,
+      head: [["Fund", "Type", "Balance"]],
+      body: [
+        ...data.fundBalances.items.map((f) => [
+          f.fundName,
+          FUND_TYPE_LABELS[f.fundType] ?? f.fundType,
+          formatCurrency(f.balance),
+        ]),
+        [
+          { content: "Total across funds", styles: { fontStyle: "bold" } },
+          "",
+          { content: formatCurrency(data.fundBalances.total), styles: { fontStyle: "bold" } },
+        ],
+      ],
+      theme: "striped",
+      headStyles: { fillColor: NAVY, fontSize: 9 },
+      bodyStyles: { fontSize: 9 },
+      columnStyles: { 2: { halign: "right" } },
+      margin: { left: MARGIN, right: MARGIN },
+    });
+    y = lastTableY(doc) + 18;
+  }
 
   // ── Financial Health ────────────────────────────────────────────────────────
   y = sectionTitle(doc, "Financial Health", y);

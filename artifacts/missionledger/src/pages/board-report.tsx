@@ -5,7 +5,7 @@ import {
   AlertTriangle, Banknote, Flame, Target, Shield,
   Users, RefreshCw, Plus, Trash2,
   CheckCircle2, Circle, Eye, EyeOff, Download,
-  BarChart3, Scale,
+  BarChart3, Scale, Wallet,
 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
@@ -150,6 +150,19 @@ const EMPTY_BALANCE_SHEET: BoardReport["balanceSheet"] = {
   topLiabilities: [],
 };
 
+const EMPTY_FUND_BALANCES: BoardReport["fundBalances"] = {
+  asOfDate: utcYmdToday(),
+  total: 0,
+  items: [],
+};
+
+const FUND_TYPE_LABELS: Record<string, string> = {
+  UNRESTRICTED: "Unrestricted",
+  RESTRICTED_TEMP: "Temp. Restricted",
+  RESTRICTED_PERM: "Perm. Restricted",
+  BOARD_DESIGNATED: "Board Designated",
+};
+
 /** Normalize API payloads from older servers or partial responses. */
 function normalizeBoardReport(raw: Record<string, unknown>, periodFilter: PeriodKind, anchor: PeriodAnchor): BoardReport {
   const period = (raw.period as BoardReport["period"] | undefined) ?? {
@@ -174,6 +187,10 @@ function normalizeBoardReport(raw: Record<string, unknown>, periodFilter: Period
     },
     balanceSheet: (raw.balanceSheet as BoardReport["balanceSheet"] | undefined) ?? {
       ...EMPTY_BALANCE_SHEET,
+      asOfDate: dateRange.endDate,
+    },
+    fundBalances: (raw.fundBalances as BoardReport["fundBalances"] | undefined) ?? {
+      ...EMPTY_FUND_BALANCES,
       asOfDate: dateRange.endDate,
     },
     financialHealth: {
@@ -211,6 +228,11 @@ interface BoardReport {
     netIncome: number;
     topAssets: Array<{ accountCode: string; accountName: string; amount: number }>;
     topLiabilities: Array<{ accountCode: string; accountName: string; amount: number }>;
+  };
+  fundBalances: {
+    asOfDate: string;
+    total: number;
+    items: Array<{ fundId: string; fundName: string; fundType: string; balance: number }>;
   };
   viewer: { role: string; isAdmin: boolean; isBoardMember: boolean; name: string | null };
   actionRequired: Array<{
@@ -652,6 +674,52 @@ export default function BoardReportPage() {
               )}
             </div>
           </div>
+        </SectionCard>
+
+        {/* Fund Balances */}
+        <SectionCard title="Fund Balances" icon={Wallet}>
+          <p className="text-xs text-muted-foreground mb-4">
+            Net asset position by fund as of {data.fundBalances.asOfDate} (equity, income, and expense GL through that date).
+          </p>
+          {data.fundBalances.items.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No funds configured.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b bg-muted/30">
+                    <th className="text-left px-4 py-2.5 font-medium text-muted-foreground text-xs">Fund</th>
+                    <th className="text-left px-4 py-2.5 font-medium text-muted-foreground text-xs">Type</th>
+                    <th className="text-right px-4 py-2.5 font-medium text-muted-foreground text-xs">Balance</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {data.fundBalances.items.map((f) => (
+                    <tr key={f.fundId} className="hover:bg-muted/20">
+                      <td className="px-4 py-3 font-medium">{f.fundName}</td>
+                      <td className="px-4 py-3 text-muted-foreground">
+                        {FUND_TYPE_LABELS[f.fundType] ?? f.fundType}
+                      </td>
+                      <td className={cn(
+                        "px-4 py-3 text-right font-semibold tabular-nums",
+                        f.balance < 0 ? "text-red-600" : "",
+                      )}>
+                        {fmt(f.balance)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t bg-muted/30 font-semibold">
+                    <td className="px-4 py-3 text-xs uppercase tracking-wide text-muted-foreground" colSpan={2}>
+                      Total across funds
+                    </td>
+                    <td className="px-4 py-3 text-right tabular-nums">{fmt(data.fundBalances.total)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
         </SectionCard>
 
         {/* Financial Health */}

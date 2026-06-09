@@ -771,6 +771,15 @@ async function ensureSchema() {
   }
 
   try {
+    await pool.query(
+      "ALTER TABLE budget_lines ADD COLUMN IF NOT EXISTS fund_id text",
+    );
+    console.log("Schema check: budget_lines.fund_id OK");
+  } catch (err: any) {
+    console.error("Schema migration error (budget_lines.fund_id):", err.message);
+  }
+
+  try {
     await pool.query(`
       DO $$ BEGIN
         CREATE TYPE risk_status AS ENUM ('GREEN', 'YELLOW', 'RED');

@@ -19,6 +19,7 @@ export const budgetLines = pgTable("budget_lines", {
   budgetId: text("budget_id").notNull(),
   companyId: text("company_id").notNull(),
   accountId: text("account_id").notNull(),
+  fundId: text("fund_id"),
   amount: numeric("amount", { precision: 15, scale: 2, mode: "number" }).notNull().default(0).$type<number>(),
   /** Monthly budget amounts; length matches months in parent budget period. Annual total = sum. */
   monthlyAmounts: jsonb("monthly_amounts").$type<number[] | null>(),

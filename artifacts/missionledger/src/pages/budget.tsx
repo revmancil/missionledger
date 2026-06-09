@@ -91,6 +91,7 @@ interface BudgetMonth {
 interface BudgetLine {
   id: string;
   accountId: string;
+  fundId: string | null;
   amount: number;
   monthlyAmounts: number[];
   monthlyActuals: number[];
@@ -99,6 +100,7 @@ interface BudgetLine {
   percent: number;
   overBudget: boolean;
   account: { id: string; code: string; name: string; type: string } | null;
+  fund: { id: string; name: string; fundType: string } | null;
 }
 
 interface BudgetLinesResponse {
@@ -191,6 +193,24 @@ interface CoaAccount {
   isActive: boolean;
 }
 
+interface FundOption {
+  id: string;
+  name: string;
+  fundType?: string;
+  isActive: boolean;
+}
+
+const FUND_TYPE_LABELS: Record<string, string> = {
+  UNRESTRICTED: "Unrestricted",
+  RESTRICTED_TEMP: "Temp. Restricted",
+  RESTRICTED_PERM: "Perm. Restricted",
+  BOARD_DESIGNATED: "Board Designated",
+};
+
+function lineKey(accountId: string, fundId: string) {
+  return `${accountId}:${fundId}`;
+}
+
 export default function BudgetPage() {
   const qc = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -225,8 +245,17 @@ export default function BudgetPage() {
     enabled: addLineOpen,
   });
 
-  const usedAccountIds = new Set(lines.map(l => l.accountId));
-  const coaOptions = coaAll.filter(c => c.isActive && !usedAccountIds.has(c.id));
+  const { data: fundList = [] } = useQuery<FundOption[]>({
+    queryKey: ["funds"],
+    queryFn: () => apiGet("api/funds"),
+    enabled: addLineOpen,
+  });
+
+  const usedLineKeys = new Set(
+    lines.map((l) => lineKey(l.accountId, l.fundId ?? "")),
+  );
+  const coaOptions = coaAll.filter((c) => c.isActive);
+  const fundOptions = fundList.filter((f) => f.isActive);
 
   const createBudget = useMutation({
     mutationFn: (body: any) => apiPost("api/budgets", body),
@@ -316,13 +345,24 @@ export default function BudgetPage() {
   function handleAddLineSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
+    const accountId = String(fd.get("accountId") ?? "");
+    const fundId = String(fd.get("fundId") ?? "");
+    if (!accountId || !fundId) {
+      toast.error("Select both a fund and an account");
+      return;
+    }
+    if (usedLineKeys.has(lineKey(accountId, fundId))) {
+      toast.error("This account and fund combination is already in this budget");
+      return;
+    }
     const monthlyAmounts = addMonthly.map((v) => parseFloat(v) || 0);
     if (monthlyAmounts.some((v) => v < 0)) {
       toast.error("Monthly amounts cannot be negative");
       return;
     }
     addLine.mutate({
-      accountId: fd.get("accountId"),
+      accountId,
+      fundId,
       monthlyAmounts,
     });
   }
@@ -514,6 +554,7 @@ export default function BudgetPage() {
                     <thead>
                       <tr className="border-b bg-muted/30">
                         <th className="text-left px-4 py-2.5 font-medium text-muted-foreground text-xs">Account</th>
+                        <th className="text-left px-4 py-2.5 font-medium text-muted-foreground text-xs">Fund</th>
                         <th className="text-right px-4 py-2.5 font-medium text-muted-foreground text-xs">Annual Budget</th>
                         <th className="text-right px-4 py-2.5 font-medium text-muted-foreground text-xs">Actual</th>
                         <th className="text-right px-4 py-2.5 font-medium text-muted-foreground text-xs">Remaining</th>
@@ -530,6 +571,14 @@ export default function BudgetPage() {
                             </div>
                             {line.account && (
                               <div className="text-xs text-muted-foreground">{line.account.type}</div>
+                            )}
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="font-medium">{line.fund?.name ?? "—"}</div>
+                            {line.fund?.fundType && (
+                              <div className="text-xs text-muted-foreground">
+                                {FUND_TYPE_LABELS[line.fund.fundType] ?? line.fund.fundType}
+                              </div>
                             )}
                           </td>
                           <td className="px-4 py-3 text-right">
@@ -576,6 +625,7 @@ export default function BudgetPage() {
                     <tfoot>
                       <tr className="border-t bg-muted/30 font-semibold">
                         <td className="px-4 py-3 text-xs uppercase tracking-wide text-muted-foreground">Total</td>
+                        <td className="px-4 py-3" />
                         <td className="px-4 py-3 text-right">{fmt(totalBudgeted)}</td>
                         <td className="px-4 py-3 text-right">{fmt(totalActual)}</td>
                         <td className={cn("px-4 py-3 text-right", totalRemaining < 0 ? "text-red-600" : "text-green-600")}>
@@ -599,7 +649,7 @@ export default function BudgetPage() {
                   <table className="w-full text-xs min-w-[720px]">
                     <thead>
                       <tr className="border-b bg-muted/20">
-                        <th className="text-left px-4 py-2 font-medium text-muted-foreground sticky left-0 bg-muted/20">Account</th>
+                        <th className="text-left px-4 py-2 font-medium text-muted-foreground sticky left-0 bg-muted/20">Account / Fund</th>
                         {budgetMonths.map((m) => (
                           <th key={m.key} className="text-right px-2 py-2 font-medium text-muted-foreground whitespace-nowrap">{m.label}</th>
                         ))}
@@ -610,7 +660,10 @@ export default function BudgetPage() {
                       {lines.map((line) => (
                         <tr key={`monthly-${line.id}`} className="hover:bg-muted/10">
                           <td className="px-4 py-2 font-medium sticky left-0 bg-card whitespace-nowrap">
-                            {line.account ? `${line.account.code}` : line.accountId}
+                            <div>{line.account ? `${line.account.code}` : line.accountId}</div>
+                            <div className="text-[10px] text-muted-foreground font-normal">
+                              {line.fund?.name ?? "No fund"}
+                            </div>
                           </td>
                           {budgetMonths.map((m, i) => (
                             <td key={`${line.id}-${m.key}`} className="px-2 py-2 text-right tabular-nums text-muted-foreground">
@@ -688,6 +741,25 @@ export default function BudgetPage() {
           <DialogHeader><DialogTitle>Add Budget Line</DialogTitle></DialogHeader>
           <form onSubmit={handleAddLineSubmit} className="space-y-4 pt-2">
             <div className="space-y-1.5">
+              <label className="text-sm font-medium">Fund</label>
+              <select
+                name="fundId"
+                required
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <option value="">Select a fund…</option>
+                {fundOptions.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.name}
+                    {f.fundType ? ` (${FUND_TYPE_LABELS[f.fundType] ?? f.fundType})` : ""}
+                  </option>
+                ))}
+              </select>
+              {fundOptions.length === 0 && (
+                <p className="text-xs text-muted-foreground">Create an active fund before adding budget lines.</p>
+              )}
+            </div>
+            <div className="space-y-1.5">
               <label className="text-sm font-medium">Account</label>
               <select
                 name="accountId"
@@ -704,7 +776,7 @@ export default function BudgetPage() {
                 ))}
               </select>
               {coaOptions.length === 0 && (
-                <p className="text-xs text-muted-foreground">All active accounts are already in this budget.</p>
+                <p className="text-xs text-muted-foreground">No active accounts on the chart of accounts.</p>
               )}
             </div>
             <MonthlyAmountGrid
@@ -718,7 +790,7 @@ export default function BudgetPage() {
             />
             <div className="flex justify-end gap-2 pt-2">
               <Button type="button" variant="outline" onClick={() => setAddLineOpen(false)}>Cancel</Button>
-              <Button type="submit" disabled={addLine.isPending || coaOptions.length === 0}>
+              <Button type="submit" disabled={addLine.isPending || coaOptions.length === 0 || fundOptions.length === 0}>
                 {addLine.isPending ? "Adding…" : "Add Line"}
               </Button>
             </div>
@@ -732,6 +804,7 @@ export default function BudgetPage() {
           <DialogHeader>
             <DialogTitle>
               Monthly budget — {editLine?.account ? `${editLine.account.code} – ${editLine.account.name}` : "Account"}
+              {editLine?.fund ? ` (${editLine.fund.name})` : ""}
             </DialogTitle>
           </DialogHeader>
           {editLine && (

@@ -7,7 +7,11 @@ import { eq, and, desc, asc, inArray } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
 import { toIsoString, toIsoStringOrNull, asDate } from "../lib/safeIso";
 import { parseBoardPeriodKind, parseBoardPeriodAnchor, resolveBoardPeriod, quarterForYmd, type BoardReportPeriod } from "../lib/boardReportPeriod";
-import { buildHighLevelProfitLoss, buildHighLevelBalanceSheet } from "../lib/boardReportFinancials";
+import {
+  buildHighLevelProfitLoss,
+  buildHighLevelBalanceSheet,
+  buildFundBalancesAsOf,
+} from "../lib/boardReportFinancials";
 
 const router = Router();
 
@@ -138,24 +142,32 @@ async function buildFinancialHealth(companyId: string, period: BoardReportPeriod
         ));
     }
 
-    const actualByAccount: Record<string, number> = {};
+    const budgetLineKey = (accountId: string, fundId: string | null | undefined) =>
+      `${accountId}::${fundId ?? ""}`;
+    const budgetTxById = Object.fromEntries(budgetTx.map((t) => [t.id, t]));
+    const actualByLine: Record<string, number> = {};
     for (const t of budgetTx) {
       if (!t.isSplit && t.chartAccountId) {
-        actualByAccount[t.chartAccountId] = (actualByAccount[t.chartAccountId] ?? 0) + t.amount;
+        const key = budgetLineKey(t.chartAccountId, t.fundId);
+        actualByLine[key] = (actualByLine[key] ?? 0) + t.amount;
       }
     }
     for (const s of splits) {
-      if (s.chartAccountId) {
-        actualByAccount[s.chartAccountId] = (actualByAccount[s.chartAccountId] ?? 0) + Math.abs(Number(s.amount));
-      }
+      if (!s.chartAccountId) continue;
+      const parent = budgetTxById[s.transactionId];
+      const key = budgetLineKey(s.chartAccountId, s.fundId ?? parent?.fundId);
+      actualByLine[key] = (actualByLine[key] ?? 0) + Math.abs(Number(s.amount));
     }
 
-    budgetActual = round2(Object.values(actualByAccount).reduce((s, v) => s + v, 0));
+    budgetActual = round2(lines.reduce((s, line) => {
+      const key = budgetLineKey(line.accountId, line.fundId);
+      return s + (actualByLine[key] ?? 0);
+    }, 0));
     budgetPercent = budgetTotal > 0 ? Math.round((budgetActual / budgetTotal) * 100) : 0;
 
     for (const line of lines.slice(0, 8)) {
       const budgeted = line.amount ?? 0;
-      const actual = round2(actualByAccount[line.accountId] ?? 0);
+      const actual = round2(actualByLine[budgetLineKey(line.accountId, line.fundId)] ?? 0);
       budgetVsActual.push({
         accountId: line.accountId,
         budgeted,
@@ -321,12 +333,20 @@ router.get("/", requireAuth, async (req, res) => {
       topLiabilities: [] as Array<{ accountCode: string; accountName: string; amount: number }>,
     };
 
+    const emptyFundBalances = {
+      asOfDate: reportPeriod.endYmd,
+      total: 0,
+      items: [] as Array<{ fundId: string; fundName: string; fundType: string; balance: number }>,
+    };
+
     let profitLoss = emptyProfitLoss;
     let balanceSheet = emptyBalanceSheet;
+    let fundBalances = emptyFundBalances;
     try {
-      [profitLoss, balanceSheet] = await Promise.all([
+      [profitLoss, balanceSheet, fundBalances] = await Promise.all([
         buildHighLevelProfitLoss(companyId, reportPeriod.start, reportPeriod.end, reportPeriod.startYmd, reportPeriod.endYmd),
         buildHighLevelBalanceSheet(companyId, reportPeriod.end, reportPeriod.endYmd),
+        buildFundBalancesAsOf(companyId, reportPeriod.end, reportPeriod.endYmd),
       ]);
     } catch (finErr) {
       console.error("GET /board-report financial summaries:", finErr);
@@ -355,6 +375,7 @@ router.get("/", requireAuth, async (req, res) => {
       period: { year, quarter, label: `Q${quarter} ${year}` },
       profitLoss,
       balanceSheet,
+      fundBalances,
       viewer: {
         role,
         isAdmin: isAdminRole(role),

@@ -6,6 +6,12 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+/** Case/whitespace-tolerant match between COA ids and bank_accounts.gl_account_id (both text). */
+export function normAccountId(id: unknown): string {
+  if (id == null) return "";
+  return String(id).trim().toLowerCase();
+}
+
 export type CashAssetLine = {
   accountId: string;
   accountCode: string;
@@ -210,16 +216,16 @@ export async function mergeBankRegisterIntoCashAssets<T extends CashAssetLine>(
   const registerByGl = await bankRegisterBalancesByGlAccount(companyId, asOfEnd);
   if (registerByGl.size === 0) return assets;
 
-  const byId = new Map(assets.map((a) => [a.accountId, { ...a }]));
+  const byId = new Map(assets.map((a) => [normAccountId(a.accountId), { ...a }]));
 
   for (const [glAccountId, registerBal] of registerByGl) {
-    const row = byId.get(glAccountId);
+    const row = byId.get(normAccountId(glAccountId));
     if (row) {
       row.amount = round2(registerBal);
     }
   }
 
-  const missingGlIds = [...registerByGl.keys()].filter((id) => !byId.has(id));
+  const missingGlIds = [...registerByGl.keys()].filter((id) => !byId.has(normAccountId(id)));
   if (missingGlIds.length > 0) {
     const coaRows = await db
       .select({ id: chartOfAccounts.id, code: chartOfAccounts.code, name: chartOfAccounts.name })

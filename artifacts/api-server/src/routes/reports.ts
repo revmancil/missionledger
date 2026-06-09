@@ -5,7 +5,7 @@ import { requireAuth } from "../lib/auth";
 import { sqlRows } from "../lib/sqlRows";
 import { parseYmdToUtcDayBounds, utcYmdToday } from "../lib/safeIso";
 import { hasReportBalance, sqlCoaActiveOrHasGlInWindow } from "../lib/reportCoaGlWindow";
-import { mergeBankRegisterIntoCashAssets } from "../lib/bankBalance";
+import { buildStatementOfFinancialPosition } from "../lib/statementOfFinancialPosition";
 
 const router = Router();
 
@@ -149,35 +149,21 @@ router.get("/balance-sheet", requireAuth, async (req, res) => {
     if (!asOfParsed.ok) return res.status(400).json({ error: asOfParsed.error });
     const asOfEnd = asOfParsed.end;
 
-    // ── 1. Asset & Liability rows (no fund split needed) ──────────────────────
-    // LEFT JOIN journal_entries and filter je.status != 'VOID' to exclude any
-    // orphaned GL entries whose parent journal entry was voided without propagating
-    // is_void to the child GL rows (data-integrity guard).
-    const assetLiabRows = await db.execute(sql`
-      SELECT
-        c.id              AS account_id,
-        c.code            AS account_code,
-        c.name            AS account_name,
-        c.coa_type        AS account_type,
-        c.sort_order      AS sort_order,
-        ROUND(COALESCE(SUM(CASE WHEN g.entry_type = 'DEBIT'  THEN g.amount ELSE 0 END), 0)::numeric, 2) AS total_debit,
-        ROUND(COALESCE(SUM(CASE WHEN g.entry_type = 'CREDIT' THEN g.amount ELSE 0 END), 0)::numeric, 2) AS total_credit
-      FROM chart_of_accounts c
-      LEFT JOIN gl_entries g
-        ON g.account_id = c.id
-        AND g.company_id = ${companyId}
-        AND g.is_void = false
-        AND g.date <= ${asOfEnd}
-      LEFT JOIN journal_entries je
-        ON je.id = g.journal_entry_id
-        AND je.status != 'VOID'
-      WHERE c.company_id = ${companyId}
-        AND ${sqlCoaActiveOrHasGlInWindow(companyId, { kind: "through", end: asOfEnd })}
-        AND c.coa_type IN ('ASSET', 'LIABILITY')
-        AND (g.id IS NULL OR g.journal_entry_id IS NULL OR je.id IS NOT NULL)
-      GROUP BY c.id, c.code, c.name, c.coa_type, c.sort_order
-      ORDER BY c.sort_order, c.code
-    `);
+    const sofp = await buildStatementOfFinancialPosition(companyId, asOfEnd, asOfParsed.ymd);
+    const assets = sofp.assets.map((a) => ({
+      accountId: a.accountId,
+      accountCode: a.accountCode,
+      accountName: a.accountName,
+      accountType: "ASSET" as const,
+      amount: a.amount,
+    }));
+    const liabilities = sofp.liabilities.map((l) => ({
+      accountId: l.accountId,
+      accountCode: l.accountCode,
+      accountName: l.accountName,
+      accountType: "LIABILITY" as const,
+      amount: l.amount,
+    }));
 
     // ── 1b. Equity (chart) accounts — cumulative GL through as-of (all funds) ─
     const equityCoaRows = await db.execute(sql`
@@ -240,22 +226,6 @@ router.get("/balance-sheet", requireAuth, async (req, res) => {
       ORDER BY c.sort_order, c.code
     `);
 
-    // Map asset/liability — pure GL through as-of (matches account ledger running balance at that date)
-    const assetLiabMapped = sqlRows(assetLiabRows).map((r) => {
-      const debit  = parseFloat(r.total_debit)  || 0;
-      const credit = parseFloat(r.total_credit) || 0;
-      const gross = debit + credit;
-      const amount = r.account_type === "ASSET" ? debit - credit : credit - debit;
-      return {
-        accountId: r.account_id,
-        accountCode: r.account_code,
-        accountName: r.account_name,
-        accountType: r.account_type,
-        amount,
-        gross,
-      };
-    });
-
     const equityMapped = sqlRows(equityCoaRows).map((r) => {
       const debit  = parseFloat(r.total_debit)  || 0;
       const credit = parseFloat(r.total_credit) || 0;
@@ -264,32 +234,6 @@ router.get("/balance-sheet", requireAuth, async (req, res) => {
       return { accountId: r.account_id, accountCode: r.account_code, accountName: r.account_name, amount, gross };
     });
 
-    const assetsFromGl = assetLiabMapped
-      .filter((r) => r.accountType === "ASSET" && hasReportBalance(r.amount, r.gross))
-      .map((r) => ({
-        accountId: r.accountId,
-        accountCode: r.accountCode,
-        accountName: r.accountName,
-        accountType: r.accountType,
-        amount: r.amount,
-      }));
-    const assetsMerged = await mergeBankRegisterIntoCashAssets(companyId, asOfEnd, assetsFromGl);
-    const assets = assetsMerged.map((r) => ({
-      accountId: r.accountId,
-      accountCode: r.accountCode,
-      accountName: r.accountName,
-      accountType: "ASSET" as const,
-      amount: r.amount,
-    }));
-    const liabilities = assetLiabMapped
-      .filter((r) => r.accountType === "LIABILITY" && hasReportBalance(r.amount, r.gross))
-      .map((r) => ({
-        accountId: r.accountId,
-        accountCode: r.accountCode,
-        accountName: r.accountName,
-        accountType: r.accountType,
-        amount: r.amount,
-      }));
     const equityLines = equityMapped
       .filter((r) => hasReportBalance(r.amount, r.gross))
       .map((r) => ({
@@ -353,8 +297,8 @@ router.get("/balance-sheet", requireAuth, async (req, res) => {
       netAssets: f.equity + (f.income - f.expense),
     })).filter(f => f.netAssets !== 0);
 
-    const totalAssets      = assets.reduce((s, r) => s + r.amount, 0);
-    const totalLiabilities = liabilities.reduce((s, r) => s + r.amount, 0);
+    const totalAssets      = sofp.totalAssets;
+    const totalLiabilities = sofp.totalLiabilities;
     const totalNetAssets   = totalUnrestrictedNetAssets + totalRestrictedNetAssets;
     const netIncome        = unrestrictedNetIncome + restrictedNetIncome;
 
