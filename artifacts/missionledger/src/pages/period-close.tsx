@@ -35,7 +35,19 @@ interface HealthCheck {
   totalDebits?: number;
   totalCredits?: number;
 }
+interface UncategorizedTransaction {
+  id: string;
+  date: string;
+  payee: string;
+  amount: number;
+  type: "DEBIT" | "CREDIT";
+  status: string;
+  bankAccountId: string | null;
+  bankAccountName: string | null;
+}
 interface HealthResult {
+  closingDate?: string;
+  uncategorizedTransactions?: UncategorizedTransaction[];
   checks: {
     reconciliation: HealthCheck;
     uncategorized: HealthCheck;
@@ -91,7 +103,15 @@ function getAvailableMonths(fiscalYearEndMonth: number): Array<{ year: number; m
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
-function CheckRow({ check, loading }: { check: HealthCheck | null; loading: boolean }) {
+function CheckRow({
+  check,
+  loading,
+  children,
+}: {
+  check: HealthCheck | null;
+  loading: boolean;
+  children?: React.ReactNode;
+}) {
   if (loading || !check) {
     return (
       <div className="flex items-center gap-3 p-4 rounded-lg border bg-white">
@@ -102,22 +122,32 @@ function CheckRow({ check, loading }: { check: HealthCheck | null; loading: bool
   }
   return (
     <div className={cn(
-      "flex items-start gap-3 p-4 rounded-lg border transition-colors",
+      "rounded-lg border transition-colors",
       check.ok ? "bg-emerald-50 border-emerald-200" : "bg-red-50 border-red-200"
     )}>
-      {check.ok
-        ? <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0 mt-0.5" />
-        : <XCircle className="h-5 w-5 text-red-500 shrink-0 mt-0.5" />}
-      <div>
-        <p className={cn("font-semibold text-sm", check.ok ? "text-emerald-800" : "text-red-800")}>
-          {check.label}
-        </p>
-        <p className={cn("text-xs mt-0.5", check.ok ? "text-emerald-700" : "text-red-700")}>
-          {check.detail}
-        </p>
+      <div className="flex items-start gap-3 p-4">
+        {check.ok
+          ? <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0 mt-0.5" />
+          : <XCircle className="h-5 w-5 text-red-500 shrink-0 mt-0.5" />}
+        <div className="flex-1 min-w-0">
+          <p className={cn("font-semibold text-sm", check.ok ? "text-emerald-800" : "text-red-800")}>
+            {check.label}
+          </p>
+          <p className={cn("text-xs mt-0.5", check.ok ? "text-emerald-700" : "text-red-700")}>
+            {check.detail}
+          </p>
+        </div>
       </div>
+      {children}
     </div>
   );
+}
+
+function bankRegisterFixUrl(params: { before?: string; edit?: string }) {
+  const q = new URLSearchParams({ uncategorized: "1" });
+  if (params.before) q.set("before", params.before);
+  if (params.edit) q.set("edit", params.edit);
+  return `${BASE}bank-register?${q.toString()}`;
 }
 
 function StepIndicator({ steps, current }: { steps: string[]; current: number }) {
@@ -504,7 +534,43 @@ export default function PeriodClosePage() {
 
               <div className="space-y-3">
                 <CheckRow check={health?.checks.reconciliation ?? null} loading={healthLoading} />
-                <CheckRow check={health?.checks.uncategorized ?? null} loading={healthLoading} />
+                <CheckRow check={health?.checks.uncategorized ?? null} loading={healthLoading}>
+                  {!healthLoading && health && !health.checks.uncategorized.ok && (
+                    <div className="border-t border-red-200/80 px-4 pb-4 pt-3 space-y-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button size="sm" variant="outline" className="h-8 text-xs" asChild>
+                          <a href={bankRegisterFixUrl({ before: health.closingDate })}>
+                            View &amp; fix in Bank Register
+                            <ArrowRight className="h-3.5 w-3.5 ml-1.5" />
+                          </a>
+                        </Button>
+                        <p className="text-[11px] text-red-700/90">
+                          Reconciled lines: reopen that reconciliation first, then assign a category.
+                        </p>
+                      </div>
+                      {(health.uncategorizedTransactions ?? []).length > 0 && (
+                        <ul className="space-y-1.5 max-h-40 overflow-y-auto">
+                          {(health.uncategorizedTransactions ?? []).map((tx) => (
+                            <li key={tx.id}>
+                              <a
+                                href={bankRegisterFixUrl({ before: health.closingDate, edit: tx.id })}
+                                className="flex items-center justify-between gap-2 rounded-md border border-red-200/60 bg-white/70 px-2.5 py-1.5 text-xs hover:bg-white hover:border-red-300 transition-colors"
+                              >
+                                <span className="truncate text-red-900">
+                                  {tx.date} · {tx.payee}
+                                  {tx.bankAccountName ? ` · ${tx.bankAccountName}` : ""}
+                                </span>
+                                <span className="shrink-0 font-medium tabular-nums text-red-800">
+                                  {fmt(tx.amount)}
+                                </span>
+                              </a>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+                </CheckRow>
                 <CheckRow check={health?.checks.trialBalance ?? null} loading={healthLoading} />
               </div>
 

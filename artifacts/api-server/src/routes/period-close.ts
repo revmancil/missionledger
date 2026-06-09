@@ -131,6 +131,25 @@ router.get("/health-check", requireAuth, async (req, res) => {
     );
     const uncategorizedOk = uncategorized.length === 0;
 
+    const bankNameById = Object.fromEntries(allBanks.map((b) => [b.id, b.name]));
+    const uncategorizedTransactions = uncategorized
+      .sort((a, b) => {
+        const da = a.date instanceof Date ? a.date.getTime() : new Date(a.date).getTime();
+        const db = b.date instanceof Date ? b.date.getTime() : new Date(b.date).getTime();
+        return da - db;
+      })
+      .slice(0, 50)
+      .map((t) => ({
+        id: t.id,
+        date: (t.date instanceof Date ? t.date : new Date(t.date)).toISOString().slice(0, 10),
+        payee: t.payee,
+        amount: t.amount,
+        type: t.type,
+        status: t.status,
+        bankAccountId: t.bankAccountId ?? null,
+        bankAccountName: t.bankAccountId ? (bankNameById[t.bankAccountId] ?? null) : null,
+      }));
+
     // 3. Trial Balance check — sum GL entries, assets should equal liabilities + equity
     const allGlForPeriod = await db
       .select()
@@ -151,8 +170,12 @@ router.get("/health-check", requireAuth, async (req, res) => {
       .reduce((sum, e) => sum + e.amount, 0);
     const trialBalanceOk = Math.abs(totalDebits - totalCredits) < 0.01;
 
+    const closingDateYmd = endDate.toISOString().slice(0, 10);
+
     // Build response
     res.json({
+      closingDate: closingDateYmd,
+      uncategorizedTransactions,
       checks: {
         reconciliation: {
           ok: reconciliationOk || allBanks.length === 0,

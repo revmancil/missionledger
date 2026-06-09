@@ -101,6 +101,17 @@ interface Transaction {
   source?: "TRANSACTION" | "JOURNAL_ENTRY";
 }
 type StatusFilter = "ALL" | "UNCLEARED" | "CLEARED" | "RECONCILED" | "VOID";
+type CategoryFilter = "ALL" | "UNCATEGORIZED";
+
+function txYmd(dateStr: string): string {
+  return format(parseISO(dateStr), "yyyy-MM-dd");
+}
+
+/** Matches Period Close health check: non-split register rows missing a chart account. */
+function isUncategorizedTx(t: Transaction): boolean {
+  if (t.isVoid || t.isSplit || t.source === "JOURNAL_ENTRY") return false;
+  return !t.chartAccount;
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function fmtAmt(n: number) {
@@ -612,6 +623,9 @@ export default function BankRegisterPage() {
   const [closedUntil, setClosedUntil] = useState<string | null>(null);
   const [selectedBank, setSelectedBank] = useState<string>("ALL");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
+  const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("ALL");
+  const [beforeDateFilter, setBeforeDateFilter] = useState<string | null>(null);
+  const [pendingEditId, setPendingEditId] = useState<string | null>(null);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [showForm, setShowForm] = useState(false);
   const [editTx, setEditTx] = useState<Transaction | null>(null);
@@ -745,10 +759,31 @@ export default function BankRegisterPage() {
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
+  // Deep links from Period Close (?uncategorized=1&before=YYYY-MM-DD&edit=txId)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("uncategorized") === "1") setCategoryFilter("UNCATEGORIZED");
+    const before = params.get("before");
+    if (before && /^\d{4}-\d{2}-\d{2}$/.test(before)) setBeforeDateFilter(before);
+    const editId = params.get("edit");
+    if (editId) setPendingEditId(editId);
+  }, []);
+
   // ── Derived state ───────────────────────────────────────────────────────────
+  const uncategorizedCount = useMemo(
+    () => txList.filter((t) => {
+      if (!isUncategorizedTx(t)) return false;
+      if (beforeDateFilter && txYmd(t.date) > beforeDateFilter) return false;
+      return true;
+    }).length,
+    [txList, beforeDateFilter],
+  );
+
   const filtered = txList.filter((t) => {
     if (selectedBank !== "ALL" && txBankId(t) !== selectedBank) return false;
     if (statusFilter !== "ALL" && t.status !== statusFilter) return false;
+    if (categoryFilter === "UNCATEGORIZED" && !isUncategorizedTx(t)) return false;
+    if (beforeDateFilter && txYmd(t.date) > beforeDateFilter) return false;
     return true;
   });
 
@@ -859,7 +894,7 @@ export default function BankRegisterPage() {
       vendorId: tx.vendor?.id ?? "",
       amount: String(tx.amount),
       type: tx.type,
-      status: tx.status === "CLEARED" ? "CLEARED" : "UNCLEARED",
+      status: tx.status === "CLEARED" || tx.status === "RECONCILED" ? tx.status : "UNCLEARED",
       chartAccountId: tx.chartAccount?.id ?? "",
       fundId: tx.fund?.id ?? "",
       bankAccountId: txBankId(tx) ?? "",
@@ -891,6 +926,20 @@ export default function BankRegisterPage() {
     });
     setShowForm(true);
   }
+
+  useEffect(() => {
+    if (!pendingEditId || loading) return;
+    if (txList.length === 0) return;
+    const tx = txList.find((t) => t.id === pendingEditId);
+    if (!tx) {
+      setPendingEditId(null);
+      toast.error("That transaction is not in the register (it may be void or outside your filters).");
+      return;
+    }
+    setExpandedRows((prev) => new Set(prev).add(tx.id));
+    openEdit(tx);
+    setPendingEditId(null);
+  }, [pendingEditId, loading, txList]);
 
   function updateDonorLine(idx: number, field: keyof DonorLine, val: string) {
     setForm((f) => {
@@ -1214,6 +1263,17 @@ export default function BankRegisterPage() {
                   {s === "ALL" ? "All" : s.charAt(0) + s.slice(1).toLowerCase()}
                 </button>
               ))}
+              <button
+                onClick={() => setCategoryFilter((c) => (c === "UNCATEGORIZED" ? "ALL" : "UNCATEGORIZED"))}
+                className={cn(
+                  "px-2.5 sm:px-3 py-1 rounded-full text-xs font-medium border transition-colors whitespace-nowrap shrink-0",
+                  categoryFilter === "UNCATEGORIZED"
+                    ? "bg-amber-600 text-white border-amber-600"
+                    : "bg-white text-amber-800 border-amber-200 hover:border-amber-400",
+                )}
+              >
+                Needs category{uncategorizedCount > 0 ? ` (${uncategorizedCount})` : ""}
+              </button>
             </div>
             <div className="ml-auto flex flex-wrap items-center justify-end gap-x-2 gap-y-1">
               <span className="text-[11px] text-muted-foreground leading-tight text-right max-w-[11rem] hidden sm:block">
@@ -1269,6 +1329,33 @@ export default function BankRegisterPage() {
           )}
         </div>
 
+        {(categoryFilter === "UNCATEGORIZED" || beforeDateFilter) && (
+          <div className="mx-4 mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 flex flex-wrap items-center justify-between gap-2">
+            <span>
+              {categoryFilter === "UNCATEGORIZED" && (
+                <>Showing register lines that still need an income or expense category.</>
+              )}
+              {beforeDateFilter && (
+                <> Through {beforeDateFilter} (period close cutoff).</>
+              )}
+              {" "}Click a row to expand, then use Edit to assign an account and fund.
+              {" "}If status is Reconciled, reopen that bank reconciliation first.
+            </span>
+            {(categoryFilter === "UNCATEGORIZED" || beforeDateFilter) && (
+              <button
+                type="button"
+                className="text-amber-800 underline underline-offset-2 hover:text-amber-950 shrink-0"
+                onClick={() => {
+                  setCategoryFilter("ALL");
+                  setBeforeDateFilter(null);
+                }}
+              >
+                Clear filters
+              </button>
+            )}
+          </div>
+        )}
+
         {/* ── Register Table ───────────────────────────── */}
         <div className="flex-1 overflow-auto">
           <table className="w-full text-sm border-collapse">
@@ -1290,7 +1377,11 @@ export default function BankRegisterPage() {
                   <td colSpan={8} className="text-center py-16 text-muted-foreground">
                     {loading
                       ? "Loading\u2026"
-                      : txList.length > 0 && selectedBank !== "ALL"
+                      : categoryFilter === "UNCATEGORIZED"
+                        ? beforeDateFilter
+                          ? "No uncategorized transactions through this date — you can return to Period Close."
+                          : "No uncategorized transactions — all lines have an account assigned."
+                        : txList.length > 0 && selectedBank !== "ALL"
                         ? "No transactions for this bank account. Choose \u201cAll Bank Accounts\u201d or pick the account you imported into."
                         : "No transactions yet. Click \u201cAdd Transaction\u201d to get started."}
                   </td>
@@ -1311,6 +1402,7 @@ export default function BankRegisterPage() {
                         "group border-b border-gray-100 cursor-pointer transition-colors",
                         stripe,
                         isVoid && "opacity-40 line-through",
+                        !isVoid && isUncategorizedTx(tx) && "border-l-4 border-l-amber-400",
                         !isVoid && "hover:bg-[hsl(210,60%,97%)]"
                       )}
                       onClick={() => toggleRow(tx.id)}
