@@ -195,6 +195,8 @@ function normalizeBoardReport(raw: Record<string, unknown>, periodFilter: Period
     },
     financialHealth: {
       totalCash: Number(fh.totalCash ?? 0),
+      cashAsOfDate: String(fh.cashAsOfDate ?? dateRange.endDate),
+      bankAccounts: (fh.bankAccounts as BoardReport["financialHealth"]["bankAccounts"] | undefined) ?? [],
       periodRevenue: Number(fh.periodRevenue ?? fh.ytdRevenue ?? 0),
       periodExpenses: Number(fh.periodExpenses ?? fh.ytdExpenses ?? 0),
       periodNet: Number(fh.periodNet ?? fh.ytdNet ?? 0),
@@ -244,6 +246,8 @@ interface BoardReport {
   }>;
   financialHealth: {
     totalCash: number;
+    cashAsOfDate: string;
+    bankAccounts: Array<{ id: string; name: string; lastFour: string | null; balance: number }>;
     periodRevenue: number;
     periodExpenses: number;
     periodNet: number;
@@ -724,6 +728,9 @@ export default function BoardReportPage() {
 
         {/* Financial Health */}
         <SectionCard title="Financial Health" icon={Banknote}>
+          <p className="text-xs text-muted-foreground mb-4">
+            Cash balances from the bank register as of {data.financialHealth.cashAsOfDate}. Period revenue and expenses match the Statement of Activities (GL income and expense accounts).
+          </p>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
             <div className="rounded-lg bg-[hsl(210,60%,25%)] text-white p-4">
               <div className="text-xs opacity-80">Cash Position</div>
@@ -734,10 +741,61 @@ export default function BoardReportPage() {
               <div className="text-lg font-semibold mt-1 text-emerald-700">{fmt(data.financialHealth.periodRevenue)}</div>
             </div>
             <div className="rounded-lg bg-muted/50 p-4">
+              <div className="text-xs text-muted-foreground">Period Expenses</div>
+              <div className="text-lg font-semibold mt-1 text-red-700">{fmt(data.financialHealth.periodExpenses)}</div>
+            </div>
+            <div className="rounded-lg bg-muted/50 p-4">
               <div className="text-xs text-muted-foreground flex items-center gap-1">
                 <Flame className="w-3 h-3" /> Avg. Burn Rate
               </div>
               <div className="text-lg font-semibold mt-1">{fmt(data.financialHealth.periodBurnRate)}/mo</div>
+            </div>
+          </div>
+
+          {data.financialHealth.bankAccounts.length > 0 && (
+            <div className="overflow-x-auto mb-5 rounded-lg border">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b bg-muted/30">
+                    <th className="text-left px-4 py-2.5 font-medium text-muted-foreground text-xs">Bank Account</th>
+                    <th className="text-right px-4 py-2.5 font-medium text-muted-foreground text-xs">Balance</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {data.financialHealth.bankAccounts.map((b) => (
+                    <tr key={b.id} className="hover:bg-muted/20">
+                      <td className="px-4 py-3 font-medium">
+                        {b.name}
+                        {b.lastFour ? (
+                          <span className="text-muted-foreground font-normal"> ••{b.lastFour}</span>
+                        ) : null}
+                      </td>
+                      <td className={cn(
+                        "px-4 py-3 text-right font-semibold tabular-nums",
+                        b.balance < 0 ? "text-red-600" : "",
+                      )}>
+                        {fmt(b.balance)}
+                      </td>
+                    </tr>
+                  ))}
+                  <tr className="bg-muted/20 font-semibold">
+                    <td className="px-4 py-3">Total cash</td>
+                    <td className="px-4 py-3 text-right tabular-nums">{fmt(data.financialHealth.totalCash)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 lg:grid-cols-2 gap-3 mb-5">
+            <div className="rounded-lg bg-muted/50 p-4">
+              <div className="text-xs text-muted-foreground">Period Net</div>
+              <div className={cn(
+                "text-lg font-semibold mt-1 tabular-nums",
+                data.financialHealth.periodNet >= 0 ? "text-emerald-700" : "text-red-600",
+              )}>
+                {fmt(data.financialHealth.periodNet)}
+              </div>
             </div>
             <div className="rounded-lg bg-muted/50 p-4">
               <div className="text-xs text-muted-foreground">Est. Runway</div>

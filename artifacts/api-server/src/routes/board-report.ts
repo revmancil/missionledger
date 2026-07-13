@@ -12,6 +12,7 @@ import {
   buildHighLevelBalanceSheet,
   buildFundBalancesAsOf,
 } from "../lib/boardReportFinancials";
+import { bankRegisterBalanceAsOf } from "../lib/bankBalance";
 
 const router = Router();
 
@@ -75,7 +76,11 @@ function serializeCommittee(row: typeof committeeUpdates.$inferSelect) {
   };
 }
 
-async function buildFinancialHealth(companyId: string, period: BoardReportPeriod) {
+async function buildFinancialHealth(
+  companyId: string,
+  period: BoardReportPeriod,
+  plTotals: { totalRevenue: number; totalExpenses: number; netIncome: number },
+) {
   const periodStart = period.start;
   const periodEnd = period.end;
   const monthsElapsed = Math.max(
@@ -84,32 +89,50 @@ async function buildFinancialHealth(companyId: string, period: BoardReportPeriod
     1,
   );
 
-  const [banks, allTx, activeBudgetRows, budgetLineRows] = await Promise.all([
-    db.select({ currentBalance: bankAccounts.currentBalance }).from(bankAccounts)
-      .where(eq(bankAccounts.companyId, companyId)),
+  const [bankRows, allTx, activeBudgetRows, budgetLineRows] = await Promise.all([
     db.select({
+      id: bankAccounts.id,
+      name: bankAccounts.name,
+      lastFour: bankAccounts.lastFour,
+    }).from(bankAccounts)
+      .where(and(eq(bankAccounts.companyId, companyId), eq(bankAccounts.isActive, true)))
+      .orderBy(asc(bankAccounts.name)),
+    db.select({
+      id: transactions.id,
       date: transactions.date,
       type: transactions.type,
       amount: transactions.amount,
       isVoid: transactions.isVoid,
       isSplit: transactions.isSplit,
       chartAccountId: transactions.chartAccountId,
+      fundId: transactions.fundId,
     }).from(transactions).where(eq(transactions.companyId, companyId)),
     db.select().from(budgets)
       .where(and(eq(budgets.companyId, companyId), eq(budgets.isActive, true))),
-    db.select({ budgetId: budgetLines.budgetId, accountId: budgetLines.accountId, amount: budgetLines.amount })
-      .from(budgetLines).where(eq(budgetLines.companyId, companyId)),
+    db.select({
+      budgetId: budgetLines.budgetId,
+      accountId: budgetLines.accountId,
+      fundId: budgetLines.fundId,
+      amount: budgetLines.amount,
+    }).from(budgetLines).where(eq(budgetLines.companyId, companyId)),
   ]);
 
-  const totalCash = round2(banks.reduce((s, b) => s + (Number(b.currentBalance) || 0), 0));
+  const bankAccountsBreakdown = await Promise.all(
+    bankRows.map(async (b) => ({
+      id: b.id,
+      name: b.name,
+      lastFour: b.lastFour,
+      balance: round2(await bankRegisterBalanceAsOf(b.id, companyId, periodEnd)),
+    })),
+  );
+  bankAccountsBreakdown.sort((a, b) => Math.abs(b.balance) - Math.abs(a.balance));
+
+  const totalCash = round2(bankAccountsBreakdown.reduce((s, b) => s + b.balance, 0));
   const activeTx = allTx.filter((t) => !t.isVoid);
 
-  const periodTx = activeTx.filter((t) => {
-    const d = asDate(t.date);
-    return d && d >= periodStart && d <= periodEnd;
-  });
-  const periodRevenue = round2(periodTx.filter((t) => t.type === "CREDIT").reduce((s, t) => s + t.amount, 0));
-  const periodExpenses = round2(periodTx.filter((t) => t.type === "DEBIT").reduce((s, t) => s + t.amount, 0));
+  const periodRevenue = round2(plTotals.totalRevenue);
+  const periodExpenses = round2(plTotals.totalExpenses);
+  const periodNet = round2(plTotals.netIncome);
   const periodBurnRate = round2(periodExpenses / monthsElapsed);
   const monthsOfRunway = periodBurnRate > 0 ? round2(totalCash / periodBurnRate) : null;
 
@@ -180,9 +203,11 @@ async function buildFinancialHealth(companyId: string, period: BoardReportPeriod
 
   return {
     totalCash,
+    cashAsOfDate: period.endYmd,
+    bankAccounts: bankAccountsBreakdown,
     periodRevenue,
     periodExpenses,
-    periodNet: round2(periodRevenue - periodExpenses),
+    periodNet,
     periodBurnRate,
     monthsOfRunway,
     budget: {
@@ -295,8 +320,7 @@ router.get("/", requireAuth, async (req, res) => {
     const { year, quarter } = quarterForYmd(reportPeriod.endYmd);
     const includeUnpublished = req.query.adminView === "true" && isAdminRole(role);
 
-    const [financial, metricRows, riskRows, committeeRows] = await Promise.all([
-      buildFinancialHealth(companyId, reportPeriod),
+    const [metricRows, riskRows, committeeRows] = await Promise.all([
       db.select().from(programMetrics)
         .where(and(
           eq(programMetrics.companyId, companyId),
@@ -350,6 +374,29 @@ router.get("/", requireAuth, async (req, res) => {
       ]);
     } catch (finErr) {
       console.error("GET /board-report financial summaries:", finErr);
+    }
+
+    let financial;
+    try {
+      financial = await buildFinancialHealth(companyId, reportPeriod, {
+        totalRevenue: profitLoss.totalRevenue,
+        totalExpenses: profitLoss.totalExpenses,
+        netIncome: profitLoss.netIncome,
+      });
+    } catch (finErr) {
+      console.error("GET /board-report financial health:", finErr);
+      financial = {
+        totalCash: 0,
+        cashAsOfDate: reportPeriod.endYmd,
+        bankAccounts: [] as Array<{ id: string; name: string; lastFour: string | null; balance: number }>,
+        periodRevenue: profitLoss.totalRevenue,
+        periodExpenses: profitLoss.totalExpenses,
+        periodNet: profitLoss.netIncome,
+        periodBurnRate: 0,
+        monthsOfRunway: null as number | null,
+        budget: { total: 0, actual: 0, percent: 0, remaining: 0 },
+        budgetVsActual: [] as Array<{ accountId: string; budgeted: number; actual: number; variance: number; percent: number }>,
+      };
     }
 
     const metrics = metricRows.map(serializeMetric);

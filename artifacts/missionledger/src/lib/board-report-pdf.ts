@@ -40,6 +40,8 @@ export interface BoardReportPdfData {
   }>;
   financialHealth: {
     totalCash: number;
+    cashAsOfDate: string;
+    bankAccounts: Array<{ id: string; name: string; lastFour: string | null; balance: number }>;
     periodRevenue: number;
     periodExpenses: number;
     periodNet: number;
@@ -323,6 +325,15 @@ export function downloadBoardReportPdf(
   // ── Financial Health ────────────────────────────────────────────────────────
   y = sectionTitle(doc, "Financial Health", y);
 
+  doc.setFontSize(8);
+  doc.setTextColor(100, 100, 100);
+  doc.text(
+    `Cash from bank register as of ${data.financialHealth.cashAsOfDate}. Revenue and expenses match Statement of Activities.`,
+    MARGIN,
+    y,
+  );
+  y += 10;
+
   autoTable(doc, {
     startY: y,
     head: [["Metric", "Amount"]],
@@ -347,6 +358,26 @@ export function downloadBoardReportPdf(
   });
 
   y = lastTableY(doc) + 10;
+
+  if (data.financialHealth.bankAccounts.length > 0) {
+    autoTable(doc, {
+      startY: y,
+      head: [["Bank Account", "Balance"]],
+      body: [
+        ...data.financialHealth.bankAccounts.map((b) => [
+          b.lastFour ? `${b.name} ••${b.lastFour}` : b.name,
+          formatCurrency(b.balance),
+        ]),
+        ["Total cash", formatCurrency(data.financialHealth.totalCash)],
+      ],
+      theme: "striped",
+      headStyles: { fillColor: NAVY, fontSize: 9 },
+      bodyStyles: { fontSize: 9 },
+      columnStyles: { 1: { halign: "right" } },
+      margin: { left: MARGIN, right: MARGIN },
+    });
+    y = lastTableY(doc) + 10;
+  }
 
   autoTable(doc, {
     startY: y,
