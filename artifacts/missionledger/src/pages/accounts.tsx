@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Trash2, BookOpen, Pencil } from "lucide-react";
+import { Plus, Trash2, BookOpen, Pencil, Download } from "lucide-react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -240,6 +240,33 @@ export default function AccountsPage() {
     }
   };
 
+  const handleDownloadCsv = () => {
+    const headers = ["Code", "Name", "Type", "Parent Code", "Balance", "Active", "System", "Description"];
+    const rows = [...accounts].sort(sortCoa).map((a) => {
+      const parent = a.parentId ? accounts.find((p) => p.id === a.parentId) : null;
+      return [
+        a.code,
+        a.name,
+        TYPE_LABELS[a.type] ?? a.type,
+        parent?.code ?? "",
+        a.balance != null ? Number(a.balance).toFixed(2) : "",
+        a.isActive ? "Yes" : "No",
+        a.isSystem ? "Yes" : "No",
+        a.description ?? "",
+      ];
+    });
+    const csv = [headers, ...rows]
+      .map((r) => r.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(","))
+      .join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `chart-of-accounts-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <AppLayout title="Chart of Accounts">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-6">
@@ -249,14 +276,19 @@ export default function AccountsPage() {
             Use a parent account to group detail accounts — for example, place checking under <strong>Cash &amp; Bank</strong> (same account type).
           </p>
         </div>
-        <Dialog open={addOpen} onOpenChange={setAddOpen}>
-          <DialogTrigger asChild>
-            <Button>
-              <Plus className="w-4 h-4 mr-2" /> Add Account
-            </Button>
-          </DialogTrigger>
-          <AddAccountDialogContent open={addOpen} onClose={() => setAddOpen(false)} grouped={grouped} createAccount={createAccount} />
-        </Dialog>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={handleDownloadCsv} disabled={accounts.length === 0}>
+            <Download className="w-4 h-4 mr-2" /> Download CSV
+          </Button>
+          <Dialog open={addOpen} onOpenChange={setAddOpen}>
+            <DialogTrigger asChild>
+              <Button>
+                <Plus className="w-4 h-4 mr-2" /> Add Account
+              </Button>
+            </DialogTrigger>
+            <AddAccountDialogContent open={addOpen} onClose={() => setAddOpen(false)} grouped={grouped} createAccount={createAccount} />
+          </Dialog>
+        </div>
       </div>
 
       <EditAccountDialog
