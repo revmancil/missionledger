@@ -1230,15 +1230,7 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                itemIds:
-                  type: array
-                  items:
-                    type: string
-                cleared:
-                  type: boolean
-              required: [itemIds, cleared]
+              $ref: "#/components/schemas/ReconciliationItemsUpdateRequest"
       responses:
         "200":
           description: Updated
@@ -1527,6 +1519,9 @@ components:
         description:
           type: string
           nullable: true
+        fundType:
+          type: string
+          description: "UNRESTRICTED | RESTRICTED_TEMP | RESTRICTED_PERM | BOARD_DESIGNATED"
         isActive:
           type: boolean
         balance:
@@ -1548,6 +1543,9 @@ components:
           type: string
         description:
           type: string
+        fundType:
+          type: string
+          description: "UNRESTRICTED | RESTRICTED_TEMP | RESTRICTED_PERM | BOARD_DESIGNATED (default: UNRESTRICTED)"
         isActive:
           type: boolean
       required: [name]
@@ -2273,3 +2271,14 @@ components:
         cleared:
           type: boolean
       required: [id, reconciliationId, bankTransactionId, cleared]
+
+    ReconciliationItemsUpdateRequest:
+      type: object
+      properties:
+        itemIds:
+          type: array
+          items:
+            type: string
+        cleared:
+          type: boolean
+      required: [itemIds, cleared]

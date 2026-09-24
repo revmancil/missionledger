@@ -9,5 +9,7 @@
 export interface CreateFundRequest {
   name: string;
   description?: string;
+  /** UNRESTRICTED | RESTRICTED_TEMP | RESTRICTED_PERM | BOARD_DESIGNATED (default: UNRESTRICTED) */
+  fundType?: string;
   isActive?: boolean;
 }

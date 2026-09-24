@@ -10,6 +10,8 @@ export interface Fund {
   id: string;
   name: string;
   description?: string | null;
+  /** UNRESTRICTED | RESTRICTED_TEMP | RESTRICTED_PERM | BOARD_DESIGNATED */
+  fundType?: string;
   isActive: boolean;
   balance?: number;
   totalDonations?: number;

@@ -511,17 +511,17 @@ function ConfirmModal({
 }: {
   open: boolean; onClose: () => void; onConfirm: () => void;
   saving: boolean; error: string;
-  submitRows: Array<{ accountId: string; fundId: string; amount: number; entryType: EntryType; memo: string | null }>;
+  submitRows: Array<{ accountId: string; fundId: string; amount: string; entryType: EntryType; memo: string | null }>;
   allCoa: CoaAccount[]; funds: FundRecord[]; asOfDate: string; method: Method;
 }) {
   const acctMap = Object.fromEntries(allCoa.map((a) => [a.id, a]));
   const fundMap = Object.fromEntries(funds.map((f) => [f.id, f]));
   const totalDRCents = submitRows
     .filter((r) => r.entryType === "DEBIT")
-    .reduce((s, r) => s + moneyToCents(r.amount), 0);
+    .reduce((s, r) => s + moneyToCents(Number(r.amount)), 0);
   const totalCRCents = submitRows
     .filter((r) => r.entryType === "CREDIT")
-    .reduce((s, r) => s + moneyToCents(r.amount), 0);
+    .reduce((s, r) => s + moneyToCents(Number(r.amount)), 0);
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
@@ -565,10 +565,10 @@ function ConfirmModal({
                       </td>
                       <td className="px-4 py-2.5 text-muted-foreground">{fund?.name ?? "—"}</td>
                       <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-blue-700">
-                        {row.entryType === "DEBIT" ? fmt(row.amount) : ""}
+                        {row.entryType === "DEBIT" ? fmt(Number(row.amount)) : ""}
                       </td>
                       <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-emerald-700">
-                        {row.entryType === "CREDIT" ? fmt(row.amount) : ""}
+                        {row.entryType === "CREDIT" ? fmt(Number(row.amount)) : ""}
                       </td>
                     </tr>
                   );
@@ -938,7 +938,7 @@ export default function OpeningBalancePage() {
 
   // ── Build final submit rows ───────────────────────────────────────────────────
   const finalSubmitRows = useMemo(() => {
-    const rows: Array<{ accountId: string; fundId: string; amount: number; entryType: EntryType; memo: string | null }> = [];
+    const rows: Array<{ accountId: string; fundId: string; amount: string; entryType: EntryType; memo: string | null }> = [];
 
     for (const r of assetRows) {
       const c = lineAmountCents(r.amount);
