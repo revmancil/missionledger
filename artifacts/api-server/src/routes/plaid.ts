@@ -167,13 +167,13 @@ router.post("/exchange-token", requireAuth, requireAdmin, async (req, res) => {
     const { companyId } = (req as any).user;
     const { publicToken, bankAccountId, institutionName, plaidAccountId: bodyPlaidAccountId } = req.body;
     if (!publicToken || !bankAccountId) {
-      return res.status(400).json({ error: "publicToken and bankAccountId are required" });
+      return void res.status(400).json({ error: "publicToken and bankAccountId are required" });
     }
 
     const [account] = await db.select().from(bankAccounts).where(
       and(eq(bankAccounts.id, bankAccountId), eq(bankAccounts.companyId, companyId))
     );
-    if (!account) return res.status(404).json({ error: "Bank account not found" });
+    if (!account) return void res.status(404).json({ error: "Bank account not found" });
 
     const plaid = getPlaidClient();
     const exchangeResponse = await plaid.itemPublicTokenExchange({ public_token: publicToken });
@@ -224,8 +224,8 @@ router.post("/sync/:bankAccountId", requireAuth, requireAdmin, async (req, res) 
     const [account] = await db.select().from(bankAccounts).where(
       and(eq(bankAccounts.id, bankAccountId), eq(bankAccounts.companyId, companyId))
     );
-    if (!account) return res.status(404).json({ error: "Bank account not found" });
-    if (!account.plaidAccessToken) return res.status(400).json({ error: "Bank account not linked with Plaid" });
+    if (!account) return void res.status(404).json({ error: "Bank account not found" });
+    if (!account.plaidAccessToken) return void res.status(400).json({ error: "Bank account not linked with Plaid" });
 
     const plaid = getPlaidClient();
 
@@ -240,7 +240,7 @@ router.post("/sync/:bankAccountId", requireAuth, requireAdmin, async (req, res) 
     });
 
     if (!matchedPlaidAccount) {
-      return res.status(422).json({
+      return void res.status(422).json({
         error:
           "Could not determine which Plaid account matches this MissionLedger bank. Set the correct last four digits on the bank account (Bank Accounts page), ensure the account name distinguishes checking vs money market, then sync again.",
         plaidAccountCount: plaidAccountList.length,

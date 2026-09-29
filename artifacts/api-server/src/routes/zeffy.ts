@@ -56,15 +56,15 @@ export function isZeffySignatureValid(
 router.post("/webhook", async (req, res) => {
   try {
     const companyCode = typeof req.query.org === "string" ? req.query.org.trim() : "";
-    if (!companyCode) return res.status(400).json({ error: "Missing org" });
+    if (!companyCode) return void res.status(400).json({ error: "Missing org" });
 
     const [company] = await db
       .select()
       .from(companies)
       .where(eq(companies.companyCode, companyCode))
       .limit(1);
-    if (!company) return res.status(404).json({ error: "Organization not found" });
-    if (!company.donationsEnabled) return res.status(403).json({ error: "Donations not enabled" });
+    if (!company) return void res.status(404).json({ error: "Organization not found" });
+    if (!company.donationsEnabled) return void res.status(403).json({ error: "Donations not enabled" });
 
     // Raw bytes are required for verification. The route is mounted with express.raw()
     // in app.ts so req.body is a Buffer; re-serializing parsed JSON would reorder keys
@@ -83,13 +83,13 @@ router.post("/webhook", async (req, res) => {
         `Zeffy webhook rejected: no signing secret configured for company ${company.id}. ` +
           "Set the Zeffy webhook signing secret (whsec_...) in organization settings.",
       );
-      return res.status(503).json({ error: "Webhook not configured" });
+      return void res.status(503).json({ error: "Webhook not configured" });
     }
 
     const signature = req.get("Zeffy-Signature") ?? undefined;
     if (!isZeffySignatureValid(rawBody, signature, company.zeffyWebhookSecret)) {
       console.warn(`Zeffy webhook rejected: invalid signature for company ${company.id}`);
-      return res.status(400).json({ error: "Invalid signature" });
+      return void res.status(400).json({ error: "Invalid signature" });
     }
 
     // Signature verified — only now is it safe to parse untrusted input.
@@ -97,7 +97,7 @@ router.post("/webhook", async (req, res) => {
     try {
       payload = JSON.parse(rawBody.toString("utf8"));
     } catch {
-      return res.status(400).json({ error: "Invalid JSON" });
+      return void res.status(400).json({ error: "Invalid JSON" });
     }
 
     // Documented envelope is { event, data }. Fall back to the flat shape for older
@@ -107,13 +107,13 @@ router.post("/webhook", async (req, res) => {
 
     if (eventType && !DONATION_EVENTS.has(eventType)) {
       // Acknowledge so Zeffy stops retrying, but do not touch the ledger.
-      return res.json({ received: true, ignored: eventType });
+      return void res.json({ received: true, ignored: eventType });
     }
 
     const status = String(data?.status ?? "").toLowerCase();
     if (status && status !== "succeeded") {
       // Pending / failed payments are not revenue.
-      return res.json({ received: true, ignored: `status:${status}` });
+      return void res.json({ received: true, ignored: `status:${status}` });
     }
 
     // Idempotency key. Prefer the payment id so that payment.created followed by
@@ -132,7 +132,7 @@ router.post("/webhook", async (req, res) => {
         )
         .limit(1);
       if (existing) {
-        return res.json({ received: true, duplicate: true });
+        return void res.json({ received: true, duplicate: true });
       }
     }
 
@@ -148,7 +148,7 @@ router.post("/webhook", async (req, res) => {
     const notes = data?.fundDesignation || data?.message || null;
 
     if (!Number.isFinite(amount) || amount <= 0) {
-      return res.status(400).json({ error: "Invalid amount" });
+      return void res.status(400).json({ error: "Invalid amount" });
     }
 
     try {
@@ -168,7 +168,7 @@ router.post("/webhook", async (req, res) => {
       // 5xx, which would make Zeffy redeliver for up to 3 days.
       const code = err?.code ?? err?.cause?.code;
       if (code === "23505") {
-        return res.json({ received: true, duplicate: true });
+        return void res.json({ received: true, duplicate: true });
       }
       throw err;
     }
@@ -186,9 +186,9 @@ router.post("/webhook", async (req, res) => {
 router.get("/public-info", async (req, res) => {
   try {
     const org = req.query.org as string;
-    if (!org) return res.status(400).json({ error: "Missing org" });
+    if (!org) return void res.status(400).json({ error: "Missing org" });
     const [company] = await db.select().from(companies).where(eq(companies.companyCode, org));
-    if (!company || !company.donationsEnabled) return res.status(404).json({ error: "Not found" });
+    if (!company || !company.donationsEnabled) return void res.status(404).json({ error: "Not found" });
     res.json({ orgName: company.name, zeffyFormUrl: company.zeffyFormUrl });
   } catch {
     res.status(500).json({ error: "Server error" });

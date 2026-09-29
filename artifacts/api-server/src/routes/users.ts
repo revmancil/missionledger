@@ -92,7 +92,7 @@ router.get("/me", requireAuth, async (req, res) => {
       // Impersonation/legacy sessions can carry a valid company context while the
       // user row is not tied to that tenant. Return token-backed profile instead
       // of hard failing so admin views can still load.
-      return res.json({
+      return void res.json({
         id: userId,
         userId: authUser.userId ?? "",
         name: authUser.name ?? null,
@@ -160,13 +160,13 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId, id: currentUserId } = (req as any).user;
     const mismatch = assertExpectedCompany(req, companyId);
-    if (mismatch) return res.status(409).json({ error: mismatch });
+    if (mismatch) return void res.status(409).json({ error: mismatch });
     const { name, userId, email, password, role } = req.body ?? {};
-    if (!userId || !password || !role) return res.status(400).json({ error: "Missing required fields" });
+    if (!userId || !password || !role) return void res.status(400).json({ error: "Missing required fields" });
     const requesterIsPrimary = await isPrimaryAdmin(currentUserId, companyId);
     const legacyRole = mapUiRoleToLegacy(role);
     if (legacyRole === "MASTER_ADMIN" && !requesterIsPrimary) {
-      return res.status(403).json({ error: "Only the Primary Admin can create another Primary Admin." });
+      return void res.status(403).json({ error: "Only the Primary Admin can create another Primary Admin." });
     }
 
     const hashed = await hashPassword(password);
@@ -226,9 +226,9 @@ router.post("/:id/send-welcome-email", requireAuth, requireAdmin, async (req, re
   try {
     const { companyId } = (req as any).user;
     const mismatch = assertExpectedCompany(req, companyId);
-    if (mismatch) return res.status(409).json({ error: mismatch });
+    if (mismatch) return void res.status(409).json({ error: mismatch });
     if (!isEmailConfigured()) {
-      return res.status(503).json({
+      return void res.status(503).json({
         error: "Email delivery is not configured on the server (missing RESEND_API_KEY).",
       });
     }
@@ -238,12 +238,12 @@ router.post("/:id/send-welcome-email", requireAuth, requireAdmin, async (req, re
       .from(users)
       .where(and(eq(users.id, req.params.id), eq(users.companyId, companyId)))
       .limit(1);
-    if (!target) return res.status(404).json({ error: "User not found" });
+    if (!target) return void res.status(404).json({ error: "User not found" });
 
     const emailStr = String(target.email ?? "");
     const isPlaceholderEmail = emailStr.endsWith("@local.missionledger");
     if (isPlaceholderEmail || !emailStr.includes("@")) {
-      return res.status(400).json({
+      return void res.status(400).json({
         error: "This user has no deliverable email. Add a real email address on the account first.",
       });
     }
@@ -276,17 +276,17 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId, id: currentUserId } = (req as any).user;
     const mismatch = assertExpectedCompany(req, companyId);
-    if (mismatch) return res.status(409).json({ error: mismatch });
+    if (mismatch) return void res.status(409).json({ error: mismatch });
     const { name, userId, email, password, role, isActive } = req.body ?? {};
     const requesterIsPrimary = await isPrimaryAdmin(currentUserId, companyId);
     const targetIsPrimary = await isPrimaryAdmin(req.params.id, companyId);
     const legacyRole = role ? mapUiRoleToLegacy(role) : undefined;
 
     if (targetIsPrimary && !requesterIsPrimary) {
-      return res.status(403).json({ error: "Only the Primary Admin can modify another Primary Admin." });
+      return void res.status(403).json({ error: "Only the Primary Admin can modify another Primary Admin." });
     }
     if (targetIsPrimary && legacyRole && legacyRole !== "MASTER_ADMIN") {
-      return res.status(400).json({ error: "Use 'Make Primary Admin' transfer to change Primary Admin ownership." });
+      return void res.status(400).json({ error: "Use 'Make Primary Admin' transfer to change Primary Admin ownership." });
     }
 
     const updateData: any = { updatedAt: new Date() };
@@ -300,7 +300,7 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
     const [updated] = await db.update(users).set(updateData)
       .where(and(eq(users.id, req.params.id), eq(users.companyId, companyId))).returning();
 
-    if (!updated) return res.status(404).json({ error: "Not found" });
+    if (!updated) return void res.status(404).json({ error: "Not found" });
     if (legacyRole) {
       await db.update(organizationUsers).set({ role: legacyRole as any })
         .where(and(eq(organizationUsers.userId, updated.id), eq(organizationUsers.companyId, companyId)));
@@ -327,17 +327,17 @@ router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId, id: currentUserId } = (req as any).user;
     const mismatch = assertExpectedCompany(req, companyId);
-    if (mismatch) return res.status(409).json({ error: mismatch });
-    if (req.params.id === currentUserId) return res.status(400).json({ error: "Cannot delete yourself" });
+    if (mismatch) return void res.status(409).json({ error: mismatch });
+    if (req.params.id === currentUserId) return void res.status(400).json({ error: "Cannot delete yourself" });
     const requesterIsPrimary = await isPrimaryAdmin(currentUserId, companyId);
     const targetIsPrimary = await isPrimaryAdmin(req.params.id, companyId);
     if (targetIsPrimary && !requesterIsPrimary) {
-      return res.status(403).json({ error: "Only a Primary Admin can delete a Primary Admin." });
+      return void res.status(403).json({ error: "Only a Primary Admin can delete a Primary Admin." });
     }
     if (targetIsPrimary) {
       const count = await countPrimaryAdmins(companyId);
       if (count <= 1) {
-        return res.status(400).json({ error: "This is the only Primary Admin. Assign a new Primary Admin first." });
+        return void res.status(400).json({ error: "This is the only Primary Admin. Assign a new Primary Admin first." });
       }
     }
     await db.delete(organizationUsers).where(and(eq(organizationUsers.userId, req.params.id), eq(organizationUsers.companyId, companyId)));
@@ -352,14 +352,14 @@ router.post("/:id/make-primary", requireAuth, requireAdmin, async (req, res) => 
   try {
     const { companyId, id: currentUserId } = (req as any).user;
     const mismatch = assertExpectedCompany(req, companyId);
-    if (mismatch) return res.status(409).json({ error: mismatch });
+    if (mismatch) return void res.status(409).json({ error: mismatch });
     const requesterIsPrimary = await isPrimaryAdmin(currentUserId, companyId);
     if (!requesterIsPrimary) {
-      return res.status(403).json({ error: "Only the current Primary Admin can designate a new Primary Admin." });
+      return void res.status(403).json({ error: "Only the current Primary Admin can designate a new Primary Admin." });
     }
     const targetUserId = req.params.id;
     const [target] = await db.select().from(users).where(and(eq(users.id, targetUserId), eq(users.companyId, companyId))).limit(1);
-    if (!target) return res.status(404).json({ error: "User not found" });
+    if (!target) return void res.status(404).json({ error: "User not found" });
 
     await db.update(organizationUsers).set({ isPrimary: false, role: "ADMIN" as any })
       .where(and(eq(organizationUsers.companyId, companyId), eq(organizationUsers.isPrimary, true)));

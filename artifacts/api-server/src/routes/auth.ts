@@ -45,14 +45,14 @@ router.post("/find-user-id", async (req, res) => {
   try {
     const { companyCode, email } = req.body ?? {};
     if (!companyCode || !email) {
-      return res.status(400).json({ error: "companyCode and email are required" });
+      return void res.status(400).json({ error: "companyCode and email are required" });
     }
 
     const normalizedCompanyCode = String(companyCode).trim().toUpperCase();
     const [company] = await db.select().from(companies)
       .where(eq(companies.companyCode, normalizedCompanyCode))
       .limit(1);
-    if (!company) return res.json({ ok: true, userIds: [] });
+    if (!company) return void res.json({ ok: true, userIds: [] });
 
     const rows = await db.select({ userId: users.userId })
       .from(users)
@@ -67,10 +67,10 @@ router.post("/find-user-id", async (req, res) => {
         .catch((err: any) => console.error("User ID recovery email failed:", err.message));
     }
     // Always return a generic success response for security.
-    return res.json({ ok: true });
+    return void res.json({ ok: true });
   } catch (error) {
     console.error("Find user id error:", error);
-    return res.status(500).json({ error: "Internal server error" });
+    return void res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -79,7 +79,7 @@ router.post("/login", async (req, res) => {
   try {
     const { companyCode, email, userId, password } = req.body ?? {};
     if (!companyCode || !password || (!email && !userId)) {
-      return res.status(400).json({ error: "companyCode, password, and email or userId are required" });
+      return void res.status(400).json({ error: "companyCode, password, and email or userId are required" });
     }
 
     const normalizedCode = String(companyCode).trim().toUpperCase();
@@ -88,10 +88,10 @@ router.post("/login", async (req, res) => {
       .limit(1);
 
     if (!company) {
-      return res.status(401).json({ error: "Invalid company code" });
+      return void res.status(401).json({ error: "Invalid company code" });
     }
     if (!company.isActive) {
-      return res.status(403).json({ error: "ACCOUNT_SUSPENDED", message: "This organization account has been suspended." });
+      return void res.status(403).json({ error: "ACCOUNT_SUSPENDED", message: "This organization account has been suspended." });
     }
 
     const normalizedUserId = userId ? String(userId).trim().toLowerCase() : "";
@@ -123,7 +123,7 @@ router.post("/login", async (req, res) => {
     }
 
     if (!user) {
-      return res.status(401).json({ error: "Invalid credentials" });
+      return void res.status(401).json({ error: "Invalid credentials" });
     }
 
     // Verify user has access to this company (check org_users or legacy companyId)
@@ -133,12 +133,12 @@ router.post("/login", async (req, res) => {
 
     // Fall back to legacy companyId check
     if (!orgMembership && user.companyId !== company.id) {
-      return res.status(401).json({ error: "Invalid credentials" });
+      return void res.status(401).json({ error: "Invalid credentials" });
     }
 
     const valid = await comparePassword(password, user.password);
     if (!valid) {
-      return res.status(401).json({ error: "Invalid credentials" });
+      return void res.status(401).json({ error: "Invalid credentials" });
     }
 
     const effectiveRole = orgMembership?.role ?? user.role;
@@ -199,7 +199,7 @@ router.post("/register", async (req, res) => {
   try {
     const { organizationName, ein, organizationType, adminName, adminEmail, adminUserId, password } = req.body ?? {};
     if (!organizationName || !ein || !organizationType || !adminEmail || !adminUserId || !password) {
-      return res.status(400).json({ error: "Missing required fields" });
+      return void res.status(400).json({ error: "Missing required fields" });
     }
 
     const existingUser = await db.select().from(users).where(
@@ -214,13 +214,13 @@ router.post("/register", async (req, res) => {
       const existing = existingUser[0];
       const valid = await comparePassword(password, existing.password);
       if (!valid) {
-        return res.status(400).json({ error: "Email already registered" });
+        return void res.status(400).json({ error: "Email already registered" });
       }
 
       const [company] = await db.select().from(companies).where(eq(companies.id, existing.companyId)).limit(1);
-      if (!company) return res.status(404).json({ error: "Account company not found" });
+      if (!company) return void res.status(404).json({ error: "Account company not found" });
       if (!company.isActive) {
-        return res.status(403).json({ error: "ACCOUNT_SUSPENDED", message: "This organization account has been suspended." });
+        return void res.status(403).json({ error: "ACCOUNT_SUSPENDED", message: "This organization account has been suspended." });
       }
 
       // Ensure the org membership row exists for org switching.
@@ -344,7 +344,7 @@ router.get("/my-orgs", requireAuth, async (req, res) => {
       // Fallback: user has no org_users rows, use their companyId
       const user = (req as any).user as AuthUser;
       const [company] = await db.select().from(companies).where(eq(companies.id, user.companyId)).limit(1);
-      return res.json([{
+      return void res.json([{
         companyId: company.id,
         companyName: company.name,
         companyCode: company.companyCode,
@@ -395,7 +395,7 @@ router.post("/switch-org", requireAuth, async (req, res) => {
     const { companyId } = req.body ?? {};
 
     if (!companyId) {
-      return res.status(400).json({ error: "companyId is required" });
+      return void res.status(400).json({ error: "companyId is required" });
     }
 
     // Verify access: check organization_users or platform admin
@@ -411,17 +411,17 @@ router.post("/switch-org", requireAuth, async (req, res) => {
       // Also allow if it's the user's primary company (legacy support)
       const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
       if (!membership && user?.companyId !== companyId) {
-        return res.status(403).json({ error: "You do not have access to this organization" });
+        return void res.status(403).json({ error: "You do not have access to this organization" });
       }
     }
 
     const [company] = await db.select().from(companies).where(eq(companies.id, companyId)).limit(1);
     if (!company || !company.isActive) {
-      return res.status(403).json({ error: "Organization is not accessible" });
+      return void res.status(403).json({ error: "Organization is not accessible" });
     }
 
     const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
-    if (!user) return res.status(404).json({ error: "User not found" });
+    if (!user) return void res.status(404).json({ error: "User not found" });
 
     const [membership] = await db.select().from(organizationUsers)
       .where(and(eq(organizationUsers.userId, userId), eq(organizationUsers.companyId, companyId)))
@@ -453,7 +453,7 @@ router.post("/admin-login", async (req, res) => {
   try {
     const { email, password } = req.body ?? {};
     if (!email || !password) {
-      return res.status(400).json({ error: "Email and password are required." });
+      return void res.status(400).json({ error: "Email and password are required." });
     }
 
     const [user] = await db
@@ -463,7 +463,7 @@ router.post("/admin-login", async (req, res) => {
       .limit(1);
 
     if (!user) {
-      return res.status(401).json({
+      return void res.status(401).json({
         error: "ACCESS_DENIED",
         message: "Platform Administrator credentials not recognized.",
       });
@@ -471,7 +471,7 @@ router.post("/admin-login", async (req, res) => {
 
     const valid = await comparePassword(password, user.password);
     if (!valid) {
-      return res.status(401).json({
+      return void res.status(401).json({
         error: "ACCESS_DENIED",
         message: "Platform Administrator credentials not recognized.",
       });
@@ -506,14 +506,14 @@ router.post("/change-password", requireAuth, async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body ?? {};
     if (!currentPassword || typeof currentPassword !== "string") {
-      return res.status(400).json({ error: "Current password is required." });
+      return void res.status(400).json({ error: "Current password is required." });
     }
     if (!newPassword || typeof newPassword !== "string" || newPassword.length < 8) {
-      return res.status(400).json({ error: "New password must be at least 8 characters." });
+      return void res.status(400).json({ error: "New password must be at least 8 characters." });
     }
     const userId = (req as any).user?.id as string | undefined;
     if (!userId) {
-      return res.status(401).json({ error: "Unauthorized" });
+      return void res.status(401).json({ error: "Unauthorized" });
     }
 
     const [row] = await db
@@ -522,12 +522,12 @@ router.post("/change-password", requireAuth, async (req, res) => {
       .where(eq(users.id, userId))
       .limit(1);
     if (!row) {
-      return res.status(404).json({ error: "User not found" });
+      return void res.status(404).json({ error: "User not found" });
     }
 
     const valid = await comparePassword(currentPassword, row.password);
     if (!valid) {
-      return res.status(401).json({ error: "Current password is incorrect." });
+      return void res.status(401).json({ error: "Current password is incorrect." });
     }
 
     const hashed = await hashPassword(newPassword);

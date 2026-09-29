@@ -165,7 +165,7 @@ async function seedStripeProductsIfNeeded() {
         product = await stripe.products.create({
           name: plan.name,
           description: plan.description,
-          metadata: plan.metadata,
+          metadata: plan.metadata as Record<string, string>,
         });
         console.log(`[Stripe seed] Created product: ${plan.name} (${product.id})`);
       }

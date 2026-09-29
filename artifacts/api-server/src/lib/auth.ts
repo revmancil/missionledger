@@ -34,7 +34,19 @@ export function verifyToken(token: string): AuthUser | null {
   }
 }
 
-export async function requireAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
+/**
+ * Express 5 types `req.params` as `string | string[]` (ParamsDictionary). Declaring these
+ * middlewares as generic in the params type lets TypeScript infer the concrete params from
+ * each route's path (e.g. "/:id" -> { id: string }) instead of collapsing every handler in
+ * the chain to the loose ParamsDictionary. Without this, `eq(table.id, req.params.id)` fails
+ * Drizzle's overloads because the column is typed `string`.
+ *
+ * `ParamsDictionary` is not importable from "express" (it uses `export =`), so the default
+ * uses a plain string map, which is all these middlewares need.
+ */
+type RouteParams = Record<string, string>;
+
+export async function requireAuth<P = RouteParams>(req: Request<P>, res: Response, next: NextFunction): Promise<void> {
   const cookieToken = req.cookies?.[COOKIE_NAME];
   const headerAuth = req.headers.authorization;
   const headerToken = headerAuth
@@ -102,7 +114,8 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
         if (subscriptionStatus === "ACTIVE") {
           // valid — fall through
         } else if (subscriptionStatus === "TRIAL") {
-          const trialExpiry = new Date(createdAt);
+          // `createdAt` comes from a raw pg row (Record<string, unknown>); coerce to string.
+          const trialExpiry = new Date(String(createdAt));
           trialExpiry.setDate(trialExpiry.getDate() + 14);
           if (new Date() > trialExpiry) {
             res.status(402).json({
@@ -147,7 +160,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
   next();
 }
 
-export function requireAdmin(req: Request, res: Response, next: NextFunction): void {
+export function requireAdmin<P = RouteParams>(req: Request<P>, res: Response, next: NextFunction): void {
   const user = (req as any).user as AuthUser;
   if (user?.role !== "ADMIN" && user?.role !== "MASTER_ADMIN") {
     res.status(403).json({ error: "Forbidden" });
@@ -156,7 +169,7 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction): v
   next();
 }
 
-export function requirePlatformAdmin(req: Request, res: Response, next: NextFunction): void {
+export function requirePlatformAdmin<P = RouteParams>(req: Request<P>, res: Response, next: NextFunction): void {
   const user = (req as any).user as AuthUser;
   if (!user?.isPlatformAdmin) {
     res.status(403).json({ error: "PLATFORM_ADMIN_REQUIRED", message: "This endpoint requires platform administrator access." });

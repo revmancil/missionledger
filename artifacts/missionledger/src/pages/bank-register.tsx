@@ -137,7 +137,7 @@ const emptyForm = {
   date: format(new Date(), "yyyy-MM-dd"),
   payee: "", vendorId: "", amount: "",
   type: "DEBIT" as "DEBIT" | "CREDIT",
-  status: "UNCLEARED" as "UNCLEARED" | "CLEARED",
+  status: "UNCLEARED" as "UNCLEARED" | "CLEARED" | "RECONCILED",
   chartAccountId: "", fundId: "", bankAccountId: "",
   memo: "", checkNumber: "", referenceNumber: "",
   isSplit: false,
@@ -1682,6 +1682,12 @@ export default function BankRegisterPage() {
                   <SelectContent>
                     <SelectItem value="UNCLEARED">Uncleared</SelectItem>
                     <SelectItem value="CLEARED">Cleared</SelectItem>
+                    {/* A reconciled transaction keeps its status; show it so the field
+                        never renders blank, but disable it — clearing a reconciliation
+                        must go through the reconciliation flow, not this dropdown. */}
+                    {form.status === "RECONCILED" && (
+                      <SelectItem value="RECONCILED" disabled>Reconciled (locked)</SelectItem>
+                    )}
                   </SelectContent>
                 </Select>
               </div>

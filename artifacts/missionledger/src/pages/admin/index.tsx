@@ -876,13 +876,13 @@ export default function AdminCommandCenter() {
                     <td className="px-5 py-3">
                       <div className="flex items-center gap-2">
                         {org.unreconciledAlert && (
-                          <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" title="Unreconciled 30+ days" />
+                          <span title="Unreconciled 30+ days"><AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" /></span>
                         )}
                         {org.status === "MAINTENANCE" && (
-                          <Wrench className="h-3.5 w-3.5 text-amber-500 shrink-0" title="Maintenance mode" />
+                          <span title="Maintenance mode"><Wrench className="h-3.5 w-3.5 text-amber-500 shrink-0" /></span>
                         )}
                         {org.status === "SUSPENDED" && (
-                          <Lock className="h-3.5 w-3.5 text-red-500 shrink-0" title="Suspended" />
+                          <span title="Suspended"><Lock className="h-3.5 w-3.5 text-red-500 shrink-0" /></span>
                         )}
                         <span className="font-medium text-slate-200">{org.name}</span>
                         {org.isComped && (

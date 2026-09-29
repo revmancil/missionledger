@@ -33,7 +33,7 @@ export function useAuth() {
   const [, setLocation] = useLocation();
 
   const { data: user, isLoading, error } = useGetMe({
-    query: { retry: false }
+    query: { queryKey: getGetMeQueryKey(), retry: false }
   });
 
   const { data: myOrgs = [] } = useQuery<any[]>({

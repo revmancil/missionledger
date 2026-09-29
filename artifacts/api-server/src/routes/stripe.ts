@@ -70,7 +70,7 @@ router.get("/plans", async (_req, res) => {
         metadata: p.metadata || {},
         prices: pricesByProduct.get(p.id) || [],
       }));
-      return res.json({ data: sortPlansByLowestPrice(fallbackPlans) });
+      return void res.json({ data: sortPlansByLowestPrice(fallbackPlans) });
     }
 
     res.json({ data: sortPlansByLowestPrice(Array.from(productsMap.values())) });
@@ -84,7 +84,7 @@ router.get("/subscription", requireAuth, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
     const [company] = await db.select().from(companies).where(eq(companies.id, companyId));
-    if (!company) return res.status(404).json({ error: "Company not found" });
+    if (!company) return void res.status(404).json({ error: "Company not found" });
 
     const { rows: compedRows } = await pool.query(
       `SELECT is_comped, comped_note FROM companies WHERE id = $1 LIMIT 1`,
@@ -124,12 +124,12 @@ router.post("/checkout", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
     const { priceId } = req.body;
-    if (!priceId) return res.status(400).json({ error: "priceId is required" });
+    if (!priceId) return void res.status(400).json({ error: "priceId is required" });
 
     const stripe = await getUncachableStripeClient();
 
     const [company] = await db.select().from(companies).where(eq(companies.id, companyId));
-    if (!company) return res.status(404).json({ error: "Company not found" });
+    if (!company) return void res.status(404).json({ error: "Company not found" });
 
     let customerId = company.stripeCustomerId;
     if (!customerId) {
@@ -163,8 +163,8 @@ router.post("/portal", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
     const [company] = await db.select().from(companies).where(eq(companies.id, companyId));
-    if (!company) return res.status(404).json({ error: "Company not found" });
-    if (!company.stripeCustomerId) return res.status(400).json({ error: "No Stripe customer. Subscribe first." });
+    if (!company) return void res.status(404).json({ error: "Company not found" });
+    if (!company.stripeCustomerId) return void res.status(400).json({ error: "No Stripe customer. Subscribe first." });
 
     const stripe = await getUncachableStripeClient();
     const base = getPublicFrontendBase(req);
@@ -184,8 +184,8 @@ router.post("/notify-subscribed", requireAuth, requireAdmin, async (req, res) =>
   try {
     const { companyId } = (req as any).user;
     const [company] = await db.select({ name: companies.name, email: companies.email, subscriptionStatus: companies.subscriptionStatus }).from(companies).where(eq(companies.id, companyId)).limit(1);
-    if (!company) return res.status(404).json({ error: "Company not found" });
-    if (company.subscriptionStatus !== "ACTIVE") return res.json({ ok: true, skipped: true });
+    if (!company) return void res.status(404).json({ error: "Company not found" });
+    if (company.subscriptionStatus !== "ACTIVE") return void res.json({ ok: true, skipped: true });
 
     const adminEmail = (req as any).user.email;
     if (adminEmail) {

@@ -26,7 +26,7 @@ router.post("/templates", requireAuth, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
     const { name, description, config } = req.body;
-    if (!name) return res.status(400).json({ error: "Name is required" });
+    if (!name) return void res.status(400).json({ error: "Name is required" });
     const id = crypto.randomUUID();
     await pool.query(
       `INSERT INTO custom_report_templates (id, company_id, name, description, config)
@@ -171,7 +171,7 @@ router.post("/run", requireAuth, async (req, res) => {
 
       const totDebit  = rows.reduce((s: number, r: any) => s + r.totalDebit,  0);
       const totCredit = rows.reduce((s: number, r: any) => s + r.totalCredit, 0);
-      return res.json({
+      return void res.json({
         reportType, groupBy,
         startDate: start.toISOString().slice(0, 10),
         endDate: end.toISOString().slice(0, 10),
@@ -250,14 +250,14 @@ router.post("/run", requireAuth, async (req, res) => {
       });
 
       if (groupBy !== "none") {
-        return res.json({ reportType, groupBy, startDate: start.toISOString().slice(0, 10), endDate: end.toISOString().slice(0, 10), rows });
+        return void res.json({ reportType, groupBy, startDate: start.toISOString().slice(0, 10), endDate: end.toISOString().slice(0, 10), rows });
       }
 
       const revenue  = rows.filter((r: any) => r.accountType === "INCOME");
       const expenses = rows.filter((r: any) => r.accountType === "EXPENSE");
       const totalRevenue  = revenue.reduce((s: number, r: any) => s + r.amount, 0);
       const totalExpenses = expenses.reduce((s: number, r: any) => s + r.amount, 0);
-      return res.json({
+      return void res.json({
         reportType, groupBy,
         startDate: start.toISOString().slice(0, 10),
         endDate: end.toISOString().slice(0, 10),
@@ -323,7 +323,7 @@ router.post("/run", requireAuth, async (req, res) => {
         fund.totalDebit  += debit;
         fund.totalCredit += credit;
       }
-      return res.json({
+      return void res.json({
         reportType,
         startDate: start.toISOString().slice(0, 10),
         endDate: end.toISOString().slice(0, 10),
@@ -384,7 +384,7 @@ router.post("/run", requireAuth, async (req, res) => {
       const totalLiabilities = liabilities.reduce((s, r) => s + r.balance, 0);
       const totalEquity      = equity.reduce((s, r) => s + r.balance, 0);
 
-      return res.json({
+      return void res.json({
         reportType,
         asOfDate: asOf.toISOString().slice(0, 10),
         assets, liabilities, equity,

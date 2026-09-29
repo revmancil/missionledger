@@ -85,6 +85,7 @@ async function computeActualsByAccountFundMonth(
 function enrichBudgetLine(
   line: typeof budgetLines.$inferSelect,
   account: { id: string; code: string; name: string; type: string } | null,
+  fund: { id: string; name: string; fundType: string } | null,
   periods: BudgetMonthPeriod[],
   actualByMonth: Record<string, number>,
 ) {
@@ -103,6 +104,7 @@ function enrichBudgetLine(
     monthlyAmounts,
     monthlyActuals,
     account: account ? { id: account.id, code: account.code, name: account.name, type: account.type } : null,
+    fund: fund ? { id: fund.id, name: fund.name, fundType: fund.fundType } : null,
     actual,
     remaining,
     percent,
@@ -150,7 +152,7 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
     const { companyId } = (req as any).user;
     const { name, fiscalYear, startDate, endDate, isActive } = req.body ?? {};
     if (!name || !fiscalYear || !startDate || !endDate)
-      return res.status(400).json({ error: "Missing required fields" });
+      return void res.status(400).json({ error: "Missing required fields" });
 
     if (isActive) {
       await db.update(budgets)
@@ -199,7 +201,7 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
       .where(and(eq(budgets.id, id), eq(budgets.companyId, companyId)))
       .returning();
 
-    if (!updated) return res.status(404).json({ error: "Budget not found" });
+    if (!updated) return void res.status(404).json({ error: "Budget not found" });
 
     const lines = await db.select().from(budgetLines).where(eq(budgetLines.budgetId, id));
     const totalBudget = lines.reduce((s, l) => s + (l.amount || 0), 0);
@@ -221,7 +223,7 @@ router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
       .where(and(eq(budgets.id, id), eq(budgets.companyId, companyId)))
       .returning();
 
-    if (!deleted) return res.status(404).json({ error: "Budget not found" });
+    if (!deleted) return void res.status(404).json({ error: "Budget not found" });
     res.json({ success: true });
   } catch (err) {
     console.error("DELETE /budgets/:id:", err);
@@ -237,7 +239,7 @@ router.get("/:id/lines", requireAuth, async (req, res) => {
 
     const [budget] = await db.select().from(budgets)
       .where(and(eq(budgets.id, id), eq(budgets.companyId, companyId)));
-    if (!budget) return res.status(404).json({ error: "Budget not found" });
+    if (!budget) return void res.status(404).json({ error: "Budget not found" });
 
     const lines = await db.select().from(budgetLines)
       .where(eq(budgetLines.budgetId, id))
@@ -279,15 +281,15 @@ router.post("/:id/lines", requireAuth, requireAdmin, async (req, res) => {
     const { id } = req.params;
     const { accountId, fundId, amount, monthlyAmounts } = req.body ?? {};
     if (!accountId || !fundId || (amount === undefined && monthlyAmounts === undefined))
-      return res.status(400).json({ error: "accountId, fundId, and monthlyAmounts (or amount) required" });
+      return void res.status(400).json({ error: "accountId, fundId, and monthlyAmounts (or amount) required" });
 
     const [budget] = await db.select().from(budgets)
       .where(and(eq(budgets.id, id), eq(budgets.companyId, companyId)));
-    if (!budget) return res.status(404).json({ error: "Budget not found" });
+    if (!budget) return void res.status(404).json({ error: "Budget not found" });
 
     const [fund] = await db.select().from(funds)
       .where(and(eq(funds.id, fundId), eq(funds.companyId, companyId)));
-    if (!fund) return res.status(400).json({ error: "Fund not found" });
+    if (!fund) return void res.status(400).json({ error: "Fund not found" });
 
     const existing = await db.select().from(budgetLines)
       .where(and(
@@ -296,7 +298,7 @@ router.post("/:id/lines", requireAuth, requireAdmin, async (req, res) => {
         eq(budgetLines.fundId, fundId),
       ));
     if (existing.length > 0)
-      return res.status(409).json({ error: "This account and fund already have a budget line" });
+      return void res.status(409).json({ error: "This account and fund already have a budget line" });
 
     const periods = buildBudgetMonthPeriods(budget.startDate, budget.endDate);
     const normalizedMonthly = monthlyAmounts !== undefined
@@ -330,16 +332,16 @@ router.put("/:id/lines/:lineId", requireAuth, requireAdmin, async (req, res) => 
     const { lineId } = req.params;
     const { amount, monthlyAmounts } = req.body ?? {};
     if (amount === undefined && monthlyAmounts === undefined) {
-      return res.status(400).json({ error: "monthlyAmounts (or amount) required" });
+      return void res.status(400).json({ error: "monthlyAmounts (or amount) required" });
     }
 
     const [existing] = await db.select().from(budgetLines)
       .where(and(eq(budgetLines.id, lineId), eq(budgetLines.companyId, companyId)));
-    if (!existing) return res.status(404).json({ error: "Line not found" });
+    if (!existing) return void res.status(404).json({ error: "Line not found" });
 
     const [budget] = await db.select().from(budgets)
       .where(and(eq(budgets.id, existing.budgetId), eq(budgets.companyId, companyId)));
-    if (!budget) return res.status(404).json({ error: "Budget not found" });
+    if (!budget) return void res.status(404).json({ error: "Budget not found" });
 
     const periods = buildBudgetMonthPeriods(budget.startDate, budget.endDate);
     const normalizedMonthly = monthlyAmounts !== undefined
@@ -352,7 +354,7 @@ router.put("/:id/lines/:lineId", requireAuth, requireAdmin, async (req, res) => 
       .where(and(eq(budgetLines.id, lineId), eq(budgetLines.companyId, companyId)))
       .returning();
 
-    if (!updated) return res.status(404).json({ error: "Line not found" });
+    if (!updated) return void res.status(404).json({ error: "Line not found" });
     res.json(updated);
   } catch (err) {
     console.error("PUT /budgets/:id/lines/:lineId:", err);
@@ -370,7 +372,7 @@ router.delete("/:id/lines/:lineId", requireAuth, requireAdmin, async (req, res) 
       .where(and(eq(budgetLines.id, lineId), eq(budgetLines.companyId, companyId)))
       .returning();
 
-    if (!deleted) return res.status(404).json({ error: "Line not found" });
+    if (!deleted) return void res.status(404).json({ error: "Line not found" });
     res.json({ success: true });
   } catch (err) {
     console.error("DELETE /budgets/:id/lines/:lineId:", err);

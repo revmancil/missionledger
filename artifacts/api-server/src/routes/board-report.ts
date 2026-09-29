@@ -315,7 +315,7 @@ router.get("/", requireAuth, async (req, res) => {
     const periodKind = parseBoardPeriodKind(req.query.period);
     const anchor = parseBoardPeriodAnchor(req.query);
     const reportPeriod = resolveBoardPeriod(periodKind, anchor);
-    if (!reportPeriod) return res.status(400).json({ error: "Invalid period" });
+    if (!reportPeriod) return void res.status(400).json({ error: "Invalid period" });
 
     const { year, quarter } = quarterForYmd(reportPeriod.endYmd);
     const includeUnpublished = req.query.adminView === "true" && isAdminRole(role);
@@ -465,7 +465,7 @@ router.post("/program-metrics", requireAuth, requireAdmin, async (req, res) => {
     const { companyId } = (req as any).user;
     const { name, description, periodYear, periodQuarter, targetValue, actualValue, unit, sortOrder } = req.body ?? {};
     if (!name || periodYear == null || periodQuarter == null) {
-      return res.status(400).json({ error: "name, periodYear, and periodQuarter are required" });
+      return void res.status(400).json({ error: "name, periodYear, and periodQuarter are required" });
     }
     const [row] = await db.insert(programMetrics).values({
       companyId,
@@ -503,7 +503,7 @@ router.put("/program-metrics/:id", requireAuth, requireAdmin, async (req, res) =
       .set(updates as any)
       .where(and(eq(programMetrics.id, req.params.id), eq(programMetrics.companyId, companyId)))
       .returning();
-    if (!row) return res.status(404).json({ error: "Not found" });
+    if (!row) return void res.status(404).json({ error: "Not found" });
     res.json(serializeMetric(row));
   } catch (err) {
     console.error("PUT /board-report/program-metrics:", err);
@@ -517,7 +517,7 @@ router.delete("/program-metrics/:id", requireAuth, requireAdmin, async (req, res
     const [row] = await db.delete(programMetrics)
       .where(and(eq(programMetrics.id, req.params.id), eq(programMetrics.companyId, companyId)))
       .returning();
-    if (!row) return res.status(404).json({ error: "Not found" });
+    if (!row) return void res.status(404).json({ error: "Not found" });
     res.json({ success: true });
   } catch (err) {
     console.error("DELETE /board-report/program-metrics:", err);
@@ -530,7 +530,7 @@ router.post("/strategic-risks", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
     const { title, description, status, ownerName, reviewDate, mitigation } = req.body ?? {};
-    if (!title) return res.status(400).json({ error: "title is required" });
+    if (!title) return void res.status(400).json({ error: "title is required" });
     const [row] = await db.insert(strategicRisks).values({
       companyId,
       title: String(title),
@@ -564,7 +564,7 @@ router.put("/strategic-risks/:id", requireAuth, requireAdmin, async (req, res) =
       .set(updates as any)
       .where(and(eq(strategicRisks.id, req.params.id), eq(strategicRisks.companyId, companyId)))
       .returning();
-    if (!row) return res.status(404).json({ error: "Not found" });
+    if (!row) return void res.status(404).json({ error: "Not found" });
     res.json(serializeRisk(row));
   } catch (err) {
     console.error("PUT /board-report/strategic-risks:", err);
@@ -578,7 +578,7 @@ router.delete("/strategic-risks/:id", requireAuth, requireAdmin, async (req, res
     const [row] = await db.delete(strategicRisks)
       .where(and(eq(strategicRisks.id, req.params.id), eq(strategicRisks.companyId, companyId)))
       .returning();
-    if (!row) return res.status(404).json({ error: "Not found" });
+    if (!row) return void res.status(404).json({ error: "Not found" });
     res.json({ success: true });
   } catch (err) {
     console.error("DELETE /board-report/strategic-risks:", err);
@@ -592,7 +592,7 @@ router.post("/committee-updates", requireAuth, requireAdmin, async (req, res) =>
     const { companyId, name, email } = (req as any).user;
     const { committeeType, title, body, meetingDate, isPublished } = req.body ?? {};
     if (!committeeType || !title || !body) {
-      return res.status(400).json({ error: "committeeType, title, and body are required" });
+      return void res.status(400).json({ error: "committeeType, title, and body are required" });
     }
     const [row] = await db.insert(committeeUpdates).values({
       companyId,
@@ -626,7 +626,7 @@ router.put("/committee-updates/:id", requireAuth, requireAdmin, async (req, res)
       .set(updates as any)
       .where(and(eq(committeeUpdates.id, req.params.id), eq(committeeUpdates.companyId, companyId)))
       .returning();
-    if (!row) return res.status(404).json({ error: "Not found" });
+    if (!row) return void res.status(404).json({ error: "Not found" });
     res.json(serializeCommittee(row));
   } catch (err) {
     console.error("PUT /board-report/committee-updates:", err);
@@ -640,7 +640,7 @@ router.delete("/committee-updates/:id", requireAuth, requireAdmin, async (req, r
     const [row] = await db.delete(committeeUpdates)
       .where(and(eq(committeeUpdates.id, req.params.id), eq(committeeUpdates.companyId, companyId)))
       .returning();
-    if (!row) return res.status(404).json({ error: "Not found" });
+    if (!row) return void res.status(404).json({ error: "Not found" });
     res.json({ success: true });
   } catch (err) {
     console.error("DELETE /board-report/committee-updates:", err);

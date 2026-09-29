@@ -26,7 +26,7 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
     const { name, email, phone, address, taxId, isActive } = req.body ?? {};
-    if (!name) return res.status(400).json({ error: "Name is required" });
+    if (!name) return void res.status(400).json({ error: "Name is required" });
 
     const [created] = await db.insert(vendors).values({
       companyId,
@@ -63,7 +63,7 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
       updatedAt: new Date(),
     }).where(and(eq(vendors.id, req.params.id), eq(vendors.companyId, companyId))).returning();
 
-    if (!updated) return res.status(404).json({ error: "Not found" });
+    if (!updated) return void res.status(404).json({ error: "Not found" });
     res.json({
       ...updated,
       createdAt: toIsoString(updated.createdAt),
