@@ -82,8 +82,18 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
 router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
-    await db.delete(billPayments).where(eq(billPayments.billId, req.params.id));
-    await db.delete(bills).where(and(eq(bills.id, req.params.id), eq(bills.companyId, companyId)));
+    // Verify tenant ownership BEFORE touching child rows. Deleting bill_payments by
+    // billId alone would let any tenant wipe another tenant's payment records by
+    // passing a foreign bill id (the parent delete below is scoped, but the child
+    // delete used to run first and unscoped).
+    const [bill] = await db.select({ id: bills.id }).from(bills)
+      .where(and(eq(bills.id, req.params.id), eq(bills.companyId, companyId)))
+      .limit(1);
+    if (!bill) return res.status(404).json({ error: "Not found" });
+
+    await db.delete(billPayments)
+      .where(and(eq(billPayments.billId, bill.id), eq(billPayments.companyId, companyId)));
+    await db.delete(bills).where(and(eq(bills.id, bill.id), eq(bills.companyId, companyId)));
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: "Internal server error" });
@@ -109,7 +119,8 @@ router.post("/:id/payments", requireAuth, requireAdmin, async (req, res) => {
     }).returning();
 
     // Update bill status
-    const allPayments = await db.select().from(billPayments).where(eq(billPayments.billId, req.params.id));
+    const allPayments = await db.select().from(billPayments)
+      .where(and(eq(billPayments.billId, req.params.id), eq(billPayments.companyId, companyId)));
     const totalPaid = allPayments.reduce((s, p) => s + (p.amount || 0), 0);
     const newStatus = totalPaid >= bill[0].amount ? "PAID" : "PARTIAL";
     await db.update(bills).set({ status: newStatus as any, updatedAt: new Date() }).where(eq(bills.id, req.params.id));

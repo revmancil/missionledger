@@ -10,7 +10,15 @@ router.get("/", requireAuth, async (req, res) => {
     const { companyId } = (req as any).user;
     const [company] = await db.select().from(companies).where(eq(companies.id, companyId));
     if (!company) return res.status(404).json({ error: "Not found" });
-    res.json({ ...company, createdAt: company.createdAt.toISOString(), updatedAt: company.updatedAt.toISOString() });
+    // Never return the signing secret itself — only whether one is configured, so the
+    // UI can show "Configured" without exposing a value that forges donations.
+    const { zeffyWebhookSecret, ...safeCompany } = company;
+    res.json({
+      ...safeCompany,
+      hasZeffyWebhookSecret: Boolean(zeffyWebhookSecret),
+      createdAt: company.createdAt.toISOString(),
+      updatedAt: company.updatedAt.toISOString(),
+    });
   } catch (error) {
     res.status(500).json({ error: "Internal server error" });
   }
@@ -19,7 +27,8 @@ router.get("/", requireAuth, async (req, res) => {
 router.put("/", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
-    const { name, dba, ein, address, phone, email, donationsEnabled, zeffyFormUrl } = req.body ?? {};
+    const { name, dba, ein, address, phone, email, donationsEnabled, zeffyFormUrl, zeffyWebhookSecret } =
+      req.body ?? {};
 
     const [updated] = await db.update(companies).set({
       name,
@@ -30,11 +39,21 @@ router.put("/", requireAuth, requireAdmin, async (req, res) => {
       email: email || null,
       donationsEnabled: donationsEnabled !== undefined ? Boolean(donationsEnabled) : undefined,
       zeffyFormUrl: zeffyFormUrl !== undefined ? (zeffyFormUrl || null) : undefined,
+      // Write-only. An empty string clears it, which makes the webhook fail closed
+      // rather than silently accepting unsigned payloads.
+      zeffyWebhookSecret:
+        typeof zeffyWebhookSecret === "string" ? zeffyWebhookSecret.trim() || null : undefined,
       updatedAt: new Date(),
     }).where(eq(companies.id, companyId)).returning();
 
     if (!updated) return res.status(404).json({ error: "Not found" });
-    res.json({ ...updated, createdAt: updated.createdAt.toISOString(), updatedAt: updated.updatedAt.toISOString() });
+    const { zeffyWebhookSecret: _omit, ...safeUpdated } = updated;
+    res.json({
+      ...safeUpdated,
+      hasZeffyWebhookSecret: Boolean(updated.zeffyWebhookSecret),
+      createdAt: updated.createdAt.toISOString(),
+      updatedAt: updated.updatedAt.toISOString(),
+    });
   } catch (error) {
     res.status(500).json({ error: "Internal server error" });
   }

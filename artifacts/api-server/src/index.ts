@@ -301,6 +301,30 @@ async function ensureSchema() {
     `ALTER TABLE donations ADD COLUMN IF NOT EXISTS transaction_id TEXT`,
   );
 
+  // Must exist before startup: donations are read with an all-columns SELECT by the
+  // dashboard and donations routes, so a schema/DB mismatch here breaks unrelated pages.
+  await ensureAlterThrow(
+    "donations.zeffy_event_id",
+    `ALTER TABLE public.donations ADD COLUMN IF NOT EXISTS zeffy_event_id TEXT`,
+  );
+  await assertColumnExists("donations", "zeffy_event_id");
+  // Idempotency backstop: Zeffy retries failed deliveries for up to 3 days. The partial
+  // index (NULLs excluded) makes a duplicate insert impossible even under a race between
+  // two concurrent deliveries of the same event. Non-fatal so that pre-existing duplicate
+  // rows cannot block startup; the application-level check still guards.
+  await ensureAlter(
+    "donations.zeffy_event_id unique index",
+    `CREATE UNIQUE INDEX IF NOT EXISTS donations_company_zeffy_event_id_uidx
+       ON public.donations (company_id, zeffy_event_id)
+       WHERE zeffy_event_id IS NOT NULL`,
+  );
+
+  await ensureAlterThrow(
+    "companies.zeffy_webhook_secret",
+    `ALTER TABLE public.companies ADD COLUMN IF NOT EXISTS zeffy_webhook_secret TEXT`,
+  );
+  await assertColumnExists("companies", "zeffy_webhook_secret");
+
   await ensureAlter(
     "bank_transactions.plaid_transaction_id",
     `ALTER TABLE bank_transactions ADD COLUMN IF NOT EXISTS plaid_transaction_id TEXT`,

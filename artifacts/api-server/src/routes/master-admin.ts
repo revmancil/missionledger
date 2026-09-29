@@ -163,7 +163,15 @@ router.get("/organizations/:id", async (req, res) => {
 
     const bankAccs = await db.select().from(bankAccounts).where(eq(bankAccounts.companyId, org.id));
 
-    res.json({ ...org, users: orgUsers, bankAccounts: bankAccs });
+    // Strip the Zeffy signing secret: spreading the raw row would ship a credential
+    // that can forge donations into this organization's books.
+    const { zeffyWebhookSecret, ...safeOrg } = org;
+    res.json({
+      ...safeOrg,
+      hasZeffyWebhookSecret: Boolean(zeffyWebhookSecret),
+      users: orgUsers,
+      bankAccounts: bankAccs,
+    });
   } catch (error) {
     console.error("Master admin org detail error:", error);
     res.status(500).json({ error: "Internal server error" });
