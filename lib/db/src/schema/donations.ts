@@ -18,6 +18,9 @@ export const donations = pgTable("donations", {
   cashAccountId: text("cash_account_id"),
   journalEntryId: text("journal_entry_id"),
   notes: text("notes"),
+  // Zeffy event id. Idempotency key: Zeffy retries failed deliveries for up to 3 days,
+  // and a replayed or retried event must not create a duplicate donation.
+  zeffyEventId: text("zeffy_event_id"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

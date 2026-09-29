@@ -42,6 +42,11 @@ app.post(
   }
 );
 
+// Zeffy signs each delivery with an HMAC over the raw body bytes, so this path must
+// be captured as a Buffer before the global express.json() below consumes the stream.
+// Re-serializing parsed JSON would reorder keys and break signature verification.
+app.use("/api/zeffy/webhook", express.raw({ type: "*/*" }));
+
 app.use(express.json({ limit: "15mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
