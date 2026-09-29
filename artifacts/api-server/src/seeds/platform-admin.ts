@@ -1,6 +1,7 @@
 import { db, users, companies, organizationUsers } from "@workspace/db";
 import { eq, sql } from "drizzle-orm";
 import bcrypt from "bcryptjs";
+import crypto from "crypto";
 
 /**
  * Idempotent seed: ensures the platform admin account exists with the correct
@@ -10,7 +11,7 @@ export async function seedPlatformAdmin() {
   try {
     const ADMIN_EMAIL = "icecoldrev06@outlook.com";
     const ADMIN_NAME = "Mancil Carroll";
-    const ADMIN_PASSWORD = "Admin@MissionLedger1";
+    const ADMIN_USER_ID = ADMIN_EMAIL.split("@")[0];
     const COMPANY_CODE = "ADMN06";
 
     // 1. Ensure company code ADMN06 exists
@@ -63,12 +64,20 @@ export async function seedPlatformAdmin() {
         console.log("[seed] Updated platform admin flags on existing user.");
       }
     } else {
-      // Create the platform admin user
-      const hashed = await bcrypt.hash(ADMIN_PASSWORD, 10);
+      // Create the platform admin user. No real password is ever hardcoded here:
+      // if PLATFORM_ADMIN_BOOTSTRAP_PASSWORD isn't set, generate a random one-time
+      // password and require it to be rotated via /forgot-password immediately.
+      const bootstrapPassword = process.env.PLATFORM_ADMIN_BOOTSTRAP_PASSWORD || crypto.randomBytes(18).toString("base64url");
+      if (!process.env.PLATFORM_ADMIN_BOOTSTRAP_PASSWORD) {
+        console.log(`[seed] No PLATFORM_ADMIN_BOOTSTRAP_PASSWORD set. Generated one-time password for ${ADMIN_EMAIL}: ${bootstrapPassword}`);
+        console.log("[seed] Rotate this password immediately after first login.");
+      }
+      const hashed = await bcrypt.hash(bootstrapPassword, 10);
       const [newUser] = await db
         .insert(users)
         .values({
           companyId: targetCompanyId,
+          userId: ADMIN_USER_ID,
           name: ADMIN_NAME,
           email: ADMIN_EMAIL,
           password: hashed,
