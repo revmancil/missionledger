@@ -48,7 +48,7 @@ router.get("/", requireAuth, async (req, res) => {
     const { companyId } = (req as any).user;
 
     const [company] = await db.select().from(companies).where(eq(companies.id, companyId));
-    if (!company) return res.status(404).json({ error: "Company not found" });
+    if (!company) return void res.status(404).json({ error: "Company not found" });
 
     let coa = await db
       .select()
@@ -192,7 +192,7 @@ router.patch("/method", requireAuth, requireAdmin, async (req, res) => {
     const { companyId } = (req as any).user;
     const { accountingMethod } = req.body ?? {};
     if (!accountingMethod || !["CASH", "ACCRUAL"].includes(accountingMethod))
-      return res.status(400).json({ error: "accountingMethod must be CASH or ACCRUAL" });
+      return void res.status(400).json({ error: "accountingMethod must be CASH or ACCRUAL" });
     await db.update(companies).set({ accountingMethod: accountingMethod as any, updatedAt: new Date() }).where(eq(companies.id, companyId));
     res.json({ success: true, accountingMethod });
   } catch (err) {
@@ -211,28 +211,28 @@ router.post("/finalize", requireAuth, requireAdmin, async (req, res) => {
     const { companyId, email } = (req as any).user;
     const { date, accountingMethod, rows } = req.body ?? {};
 
-    if (!date) return res.status(400).json({ error: "As-of date is required." });
+    if (!date) return void res.status(400).json({ error: "As-of date is required." });
 
     const parsed = parseYmdToUtcNoon(date);
-    if (!parsed) return res.status(400).json({ error: "As-of date must be YYYY-MM-DD." });
+    if (!parsed) return void res.status(400).json({ error: "As-of date must be YYYY-MM-DD." });
     const { ymd: asOfYmd, date: asOf } = parsed;
     if (asOfYmd > utcYmdToday()) {
-      return res.status(400).json({ error: "As-of date cannot be in the future." });
+      return void res.status(400).json({ error: "As-of date cannot be in the future." });
     }
 
     if (!Array.isArray(rows) || rows.length < 2) {
-      return res.status(400).json({ error: "At least 2 rows are required." });
+      return void res.status(400).json({ error: "At least 2 rows are required." });
     }
 
     const activeRows = rows.filter((r: any) => Number(r.amount) > 0.009);
     if (activeRows.length < 2) {
-      return res.status(400).json({ error: "At least 2 rows must have an amount greater than zero." });
+      return void res.status(400).json({ error: "At least 2 rows must have an amount greater than zero." });
     }
 
     for (const r of activeRows) {
-      if (!r.accountId) return res.status(400).json({ error: "Every row must have an account selected." });
-      if (!r.fundId) return res.status(400).json({ error: "Every row must have a fund selected." });
-      if (!["DEBIT", "CREDIT"].includes(r.entryType)) return res.status(400).json({ error: "Invalid entry type on one or more rows." });
+      if (!r.accountId) return void res.status(400).json({ error: "Every row must have an account selected." });
+      if (!r.fundId) return void res.status(400).json({ error: "Every row must have a fund selected." });
+      if (!["DEBIT", "CREDIT"].includes(r.entryType)) return void res.status(400).json({ error: "Invalid entry type on one or more rows." });
     }
 
     const allCoaForResolve = await db
@@ -258,10 +258,10 @@ router.post("/finalize", requireAuth, requireAdmin, async (req, res) => {
       const canonA = ak ? coaCanonByNorm.get(ak) : undefined;
       const canonF = fk ? fundCanonByNorm.get(fk) : undefined;
       if (!canonA) {
-        return res.status(400).json({ error: `Unknown chart of accounts id: ${String(r.accountId)}` });
+        return void res.status(400).json({ error: `Unknown chart of accounts id: ${String(r.accountId)}` });
       }
       if (!canonF) {
-        return res.status(400).json({ error: `Unknown fund id: ${String(r.fundId)}` });
+        return void res.status(400).json({ error: `Unknown fund id: ${String(r.fundId)}` });
       }
       rowsToPost.push({ ...r, accountId: canonA, fundId: canonF });
     }
@@ -278,7 +278,7 @@ router.post("/finalize", requireAuth, requireAdmin, async (req, res) => {
 
     if (debitCents !== creditCents) {
       const diff = Math.abs(debitCents - creditCents) / 100;
-      return res.status(400).json({
+      return void res.status(400).json({
         error: `Entry is not balanced. Debits: $${totalDebits.toFixed(2)}, Credits: $${totalCredits.toFixed(2)}. Difference: $${diff.toFixed(2)}.`,
       });
     }
@@ -331,7 +331,7 @@ router.post("/finalize", requireAuth, requireAdmin, async (req, res) => {
 
     // Void existing OB entry (journal entry + its GL entries)
     const [company] = await db.select().from(companies).where(eq(companies.id, companyId));
-    if (!company) return res.status(404).json({ error: "Company not found" });
+    if (!company) return void res.status(404).json({ error: "Company not found" });
 
     if (company.openingBalanceEntryId) {
       const oldJeId = company.openingBalanceEntryId;
@@ -600,7 +600,7 @@ router.post("/recalculate", requireAuth, requireAdmin, async (req, res) => {
     const fundBalances = sqlRows(fundResult).map((r) => ({
       fundId:   r.fund_id,
       name:     r.fund_name,
-      balance:  parseFloat(r.total_credit) - parseFloat(r.total_debit),
+      balance:  parseFloat(String(r.total_credit)) - parseFloat(String(r.total_debit)),
     }));
 
     // ── Step E: Fix JE linkage on OB transactions ──────────────────────────
@@ -692,7 +692,7 @@ router.post("/sync", requireAuth, requireAdmin, async (req, res) => {
 
     const [company] = await db.select().from(companies).where(eq(companies.id, companyId));
     if (!company?.openingBalanceEntryId) {
-      return res.status(400).json({ error: "No opening balance entry found for this company." });
+      return void res.status(400).json({ error: "No opening balance entry found for this company." });
     }
 
     const jeId = company.openingBalanceEntryId;
@@ -704,7 +704,7 @@ router.post("/sync", requireAuth, requireAdmin, async (req, res) => {
       .where(and(eq(glEntries.journalEntryId, jeId), eq(glEntries.companyId, companyId)));
 
     if (!jeGlEntries.length) {
-      return res.status(400).json({ error: "No GL entries found for this opening balance JE." });
+      return void res.status(400).json({ error: "No GL entries found for this opening balance JE." });
     }
 
     // ── Step 1: Recompute and update bank account balances ─────────────────

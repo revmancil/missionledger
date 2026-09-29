@@ -422,6 +422,9 @@ export default function BoardReportPage() {
 
   function handleDownloadPdf() {
     try {
+      // `data` is destructured from useQuery, so it is `BoardReport | undefined`; the
+      // early return above the JSX does not narrow inside this closure.
+      if (!data) return;
       downloadBoardReportPdf(
         data,
         user?.companyName || "Organization",

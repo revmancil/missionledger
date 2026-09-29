@@ -37,7 +37,7 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
     const { vendorId, description, amount, dueDate, accountId, fundId } = req.body ?? {};
-    if (!description || !amount || !dueDate) return res.status(400).json({ error: "Missing required fields" });
+    if (!description || !amount || !dueDate) return void res.status(400).json({ error: "Missing required fields" });
 
     const [created] = await db.insert(bills).values({
       companyId,
@@ -72,7 +72,7 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
       updatedAt: new Date(),
     }).where(and(eq(bills.id, req.params.id), eq(bills.companyId, companyId))).returning();
 
-    if (!updated) return res.status(404).json({ error: "Not found" });
+    if (!updated) return void res.status(404).json({ error: "Not found" });
     res.json({ ...updated, dueDate: updated.dueDate.toISOString(), createdAt: updated.createdAt.toISOString(), updatedAt: updated.updatedAt.toISOString() });
   } catch (error) {
     res.status(500).json({ error: "Internal server error" });
@@ -89,7 +89,7 @@ router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
     const [bill] = await db.select({ id: bills.id }).from(bills)
       .where(and(eq(bills.id, req.params.id), eq(bills.companyId, companyId)))
       .limit(1);
-    if (!bill) return res.status(404).json({ error: "Not found" });
+    if (!bill) return void res.status(404).json({ error: "Not found" });
 
     await db.delete(billPayments)
       .where(and(eq(billPayments.billId, bill.id), eq(billPayments.companyId, companyId)));
@@ -104,10 +104,10 @@ router.post("/:id/payments", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
     const { amount, date, cashAccountId, notes } = req.body ?? {};
-    if (!amount || !date) return res.status(400).json({ error: "Missing required fields" });
+    if (!amount || !date) return void res.status(400).json({ error: "Missing required fields" });
 
     const bill = await db.select().from(bills).where(and(eq(bills.id, req.params.id), eq(bills.companyId, companyId))).limit(1);
-    if (!bill.length) return res.status(404).json({ error: "Bill not found" });
+    if (!bill.length) return void res.status(404).json({ error: "Bill not found" });
 
     const [payment] = await db.insert(billPayments).values({
       billId: req.params.id,

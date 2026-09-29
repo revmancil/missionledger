@@ -35,11 +35,11 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
     const { code, name, type, description, isActive, parentId } = req.body ?? {};
-    if (!code || !name || !type) return res.status(400).json({ error: "Code, name, and type are required" });
+    if (!code || !name || !type) return void res.status(400).json({ error: "Code, name, and type are required" });
 
     // Check for duplicate code
     const existing = await db.select().from(accounts).where(and(eq(accounts.companyId, companyId), eq(accounts.code, code))).limit(1);
-    if (existing.length) return res.status(400).json({ error: "Account code already exists" });
+    if (existing.length) return void res.status(400).json({ error: "Account code already exists" });
 
     const [created] = await db.insert(accounts).values({
       companyId,
@@ -72,7 +72,7 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
       updatedAt: new Date(),
     }).where(and(eq(accounts.id, req.params.id), eq(accounts.companyId, companyId))).returning();
 
-    if (!updated) return res.status(404).json({ error: "Not found" });
+    if (!updated) return void res.status(404).json({ error: "Not found" });
     res.json({ ...updated, createdAt: updated.createdAt.toISOString(), updatedAt: updated.updatedAt.toISOString(), balance: 0 });
   } catch (error) {
     res.status(500).json({ error: "Internal server error" });

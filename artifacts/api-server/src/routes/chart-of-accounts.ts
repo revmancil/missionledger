@@ -318,19 +318,19 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
     const { companyId } = (req as any).user;
     const { code, name, type, description, parentId, sortOrder } = req.body ?? {};
     if (!code || !name || !type)
-      return res.status(400).json({ error: "code, name, and type are required" });
+      return void res.status(400).json({ error: "code, name, and type are required" });
 
     const dup = await db
       .select({ id: chartOfAccounts.id })
       .from(chartOfAccounts)
       .where(and(eq(chartOfAccounts.companyId, companyId), eq(chartOfAccounts.code, code)))
       .limit(1);
-    if (dup.length) return res.status(400).json({ error: "Account code already exists" });
+    if (dup.length) return void res.status(400).json({ error: "Account code already exists" });
 
     const parentIdNorm =
       parentId === null || parentId === undefined || parentId === "" ? null : String(parentId);
     const parentErr = await validateParentChoice(companyId, type as string, parentIdNorm);
-    if (parentErr) return res.status(400).json({ error: parentErr });
+    if (parentErr) return void res.status(400).json({ error: parentErr });
 
     const [created] = await db
       .insert(chartOfAccounts)
@@ -365,13 +365,13 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
     const body = req.body ?? {};
 
     const existing = await coaRow(companyId, req.params.id);
-    if (!existing) return res.status(404).json({ error: "Not found" });
+    if (!existing) return void res.status(404).json({ error: "Not found" });
 
     const set: Record<string, unknown> = { updatedAt: new Date() };
 
     if (typeof body.name === "string") {
       const n = body.name.trim();
-      if (!n) return res.status(400).json({ error: "Name cannot be empty." });
+      if (!n) return void res.status(400).json({ error: "Name cannot be empty." });
       set.name = n;
     }
 
@@ -391,26 +391,26 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
       const parentIdNorm =
         body.parentId === null || body.parentId === "" ? null : String(body.parentId);
       const perr = await validateParentChoice(companyId, existing.type, parentIdNorm, existing.id);
-      if (perr) return res.status(400).json({ error: perr });
+      if (perr) return void res.status(400).json({ error: perr });
       set.parentId = parentIdNorm;
     }
 
     if (body.code !== undefined && !existing.isSystem) {
       const code = String(body.code).trim();
-      if (!code) return res.status(400).json({ error: "Account code cannot be empty." });
+      if (!code) return void res.status(400).json({ error: "Account code cannot be empty." });
       const dup = await db
         .select({ id: chartOfAccounts.id })
         .from(chartOfAccounts)
         .where(and(eq(chartOfAccounts.companyId, companyId), eq(chartOfAccounts.code, code)));
       if (dup.some((d) => d.id !== existing.id)) {
-        return res.status(400).json({ error: "Account code already exists" });
+        return void res.status(400).json({ error: "Account code already exists" });
       }
       set.code = code;
     }
 
     const keys = Object.keys(set).filter((k) => k !== "updatedAt");
     if (keys.length === 0) {
-      return res.json({
+      return void res.json({
         ...existing,
         createdAt: toIsoString(existing.createdAt),
         updatedAt: toIsoString(existing.updatedAt),
@@ -425,7 +425,7 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
       )
       .returning();
 
-    if (!updated) return res.status(404).json({ error: "Not found" });
+    if (!updated) return void res.status(404).json({ error: "Not found" });
     res.json({
       ...updated,
       createdAt: toIsoString(updated.createdAt),
@@ -450,9 +450,9 @@ router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
           eq(chartOfAccounts.companyId, companyId)
         )
       );
-    if (!acct) return res.status(404).json({ error: "Not found" });
+    if (!acct) return void res.status(404).json({ error: "Not found" });
     if (acct.isSystem)
-      return res.status(400).json({ error: "System accounts cannot be deleted" });
+      return void res.status(400).json({ error: "System accounts cannot be deleted" });
 
     const [child] = await db
       .select({ id: chartOfAccounts.id })
@@ -465,7 +465,7 @@ router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
       )
       .limit(1);
     if (child) {
-      return res.status(400).json({
+      return void res.status(400).json({
         error: "This account has sub-accounts. Reassign or delete them first.",
       });
     }
@@ -489,7 +489,7 @@ router.get("/:id/ledger", requireAuth, async (req, res) => {
       .select()
       .from(chartOfAccounts)
       .where(and(eq(chartOfAccounts.id, accountId), eq(chartOfAccounts.companyId, companyId)));
-    if (!account) return res.status(404).json({ error: "Account not found" });
+    if (!account) return void res.status(404).json({ error: "Account not found" });
 
     const rows = await db.execute(sql`
       SELECT

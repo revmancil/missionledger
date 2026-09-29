@@ -44,7 +44,7 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
     const { companyId } = (req as any).user;
     const { bankAccountId, date, description, merchantName, amount, type } = req.body ?? {};
     if (!bankAccountId || !date || !description || !amount || !type) {
-      return res.status(400).json({ error: "Missing required fields" });
+      return void res.status(400).json({ error: "Missing required fields" });
     }
 
     const [created] = await db.insert(bankTransactions).values({
@@ -78,7 +78,7 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
       updatedAt: new Date(),
     }).where(and(eq(bankTransactions.id, req.params.id), eq(bankTransactions.companyId, companyId))).returning();
 
-    if (!updated) return res.status(404).json({ error: "Not found" });
+    if (!updated) return void res.status(404).json({ error: "Not found" });
     res.json({ ...updated, date: updated.date.toISOString(), createdAt: updated.createdAt.toISOString(), updatedAt: updated.updatedAt.toISOString() });
   } catch (error) {
     res.status(500).json({ error: "Internal server error" });
@@ -99,7 +99,7 @@ router.post("/:id/categorize", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
     const { accountId, fundId, description } = req.body ?? {};
-    if (!accountId) return res.status(400).json({ error: "Account is required" });
+    if (!accountId) return void res.status(400).json({ error: "Account is required" });
 
     const [updated] = await db.update(bankTransactions).set({
       accountId,
@@ -109,7 +109,7 @@ router.post("/:id/categorize", requireAuth, requireAdmin, async (req, res) => {
       updatedAt: new Date(),
     }).where(and(eq(bankTransactions.id, req.params.id), eq(bankTransactions.companyId, companyId))).returning();
 
-    if (!updated) return res.status(404).json({ error: "Not found" });
+    if (!updated) return void res.status(404).json({ error: "Not found" });
     res.json({ ...updated, date: updated.date.toISOString(), createdAt: updated.createdAt.toISOString(), updatedAt: updated.updatedAt.toISOString() });
   } catch (error) {
     res.status(500).json({ error: "Internal server error" });

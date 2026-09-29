@@ -29,7 +29,7 @@ app.post(
   async (req, res) => {
     const signature = req.headers["stripe-signature"];
     if (!signature) {
-      return res.status(400).json({ error: "Missing stripe-signature header" });
+      return void res.status(400).json({ error: "Missing stripe-signature header" });
     }
     try {
       const sig = Array.isArray(signature) ? signature[0] : signature;

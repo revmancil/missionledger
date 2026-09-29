@@ -9,7 +9,7 @@ router.get("/", requireAuth, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
     const [company] = await db.select().from(companies).where(eq(companies.id, companyId));
-    if (!company) return res.status(404).json({ error: "Not found" });
+    if (!company) return void res.status(404).json({ error: "Not found" });
     // Never return the signing secret itself — only whether one is configured, so the
     // UI can show "Configured" without exposing a value that forges donations.
     const { zeffyWebhookSecret, ...safeCompany } = company;
@@ -46,7 +46,7 @@ router.put("/", requireAuth, requireAdmin, async (req, res) => {
       updatedAt: new Date(),
     }).where(eq(companies.id, companyId)).returning();
 
-    if (!updated) return res.status(404).json({ error: "Not found" });
+    if (!updated) return void res.status(404).json({ error: "Not found" });
     const { zeffyWebhookSecret: _omit, ...safeUpdated } = updated;
     res.json({
       ...safeUpdated,

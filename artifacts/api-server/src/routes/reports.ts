@@ -40,12 +40,12 @@ router.get("/profit-loss", requireAuth, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
     if (!companyId) {
-      return res.status(400).json({ error: "No organization in session. Refresh the page or sign in again." });
+      return void res.status(400).json({ error: "No organization in session. Refresh the page or sign in again." });
     }
     const { startDate, endDate } = req.query;
 
     const range = parseReportRange(startDate, endDate);
-    if (!range.ok) return res.status(400).json({ error: range.error });
+    if (!range.ok) return void res.status(400).json({ error: range.error });
     const start = range.start;
     const endOfDay = range.end;
 
@@ -141,12 +141,12 @@ router.get("/balance-sheet", requireAuth, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
     if (!companyId) {
-      return res.status(400).json({ error: "No organization in session. Refresh the page or sign in again." });
+      return void res.status(400).json({ error: "No organization in session. Refresh the page or sign in again." });
     }
     const { asOfDate } = req.query;
 
     const asOfParsed = parseAsOfDay(asOfDate);
-    if (!asOfParsed.ok) return res.status(400).json({ error: asOfParsed.error });
+    if (!asOfParsed.ok) return void res.status(400).json({ error: asOfParsed.error });
     const asOfEnd = asOfParsed.end;
 
     const sofp = await buildStatementOfFinancialPosition(companyId, asOfEnd, asOfParsed.ymd);
@@ -227,8 +227,8 @@ router.get("/balance-sheet", requireAuth, async (req, res) => {
     `);
 
     const equityMapped = sqlRows(equityCoaRows).map((r) => {
-      const debit  = parseFloat(r.total_debit)  || 0;
-      const credit = parseFloat(r.total_credit) || 0;
+      const debit  = parseFloat(String(r.total_debit))  || 0;
+      const credit = parseFloat(String(r.total_credit)) || 0;
       const gross = debit + credit;
       const amount = credit - debit; // EQUITY credit-normal
       return { accountId: r.account_id, accountCode: r.account_code, accountName: r.account_name, amount, gross };
@@ -344,7 +344,7 @@ router.get("/cash-flow", requireAuth, async (req, res) => {
     const { companyId } = (req as any).user;
     const { startDate, endDate } = req.query;
     const range = parseReportRange(startDate, endDate);
-    if (!range.ok) return res.status(400).json({ error: range.error });
+    if (!range.ok) return void res.status(400).json({ error: range.error });
     const start = range.start;
     const end = range.end;
 
@@ -381,7 +381,7 @@ router.get("/budget-vs-actual", requireAuth, async (req, res) => {
     const activeBudget = allBudgets.find(b => b.isActive) || allBudgets[0];
 
     if (!activeBudget) {
-      return res.json({
+      return void res.json({
         startDate: startDate || new Date().toISOString(),
         endDate: endDate || new Date().toISOString(),
         items: [],
@@ -429,7 +429,7 @@ router.get("/general-ledger", requireAuth, async (req, res) => {
     const { startDate, endDate, fundId: filterFundId } = req.query;
 
     const range = parseReportRange(startDate, endDate);
-    if (!range.ok) return res.status(400).json({ error: range.error });
+    if (!range.ok) return void res.status(400).json({ error: range.error });
     const start = range.start;
     const end = range.end;
 
@@ -507,7 +507,7 @@ router.get("/gl-by-account", requireAuth, async (req, res) => {
     const { startDate, endDate, fundId: filterFundId } = req.query;
 
     const range = parseReportRange(startDate, endDate);
-    if (!range.ok) return res.status(400).json({ error: range.error });
+    if (!range.ok) return void res.status(400).json({ error: range.error });
     const start = range.start;
     const endOfDay = range.end;
 
@@ -653,7 +653,7 @@ router.get("/general-journal", requireAuth, async (req, res) => {
     const { startDate, endDate, fundId: filterFundId } = req.query;
 
     const range = parseReportRange(startDate, endDate);
-    if (!range.ok) return res.status(400).json({ error: range.error });
+    if (!range.ok) return void res.status(400).json({ error: range.error });
     const start = range.start;
     const endOfDay = range.end;
 
@@ -742,7 +742,7 @@ router.get("/transaction-register", requireAuth, async (req, res) => {
     const { startDate, endDate, search, minAmount, maxAmount, fundId: filterFundId } = req.query;
 
     const range = parseReportRange(startDate, endDate);
-    if (!range.ok) return res.status(400).json({ error: range.error });
+    if (!range.ok) return void res.status(400).json({ error: range.error });
     const start = range.start;
     const endOfDay = range.end;
 
@@ -868,7 +868,7 @@ router.get("/990-readiness", requireAuth, async (req, res) => {
     const { startDate, endDate } = req.query;
 
     const range = parseReportRange(startDate, endDate);
-    if (!range.ok) return res.status(400).json({ error: range.error });
+    if (!range.ok) return void res.status(400).json({ error: range.error });
     const start = range.start;
     const endOfDay = range.end;
 
@@ -940,7 +940,7 @@ router.get("/990-preparer", requireAuth, async (req, res) => {
     const { startDate, endDate } = req.query;
 
     const range = parseReportRange(startDate, endDate);
-    if (!range.ok) return res.status(400).json({ error: range.error });
+    if (!range.ok) return void res.status(400).json({ error: range.error });
     const start = range.start;
     const endOfDay = range.end;
 
@@ -1066,7 +1066,7 @@ router.get("/990-export", requireAuth, async (req, res) => {
     const { startDate, endDate } = req.query;
 
     const range = parseReportRange(startDate, endDate);
-    if (!range.ok) return res.status(400).json({ error: range.error });
+    if (!range.ok) return void res.status(400).json({ error: range.error });
     const start = range.start;
     const endOfDay = range.end;
 

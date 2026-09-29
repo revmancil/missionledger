@@ -38,7 +38,7 @@ router.get("/:id", requireAuth, async (req, res) => {
     const [donation] = await db.select().from(donations).where(
       and(eq(donations.id, req.params.id), eq(donations.companyId, companyId))
     );
-    if (!donation) return res.status(404).json({ error: "Not found" });
+    if (!donation) return void res.status(404).json({ error: "Not found" });
     res.json({ ...donation, date: donation.date.toISOString() });
   } catch (error) {
     res.status(500).json({ error: "Internal server error" });
@@ -50,7 +50,7 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
     const { companyId } = (req as any).user;
     const { donorName, donorEmail, amount, date, type, fundId, accountId, cashAccountId, notes } = req.body ?? {};
     if (!donorName || !amount || !date || !type) {
-      return res.status(400).json({ error: "Missing required fields" });
+      return void res.status(400).json({ error: "Missing required fields" });
     }
 
     const [created] = await db.insert(donations).values({
@@ -91,7 +91,7 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
       updatedAt: new Date(),
     }).where(and(eq(donations.id, req.params.id), eq(donations.companyId, companyId))).returning();
 
-    if (!updated) return res.status(404).json({ error: "Not found" });
+    if (!updated) return void res.status(404).json({ error: "Not found" });
     res.json({ ...updated, date: updated.date.toISOString(), createdAt: updated.createdAt.toISOString(), updatedAt: updated.updatedAt.toISOString() });
   } catch (error) {
     res.status(500).json({ error: "Internal server error" });

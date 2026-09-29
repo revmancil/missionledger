@@ -150,7 +150,7 @@ router.get("/organizations", async (_req, res) => {
 router.get("/organizations/:id", async (req, res) => {
   try {
     const [org] = await db.select().from(companies).where(eq(companies.id, req.params.id)).limit(1);
-    if (!org) return res.status(404).json({ error: "Organization not found" });
+    if (!org) return void res.status(404).json({ error: "Organization not found" });
 
     const orgUsers = await db.select({
       id: users.id,
@@ -183,7 +183,7 @@ router.patch("/organizations/:id", async (req, res) => {
   try {
     const { isActive, maintenanceMode, suspendedReason, isComped, compedNote } = req.body ?? {};
     const [org] = await db.select().from(companies).where(eq(companies.id, req.params.id)).limit(1);
-    if (!org) return res.status(404).json({ error: "Organization not found" });
+    if (!org) return void res.status(404).json({ error: "Organization not found" });
 
     // Use raw SQL to handle the columns added via ensureSchema
     const updates: string[] = ["updated_at = NOW()"];
@@ -211,7 +211,7 @@ router.patch("/organizations/:id", async (req, res) => {
     }
 
     if (updates.length === 1) {
-      return res.status(400).json({ error: "No valid fields to update." });
+      return void res.status(400).json({ error: "No valid fields to update." });
     }
 
     const { rows } = await pool.query(
@@ -247,7 +247,7 @@ router.post("/system/maintenance", async (req, res) => {
   try {
     const { enabled } = req.body ?? {};
     if (typeof enabled !== "boolean") {
-      return res.status(400).json({ error: "enabled (boolean) is required." });
+      return void res.status(400).json({ error: "enabled (boolean) is required." });
     }
     await pool.query(
       `UPDATE system_settings SET value = $1, updated_at = NOW() WHERE key = 'global_maintenance_mode'`,
@@ -275,9 +275,9 @@ router.get("/global-coa", async (_req, res) => {
 router.post("/global-coa", async (req, res) => {
   try {
     const { code, name, type, parentCode } = req.body ?? {};
-    if (!code || !name || !type) return res.status(400).json({ error: "code, name, and type are required." });
+    if (!code || !name || !type) return void res.status(400).json({ error: "code, name, and type are required." });
     const validTypes = ["ASSET", "LIABILITY", "EQUITY", "INCOME", "EXPENSE"];
-    if (!validTypes.includes(type)) return res.status(400).json({ error: `type must be one of: ${validTypes.join(", ")}` });
+    if (!validTypes.includes(type)) return void res.status(400).json({ error: `type must be one of: ${validTypes.join(", ")}` });
 
     const { rows } = await pool.query(`
       INSERT INTO coa_templates (code, name, type, parent_code, sort_order)
@@ -309,15 +309,15 @@ router.post("/reset-password", async (req, res) => {
   try {
     const { userId, newPassword } = req.body ?? {};
     if (!userId || !newPassword) {
-      return res.status(400).json({ error: "userId and newPassword are required." });
+      return void res.status(400).json({ error: "userId and newPassword are required." });
     }
     if (newPassword.length < 8) {
-      return res.status(400).json({ error: "Password must be at least 8 characters." });
+      return void res.status(400).json({ error: "Password must be at least 8 characters." });
     }
 
     const [user] = await db.select({ id: users.id, email: users.email, companyId: users.companyId })
       .from(users).where(eq(users.id, userId)).limit(1);
-    if (!user) return res.status(404).json({ error: "User not found." });
+    if (!user) return void res.status(404).json({ error: "User not found." });
 
     const hashed = await hashPassword(newPassword);
     await db.update(users).set({ password: hashed } as any).where(eq(users.id, userId));
@@ -337,7 +337,7 @@ router.post("/impersonate/:companyId", async (req, res) => {
     const { companyId } = req.params;
 
     const [company] = await db.select().from(companies).where(eq(companies.id, companyId)).limit(1);
-    if (!company) return res.status(404).json({ error: "Organization not found" });
+    if (!company) return void res.status(404).json({ error: "Organization not found" });
 
     const impersonatedUser: AuthUser = {
       id: adminUser.id,
@@ -374,7 +374,7 @@ router.post("/exit-impersonation", async (req, res) => {
     const currentUser = (req as any).user as AuthUser;
 
     const [user] = await db.select().from(users).where(eq(users.id, currentUser.id)).limit(1);
-    if (!user) return res.status(404).json({ error: "User not found" });
+    if (!user) return void res.status(404).json({ error: "User not found" });
 
     const [company] = user.companyId
       ? await db.select().from(companies).where(eq(companies.id, user.companyId)).limit(1)

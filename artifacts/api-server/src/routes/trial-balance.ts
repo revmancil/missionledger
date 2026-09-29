@@ -151,9 +151,9 @@ router.get("/health", requireAuth, async (req, res) => {
     `);
 
     const row = sqlRows(result)[0] ?? {};
-    const totalDebit  = parseFloat(row.total_debit)  || 0;
-    const totalCredit = parseFloat(row.total_credit) || 0;
-    const entryCount  = parseInt(row.entry_count)    || 0;
+    const totalDebit  = parseFloat(String(row.total_debit))  || 0;
+    const totalCredit = parseFloat(String(row.total_credit)) || 0;
+    const entryCount  = parseInt(String(row.entry_count))    || 0;
     const difference  = totalDebit - totalCredit;
     const isBalanced  = Math.abs(difference) < 0.01;
 

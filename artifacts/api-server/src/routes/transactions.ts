@@ -324,7 +324,7 @@ router.get("/", requireAuth, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
     if (!companyId) {
-      return res.status(400).json({
+      return void res.status(400).json({
         error: "MISSING_ORG",
         message: "Your session has no organization. Try signing out and back in, or switch organization.",
       });
@@ -512,12 +512,12 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
     } = req.body ?? {};
 
     if (!date || !payee || amount === undefined)
-      return res.status(400).json({ error: "date, payee, and amount are required" });
+      return void res.status(400).json({ error: "date, payee, and amount are required" });
 
     // Period-close protection
     const closedUntil = await getClosedUntil(companyId);
     if (isInClosedPeriod(date, closedUntil)) {
-      return res.status(403).json({
+      return void res.status(403).json({
         error: `This period is locked through ${closedUntilLabel(closedUntil)}. Reopen the period before adding transactions.`,
         code: "PERIOD_LOCKED",
       });
@@ -530,7 +530,7 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
       const sum = rawSplits.reduce((acc: number, s: any) => acc + Number(s.amount), 0);
       const diff = Math.abs(sum - Number(amount));
       if (diff > 0.005) {
-        return res.status(400).json({
+        return void res.status(400).json({
           error: `Split amounts (${sum.toFixed(2)}) must equal the transaction total (${Number(amount).toFixed(2)})`,
         });
       }
@@ -541,7 +541,7 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
     const fingerprint = buildFingerprint(parseFloat(amount), txDate, payee);
     const dup = await findDuplicate(companyId, fingerprint);
     if (dup) {
-      return res.status(409).json({
+      return void res.status(409).json({
         error: "Duplicate Detected: This transaction is already in the Register.",
         code: "DUPLICATE_TRANSACTION",
         existingId: dup.id,
@@ -633,27 +633,27 @@ router.post("/import-statement", requireAuth, requireAdmin, async (req, res) => 
     const { companyId } = (req as any).user;
     const { bankAccountId, csvText } = req.body ?? {};
     if (!bankAccountId || typeof csvText !== "string") {
-      return res.status(400).json({ error: "bankAccountId and csvText are required" });
+      return void res.status(400).json({ error: "bankAccountId and csvText are required" });
     }
     if (csvText.length > 2_500_000) {
-      return res.status(400).json({ error: "CSV text too large (max ~2.5MB)" });
+      return void res.status(400).json({ error: "CSV text too large (max ~2.5MB)" });
     }
 
     const [bank] = await db
       .select()
       .from(bankAccounts)
       .where(and(eq(bankAccounts.id, bankAccountId), eq(bankAccounts.companyId, companyId)));
-    if (!bank) return res.status(404).json({ error: "Bank account not found" });
+    if (!bank) return void res.status(404).json({ error: "Bank account not found" });
 
     const objects = parseCsvToObjects(csvText);
     if (objects.length === 0) {
-      return res.status(400).json({ error: "No data rows found in CSV" });
+      return void res.status(400).json({ error: "No data rows found in CSV" });
     }
 
     const headers = Object.keys(objects[0]);
     const mapping = detectColumnMapping(headers);
     if (!mapping) {
-      return res.status(400).json({
+      return void res.status(400).json({
         error:
           "Could not detect columns. Export a CSV with a Date column and an Amount column (or separate Debit and Credit columns), plus a description column.",
       });
@@ -661,7 +661,7 @@ router.post("/import-statement", requireAuth, requireAdmin, async (req, res) => 
 
     const { ok, errors: parseErrors } = rowsToStatementImports(objects, mapping);
     if (ok.length > 5000) {
-      return res.status(400).json({ error: "Too many rows (max 5000 per import)" });
+      return void res.status(400).json({ error: "Too many rows (max 5000 per import)" });
     }
     const result = await commitStatementImportRows(
       req,
@@ -688,36 +688,40 @@ router.post("/import-statement-pdf", requireAuth, requireAdmin, async (req, res)
     const { companyId } = (req as any).user;
     const { bankAccountId, pdfBase64 } = req.body ?? {};
     if (!bankAccountId || typeof pdfBase64 !== "string") {
-      return res.status(400).json({ error: "bankAccountId and pdfBase64 are required" });
+      return void res.status(400).json({ error: "bankAccountId and pdfBase64 are required" });
     }
 
     const [bank] = await db
       .select()
       .from(bankAccounts)
       .where(and(eq(bankAccounts.id, bankAccountId), eq(bankAccounts.companyId, companyId)));
-    if (!bank) return res.status(404).json({ error: "Bank account not found" });
+    if (!bank) return void res.status(404).json({ error: "Bank account not found" });
 
     let buffer: Buffer;
     try {
       buffer = Buffer.from(pdfBase64.replace(/^data:application\/pdf;base64,/, ""), "base64");
     } catch {
-      return res.status(400).json({ error: "Invalid base64 PDF data" });
+      return void res.status(400).json({ error: "Invalid base64 PDF data" });
     }
     if (buffer.length < 100) {
-      return res.status(400).json({ error: "PDF file is too small or empty" });
+      return void res.status(400).json({ error: "PDF file is too small or empty" });
     }
     if (buffer.length > 12 * 1024 * 1024) {
-      return res.status(400).json({ error: "PDF too large (max 12MB)" });
+      return void res.status(400).json({ error: "PDF too large (max 12MB)" });
     }
 
+    // pdf-parse ships no type declarations. Routing the specifier through a
+    // `string`-typed variable keeps this a dynamic import (so TS does not resolve
+    // the module and emit TS7016) while still loading it lazily at runtime.
+    const pdfParseSpecifier: string = "pdf-parse";
     const pdfParseMod: { default?: (b: Buffer) => Promise<{ text: string }> } = await import(
-      "pdf-parse",
+      pdfParseSpecifier
     );
     const pdfParse = pdfParseMod.default ?? (pdfParseMod as unknown as (b: Buffer) => Promise<{ text: string }>);
     const parsed = await pdfParse(buffer);
     const text = (parsed?.text ?? "").trim();
     if (!text || text.length < 20) {
-      return res.status(400).json({
+      return void res.status(400).json({
         error:
           "Could not read text from this PDF. It may be a scanned image; use your bank’s CSV download or a PDF with selectable text.",
       });
@@ -725,14 +729,14 @@ router.post("/import-statement-pdf", requireAuth, requireAdmin, async (req, res)
 
     const { ok, errors: parseErrors } = parseTransactionsFromPdfText(text);
     if (ok.length === 0) {
-      return res.status(400).json({
+      return void res.status(400).json({
         error:
           "No transaction lines found in the PDF. Layout may be unsupported — try CSV export, or a PDF with a standard date + amount line format.",
         parseErrors: parseErrors.slice(0, 20),
       });
     }
     if (ok.length > 5000) {
-      return res.status(400).json({ error: "Too many rows (max 5000 per import)" });
+      return void res.status(400).json({ error: "Too many rows (max 5000 per import)" });
     }
 
     const result = await commitStatementImportRows(
@@ -764,7 +768,7 @@ router.get("/:id/splits", requireAuth, async (req, res) => {
       .from(transactions)
       .where(and(eq(transactions.id, req.params.id), eq(transactions.companyId, companyId)));
 
-    if (!tx) return res.status(404).json({ error: "Transaction not found" });
+    if (!tx) return void res.status(404).json({ error: "Transaction not found" });
 
     const allCoa = await db.select().from(chartOfAccounts).where(eq(chartOfAccounts.companyId, companyId));
     const coaMap = Object.fromEntries(allCoa.map((a) => [a.id, a]));
@@ -778,7 +782,7 @@ router.get("/:id/splits", requireAuth, async (req, res) => {
         .from(journalEntryLines)
         .where(eq(journalEntryLines.journalEntryId, tx.journalEntryId));
 
-      return res.json({
+      return void res.json({
         transactionId: tx.id,
         journalEntryId: tx.journalEntryId,
         source: "JOURNAL_ENTRY",
@@ -796,7 +800,7 @@ router.get("/:id/splits", requireAuth, async (req, res) => {
     // Otherwise return regular transaction splits
     const splits = await loadSplitRowsByTransactionIds([tx.id]);
 
-    return res.json({
+    return void res.json({
       transactionId: tx.id,
       journalEntryId: null,
       source: "TRANSACTION_SPLIT",
@@ -832,14 +836,14 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
       .select()
       .from(transactions)
       .where(and(eq(transactions.id, req.params.id), eq(transactions.companyId, companyId)));
-    if (!existing) return res.status(404).json({ error: "Not found" });
-    if (existing.isVoid) return res.status(400).json({ error: "Cannot edit a voided transaction" });
+    if (!existing) return void res.status(404).json({ error: "Not found" });
+    if (existing.isVoid) return void res.status(400).json({ error: "Cannot edit a voided transaction" });
 
     // Period-close protection
     const closedUntil = await getClosedUntil(companyId);
     const effectiveDate = date ? new Date(`${String(date).slice(0, 10)}T12:00:00.000Z`) : existing.date;
     if (isInClosedPeriod(existing.date, closedUntil) || isInClosedPeriod(effectiveDate, closedUntil)) {
-      return res.status(403).json({
+      return void res.status(403).json({
         error: `This period is locked through ${closedUntilLabel(closedUntil)}. Reopen the period to edit this transaction.`,
         code: "PERIOD_LOCKED",
       });
@@ -851,7 +855,7 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
       const sum = rawSplits.reduce((acc: number, s: any) => acc + Number(s.amount), 0);
       const diff = Math.abs(sum - Number(amount));
       if (diff > 0.005) {
-        return res.status(400).json({
+        return void res.status(400).json({
           error: `Split amounts (${sum.toFixed(2)}) must equal the transaction total (${Number(amount).toFixed(2)})`,
         });
       }
@@ -864,7 +868,7 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
     const newFingerprint = buildFingerprint(effectiveAmount, effectiveDateVal, effectivePayee);
     const dup = await findDuplicate(companyId, newFingerprint, req.params.id);
     if (dup) {
-      return res.status(409).json({
+      return void res.status(409).json({
         error: "Duplicate Detected: This transaction is already in the Register.",
         code: "DUPLICATE_TRANSACTION",
         existingId: dup.id,
@@ -986,12 +990,12 @@ router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
       .select()
       .from(transactions)
       .where(and(eq(transactions.id, req.params.id), eq(transactions.companyId, companyId)));
-    if (!existing) return res.status(404).json({ error: "Not found" });
+    if (!existing) return void res.status(404).json({ error: "Not found" });
 
     // Period-close protection
     const closedUntil = await getClosedUntil(companyId);
     if (isInClosedPeriod(existing.date, closedUntil)) {
-      return res.status(403).json({
+      return void res.status(403).json({
         error: `This period is locked through ${closedUntilLabel(closedUntil)}. Reopen the period to delete this transaction.`,
         code: "PERIOD_LOCKED",
       });
@@ -1009,7 +1013,7 @@ router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
       .set({ isVoid: true, status: "VOID", updatedAt: new Date() })
       .where(and(eq(transactions.companyId, companyId), inArray(transactions.id, idsToVoid)))
       .returning();
-    if (!updatedRows.length) return res.status(404).json({ error: "Not found" });
+    if (!updatedRows.length) return void res.status(404).json({ error: "Not found" });
 
     voidGlEntries(glSourceId, companyId).catch((e) =>
       console.error("[GL] void error:", e)
@@ -1056,7 +1060,7 @@ router.patch("/:id/status", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
     const { status } = req.body ?? {};
-    if (!status) return res.status(400).json({ error: "status is required" });
+    if (!status) return void res.status(400).json({ error: "status is required" });
 
     const [before] = await db
       .select()
@@ -1068,7 +1072,7 @@ router.patch("/:id/status", requireAuth, requireAdmin, async (req, res) => {
       .set({ status: status as any, updatedAt: new Date() })
       .where(and(eq(transactions.id, req.params.id), eq(transactions.companyId, companyId)))
       .returning();
-    if (!updated) return res.status(404).json({ error: "Not found" });
+    if (!updated) return void res.status(404).json({ error: "Not found" });
 
     if (before) {
       const { id: userId4, email: userEmail4, name: userName4 } = (req as any).user;

@@ -11,7 +11,13 @@ async function fetchConnectorKey(hostname: string, token: string, environment: s
   const response = await fetch(url.toString(), {
     headers: { Accept: "application/json", "X-Replit-Token": token },
   });
-  const data = await response.json();
+  // `response.json()` is typed `unknown` under TS 5.9 + lib.dom's fetch overloads;
+  // describe just the shape we read instead of falling back to `any`.
+  const data = (await response.json()) as {
+    items?: {
+      settings?: { secret?: string; publishable?: string };
+    }[];
+  };
   const settings = data.items?.[0];
   if (settings?.settings?.secret) {
     return { publishableKey: settings.settings.publishable || "", secretKey: settings.settings.secret };

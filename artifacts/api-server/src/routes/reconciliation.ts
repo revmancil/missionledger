@@ -39,11 +39,11 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
     const { companyId } = (req as any).user;
     const { bankAccountId, statementDate, statementBalance, openingBalance: openingBalanceInput } = req.body ?? {};
     if (!bankAccountId || !statementDate || statementBalance === undefined)
-      return res.status(400).json({ error: "bankAccountId, statementDate, statementBalance are required" });
+      return void res.status(400).json({ error: "bankAccountId, statementDate, statementBalance are required" });
 
     const parsedStmt = parseYmdToUtcNoon(statementDate);
     if (!parsedStmt) {
-      return res.status(400).json({ error: "Invalid statementDate (use YYYY-MM-DD)" });
+      return void res.status(400).json({ error: "Invalid statementDate (use YYYY-MM-DD)" });
     }
     const stmtDate = parsedStmt.date;
 
@@ -115,7 +115,7 @@ router.get("/:id/items", requireAuth, async (req, res) => {
 
     const [recon] = await db.select().from(reconciliations)
       .where(and(eq(reconciliations.id, req.params.id), eq(reconciliations.companyId, companyId)));
-    if (!recon) return res.status(404).json({ error: "Not found" });
+    if (!recon) return void res.status(404).json({ error: "Not found" });
 
     const items = await db.select().from(reconciliationItems)
       .where(eq(reconciliationItems.reconciliationId, req.params.id));
@@ -157,7 +157,7 @@ router.get("/:id/items", requireAuth, async (req, res) => {
 router.patch("/:id/items/:itemId", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { cleared } = req.body ?? {};
-    if (cleared === undefined) return res.status(400).json({ error: "cleared is required" });
+    if (cleared === undefined) return void res.status(400).json({ error: "cleared is required" });
     await db.update(reconciliationItems)
       .set({ cleared: !!cleared, updatedAt: new Date() })
       .where(and(
@@ -177,8 +177,8 @@ router.post("/:id/complete", requireAuth, requireAdmin, async (req, res) => {
 
     const [recon] = await db.select().from(reconciliations)
       .where(and(eq(reconciliations.id, req.params.id), eq(reconciliations.companyId, companyId)));
-    if (!recon) return res.status(404).json({ error: "Not found" });
-    if (recon.status === "COMPLETED") return res.status(400).json({ error: "Already reconciled" });
+    if (!recon) return void res.status(404).json({ error: "Not found" });
+    if (recon.status === "COMPLETED") return void res.status(400).json({ error: "Already reconciled" });
 
     const items = await db.select().from(reconciliationItems)
       .where(eq(reconciliationItems.reconciliationId, req.params.id));
@@ -200,7 +200,7 @@ router.post("/:id/complete", requireAuth, requireAdmin, async (req, res) => {
     const difference = recon.statementBalance - clearedBalance;
 
     if (Math.abs(difference) > 0.005)
-      return res.status(400).json({
+      return void res.status(400).json({
         error: `Cannot reconcile: difference of $${Math.abs(difference).toFixed(2)} must be $0.00`,
       });
 
@@ -230,8 +230,8 @@ router.post("/:id/reopen", requireAuth, requireAdmin, async (req, res) => {
 
     const [recon] = await db.select().from(reconciliations)
       .where(and(eq(reconciliations.id, req.params.id), eq(reconciliations.companyId, companyId)));
-    if (!recon) return res.status(404).json({ error: "Not found" });
-    if (recon.status !== "COMPLETED") return res.status(400).json({ error: "Only completed reconciliations can be reopened" });
+    if (!recon) return void res.status(404).json({ error: "Not found" });
+    if (recon.status !== "COMPLETED") return void res.status(400).json({ error: "Only completed reconciliations can be reopened" });
 
     // Find all transaction IDs that were cleared in this reconciliation
     const items = await db.select().from(reconciliationItems)
@@ -271,9 +271,9 @@ router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
     const { companyId } = (req as any).user;
     const [recon] = await db.select().from(reconciliations)
       .where(and(eq(reconciliations.id, req.params.id), eq(reconciliations.companyId, companyId)));
-    if (!recon) return res.status(404).json({ error: "Not found" });
+    if (!recon) return void res.status(404).json({ error: "Not found" });
     if (recon.status === "COMPLETED")
-      return res.status(400).json({ error: "Completed reconciliations cannot be deleted." });
+      return void res.status(400).json({ error: "Completed reconciliations cannot be deleted." });
 
     // Delete items first, then the session
     await db.delete(reconciliationItems).where(eq(reconciliationItems.reconciliationId, req.params.id));
@@ -290,12 +290,12 @@ router.post("/:id/statement", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
     const { fileName, fileData } = req.body ?? {};
-    if (!fileName || !fileData) return res.status(400).json({ error: "fileName and fileData are required" });
+    if (!fileName || !fileData) return void res.status(400).json({ error: "fileName and fileData are required" });
 
     const [recon] = await db.select({ id: reconciliations.id })
       .from(reconciliations)
       .where(and(eq(reconciliations.id, req.params.id), eq(reconciliations.companyId, companyId)));
-    if (!recon) return res.status(404).json({ error: "Not found" });
+    if (!recon) return void res.status(404).json({ error: "Not found" });
 
     await db.update(reconciliations)
       .set({ statementFileName: fileName, statementFileData: fileData, updatedAt: new Date() } as any)
@@ -315,8 +315,8 @@ router.get("/:id/statement", requireAuth, async (req, res) => {
     const result = await db.select().from(reconciliations)
       .where(and(eq(reconciliations.id, req.params.id), eq(reconciliations.companyId, companyId)));
     const recon = result[0] as any;
-    if (!recon) return res.status(404).json({ error: "Not found" });
-    if (!recon.statementFileData) return res.status(404).json({ error: "No statement attached" });
+    if (!recon) return void res.status(404).json({ error: "Not found" });
+    if (!recon.statementFileData) return void res.status(404).json({ error: "No statement attached" });
 
     // fileData is a data URL: "data:<mime>;base64,<data>"
     const [header, base64] = recon.statementFileData.split(",");
@@ -337,7 +337,7 @@ router.get("/:id/statement", requireAuth, async (req, res) => {
 router.put("/:id/items", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { itemIds, cleared } = req.body ?? {};
-    if (!itemIds || cleared === undefined) return res.status(400).json({ error: "Missing fields" });
+    if (!itemIds || cleared === undefined) return void res.status(400).json({ error: "Missing fields" });
     for (const id of itemIds) {
       await db.update(reconciliationItems).set({ cleared, updatedAt: new Date() }).where(eq(reconciliationItems.id, id));
     }

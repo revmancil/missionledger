@@ -59,15 +59,15 @@ router.post("/transfer", requireAuth, requireAdmin, async (req, res) => {
     const { fromBankAccountId, toBankAccountId, amount, date, memo, fundId } = req.body ?? {};
 
     if (!fromBankAccountId || !toBankAccountId || amount === undefined || !date) {
-      return res.status(400).json({ error: "fromBankAccountId, toBankAccountId, amount, and date are required" });
+      return void res.status(400).json({ error: "fromBankAccountId, toBankAccountId, amount, and date are required" });
     }
     if (fromBankAccountId === toBankAccountId) {
-      return res.status(400).json({ error: "Cannot transfer to the same bank account" });
+      return void res.status(400).json({ error: "Cannot transfer to the same bank account" });
     }
 
     const amt = parseFloat(String(amount));
     if (!Number.isFinite(amt) || amt <= 0) {
-      return res.status(400).json({ error: "Amount must be a positive number" });
+      return void res.status(400).json({ error: "Amount must be a positive number" });
     }
 
     const [fromBank] = await db
@@ -79,9 +79,9 @@ router.post("/transfer", requireAuth, requireAdmin, async (req, res) => {
       .from(bankAccounts)
       .where(and(eq(bankAccounts.id, toBankAccountId), eq(bankAccounts.companyId, companyId)));
 
-    if (!fromBank || !toBank) return res.status(404).json({ error: "Bank account not found" });
+    if (!fromBank || !toBank) return void res.status(404).json({ error: "Bank account not found" });
     if (!fromBank.glAccountId || !toBank.glAccountId) {
-      return res.status(400).json({
+      return void res.status(400).json({
         error:
           "Both bank accounts must be linked to chart-of-accounts cash accounts. Open each bank on the Chart of Accounts page and link a GL account, then try again.",
       });
@@ -97,12 +97,12 @@ router.post("/transfer", requireAuth, requireAdmin, async (req, res) => {
       .where(and(eq(chartOfAccounts.id, toBank.glAccountId), eq(chartOfAccounts.companyId, companyId)));
 
     if (!fromCoa || !toCoa || fromCoa.type !== "ASSET" || toCoa.type !== "ASSET") {
-      return res.status(400).json({
+      return void res.status(400).json({
         error: "Inter-bank transfers require both linked GL accounts to be ASSET (cash) accounts.",
       });
     }
     if (fromBank.glAccountId === toBank.glAccountId) {
-      return res.status(400).json({
+      return void res.status(400).json({
         error:
           "Both banks are linked to the same chart account. Link each bank to a different cash account so the transfer posts to the right GL lines.",
       });
@@ -111,7 +111,7 @@ router.post("/transfer", requireAuth, requireAdmin, async (req, res) => {
     const txDate = new Date(`${String(date).slice(0, 10)}T12:00:00.000Z`);
     const closedUntil = await getClosedUntil(companyId);
     if (isInClosedPeriod(txDate, closedUntil)) {
-      return res.status(403).json({
+      return void res.status(403).json({
         error: `This period is locked through ${closedUntilLabel(closedUntil)}. Reopen the period before recording transfers.`,
         code: "PERIOD_LOCKED",
       });
@@ -193,7 +193,7 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
     const { name, accountType, lastFour, currentBalance, glAccountId, isActive } = req.body ?? {};
-    if (!name || !accountType) return res.status(400).json({ error: "Missing required fields" });
+    if (!name || !accountType) return void res.status(400).json({ error: "Missing required fields" });
 
     const [created] = await db.insert(bankAccounts).values({
       companyId,
@@ -230,7 +230,7 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
       updatedAt: new Date(),
     }).where(and(eq(bankAccounts.id, req.params.id), eq(bankAccounts.companyId, companyId))).returning();
 
-    if (!updated) return res.status(404).json({ error: "Not found" });
+    if (!updated) return void res.status(404).json({ error: "Not found" });
     res.json({
       ...updated,
       createdAt: toIsoString(updated.createdAt),
