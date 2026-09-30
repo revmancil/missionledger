@@ -27,7 +27,7 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
     const { donorName, donorEmail, totalAmount, pledgeDate, startDate, endDate, frequency, fundId, notes } = req.body ?? {};
-    if (!donorName || !totalAmount || !pledgeDate) return res.status(400).json({ error: "Missing required fields" });
+    if (!donorName || !totalAmount || !pledgeDate) return void res.status(400).json({ error: "Missing required fields" });
 
     const [created] = await db.insert(pledges).values({
       companyId,
@@ -77,7 +77,7 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
       updatedAt: new Date(),
     }).where(and(eq(pledges.id, req.params.id), eq(pledges.companyId, companyId))).returning();
 
-    if (!updated) return res.status(404).json({ error: "Not found" });
+    if (!updated) return void res.status(404).json({ error: "Not found" });
     res.json({
       ...updated,
       pledgeDate: updated.pledgeDate.toISOString(),

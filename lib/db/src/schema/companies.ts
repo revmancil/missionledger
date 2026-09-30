@@ -29,6 +29,9 @@ export const companies = pgTable("companies", {
   fiscalYearEndMonth: text("fiscal_year_end_month").notNull().default("12"),
   donationsEnabled: boolean("donations_enabled").notNull().default(false),
   zeffyFormUrl: text("zeffy_form_url"),
+  // Per-organization Zeffy webhook signing secret ("whsec_..."). Scoped per org so a
+  // single leaked secret cannot be used to forge donations into every other tenant.
+  zeffyWebhookSecret: text("zeffy_webhook_secret"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

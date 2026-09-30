@@ -119,6 +119,12 @@ export const GetDonationsResponseItem = zod.object({
       id: zod.string(),
       name: zod.string(),
       description: zod.string().nullish(),
+      fundType: zod
+        .string()
+        .optional()
+        .describe(
+          "UNRESTRICTED | RESTRICTED_TEMP | RESTRICTED_PERM | BOARD_DESIGNATED",
+        ),
       isActive: zod.boolean(),
       balance: zod.number().optional(),
       totalDonations: zod.number().optional(),
@@ -182,6 +188,12 @@ export const GetDonationResponse = zod.object({
       id: zod.string(),
       name: zod.string(),
       description: zod.string().nullish(),
+      fundType: zod
+        .string()
+        .optional()
+        .describe(
+          "UNRESTRICTED | RESTRICTED_TEMP | RESTRICTED_PERM | BOARD_DESIGNATED",
+        ),
       isActive: zod.boolean(),
       balance: zod.number().optional(),
       totalDonations: zod.number().optional(),
@@ -241,6 +253,12 @@ export const UpdateDonationResponse = zod.object({
       id: zod.string(),
       name: zod.string(),
       description: zod.string().nullish(),
+      fundType: zod
+        .string()
+        .optional()
+        .describe(
+          "UNRESTRICTED | RESTRICTED_TEMP | RESTRICTED_PERM | BOARD_DESIGNATED",
+        ),
       isActive: zod.boolean(),
       balance: zod.number().optional(),
       totalDonations: zod.number().optional(),
@@ -304,6 +322,12 @@ export const GetExpensesResponseItem = zod.object({
       id: zod.string(),
       name: zod.string(),
       description: zod.string().nullish(),
+      fundType: zod
+        .string()
+        .optional()
+        .describe(
+          "UNRESTRICTED | RESTRICTED_TEMP | RESTRICTED_PERM | BOARD_DESIGNATED",
+        ),
       isActive: zod.boolean(),
       balance: zod.number().optional(),
       totalDonations: zod.number().optional(),
@@ -378,6 +402,12 @@ export const UpdateExpenseResponse = zod.object({
       id: zod.string(),
       name: zod.string(),
       description: zod.string().nullish(),
+      fundType: zod
+        .string()
+        .optional()
+        .describe(
+          "UNRESTRICTED | RESTRICTED_TEMP | RESTRICTED_PERM | BOARD_DESIGNATED",
+        ),
       isActive: zod.boolean(),
       balance: zod.number().optional(),
       totalDonations: zod.number().optional(),
@@ -403,6 +433,12 @@ export const GetFundsResponseItem = zod.object({
   id: zod.string(),
   name: zod.string(),
   description: zod.string().nullish(),
+  fundType: zod
+    .string()
+    .optional()
+    .describe(
+      "UNRESTRICTED | RESTRICTED_TEMP | RESTRICTED_PERM | BOARD_DESIGNATED",
+    ),
   isActive: zod.boolean(),
   balance: zod.number().optional(),
   totalDonations: zod.number().optional(),
@@ -418,6 +454,12 @@ export const GetFundsResponse = zod.array(GetFundsResponseItem);
 export const CreateFundBody = zod.object({
   name: zod.string(),
   description: zod.string().optional(),
+  fundType: zod
+    .string()
+    .optional()
+    .describe(
+      "UNRESTRICTED | RESTRICTED_TEMP | RESTRICTED_PERM | BOARD_DESIGNATED (default: UNRESTRICTED)",
+    ),
   isActive: zod.boolean().optional(),
 });
 
@@ -428,6 +470,12 @@ export const UpdateFundParams = zod.object({
 export const UpdateFundBody = zod.object({
   name: zod.string(),
   description: zod.string().optional(),
+  fundType: zod
+    .string()
+    .optional()
+    .describe(
+      "UNRESTRICTED | RESTRICTED_TEMP | RESTRICTED_PERM | BOARD_DESIGNATED (default: UNRESTRICTED)",
+    ),
   isActive: zod.boolean().optional(),
 });
 
@@ -435,6 +483,12 @@ export const UpdateFundResponse = zod.object({
   id: zod.string(),
   name: zod.string(),
   description: zod.string().nullish(),
+  fundType: zod
+    .string()
+    .optional()
+    .describe(
+      "UNRESTRICTED | RESTRICTED_TEMP | RESTRICTED_PERM | BOARD_DESIGNATED",
+    ),
   isActive: zod.boolean(),
   balance: zod.number().optional(),
   totalDonations: zod.number().optional(),
@@ -1097,6 +1151,12 @@ export const GetBankTransactionsResponseItem = zod.object({
       id: zod.string(),
       name: zod.string(),
       description: zod.string().nullish(),
+      fundType: zod
+        .string()
+        .optional()
+        .describe(
+          "UNRESTRICTED | RESTRICTED_TEMP | RESTRICTED_PERM | BOARD_DESIGNATED",
+        ),
       isActive: zod.boolean(),
       balance: zod.number().optional(),
       totalDonations: zod.number().optional(),
@@ -1167,6 +1227,12 @@ export const UpdateBankTransactionResponse = zod.object({
       id: zod.string(),
       name: zod.string(),
       description: zod.string().nullish(),
+      fundType: zod
+        .string()
+        .optional()
+        .describe(
+          "UNRESTRICTED | RESTRICTED_TEMP | RESTRICTED_PERM | BOARD_DESIGNATED",
+        ),
       isActive: zod.boolean(),
       balance: zod.number().optional(),
       totalDonations: zod.number().optional(),
@@ -1224,6 +1290,12 @@ export const CategorizeBankTransactionResponse = zod.object({
       id: zod.string(),
       name: zod.string(),
       description: zod.string().nullish(),
+      fundType: zod
+        .string()
+        .optional()
+        .describe(
+          "UNRESTRICTED | RESTRICTED_TEMP | RESTRICTED_PERM | BOARD_DESIGNATED",
+        ),
       isActive: zod.boolean(),
       balance: zod.number().optional(),
       totalDonations: zod.number().optional(),
@@ -1550,6 +1622,12 @@ export const GetReconciliationItemsResponseItem = zod.object({
           id: zod.string(),
           name: zod.string(),
           description: zod.string().nullish(),
+          fundType: zod
+            .string()
+            .optional()
+            .describe(
+              "UNRESTRICTED | RESTRICTED_TEMP | RESTRICTED_PERM | BOARD_DESIGNATED",
+            ),
           isActive: zod.boolean(),
           balance: zod.number().optional(),
           totalDonations: zod.number().optional(),

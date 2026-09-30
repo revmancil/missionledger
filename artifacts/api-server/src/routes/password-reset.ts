@@ -11,7 +11,7 @@ const router = Router();
 router.post("/forgot-password", async (req, res) => {
   const { email } = req.body ?? {};
   if (!email || typeof email !== "string") {
-    return res.status(400).json({ error: "Email is required" });
+    return void res.status(400).json({ error: "Email is required" });
   }
 
   const [user] = await db
@@ -21,7 +21,7 @@ router.post("/forgot-password", async (req, res) => {
     .limit(1);
 
   if (!user) {
-    return res.json({ ok: true });
+    return void res.json({ ok: true });
   }
 
   const token = crypto.randomBytes(32).toString("hex");
@@ -48,10 +48,10 @@ router.post("/forgot-password", async (req, res) => {
 router.post("/reset-password", async (req, res) => {
   const { token, password } = req.body ?? {};
   if (!token || !password) {
-    return res.status(400).json({ error: "Token and new password are required" });
+    return void res.status(400).json({ error: "Token and new password are required" });
   }
   if (password.length < 8) {
-    return res.status(400).json({ error: "Password must be at least 8 characters" });
+    return void res.status(400).json({ error: "Password must be at least 8 characters" });
   }
 
   const [record] = await db
@@ -67,7 +67,7 @@ router.post("/reset-password", async (req, res) => {
     .limit(1);
 
   if (!record) {
-    return res.status(400).json({ error: "This reset link is invalid or has expired." });
+    return void res.status(400).json({ error: "This reset link is invalid or has expired." });
   }
 
   const hashed = await hashPassword(password);

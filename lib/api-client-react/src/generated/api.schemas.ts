@@ -77,6 +77,8 @@ export interface Fund {
   id: string;
   name: string;
   description?: string | null;
+  /** UNRESTRICTED | RESTRICTED_TEMP | RESTRICTED_PERM | BOARD_DESIGNATED */
+  fundType?: string;
   isActive: boolean;
   balance?: number;
   totalDonations?: number;
@@ -173,6 +175,8 @@ export interface CreateExpenseRequest {
 export interface CreateFundRequest {
   name: string;
   description?: string;
+  /** UNRESTRICTED | RESTRICTED_TEMP | RESTRICTED_PERM | BOARD_DESIGNATED (default: UNRESTRICTED) */
+  fundType?: string;
   isActive?: boolean;
 }
 
@@ -388,12 +392,9 @@ export interface BalanceSheetReport {
   assets: ReportLineItem[];
   liabilities: ReportLineItem[];
   equity: ReportLineItem[];
-  netIncome: number;
   totalAssets: number;
   totalLiabilities: number;
   totalEquity: number;
-  totalNetAssets: number;
-  difference: number;
 }
 
 export interface CashFlowReport {
@@ -506,6 +507,11 @@ export interface ReconciliationItem {
   cleared: boolean;
 }
 
+export interface ReconciliationItemsUpdateRequest {
+  itemIds: string[];
+  cleared: boolean;
+}
+
 export type GetBankTransactionsParams = {
   bankAccountId?: string;
   status?: string;
@@ -531,9 +537,4 @@ export type GetBudgetVsActualReportParams = {
   startDate?: string;
   endDate?: string;
   budgetId?: string;
-};
-
-export type UpdateReconciliationItemsBody = {
-  itemIds: string[];
-  cleared: boolean;
 };

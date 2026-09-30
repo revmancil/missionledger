@@ -39,7 +39,7 @@ router.get("/status", requireAuth, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
     const co = await getCompany(companyId);
-    if (!co) return res.status(404).json({ error: "Company not found" });
+    if (!co) return void res.status(404).json({ error: "Company not found" });
 
     const snapshots = await db
       .select()
@@ -341,7 +341,7 @@ router.post("/close-period", requireAuth, requireAdmin, async (req, res) => {
     const { year, month, overrideChecks } = req.body ?? {};
 
     if (!year || !month) {
-      return res.status(400).json({ error: "year and month are required" });
+      return void res.status(400).json({ error: "year and month are required" });
     }
 
     const periodYear = parseInt(year, 10);
@@ -367,7 +367,7 @@ router.post("/close-period", requireAuth, requireAdmin, async (req, res) => {
         );
 
       if (uncategorized.length > 0) {
-        return res.status(422).json({
+        return void res.status(422).json({
           error: `${uncategorized.length} uncategorized transaction(s) exist. Fix them or use overrideChecks=true.`,
           code: "UNCATEGORIZED_TRANSACTIONS",
           count: uncategorized.length,
@@ -444,10 +444,10 @@ router.post("/year-end-close", requireAuth, requireAdmin, async (req, res) => {
     const { id: userId, companyId, email } = (req as any).user;
     const { year, overrideChecks } = req.body ?? {};
 
-    if (!year) return res.status(400).json({ error: "year is required" });
+    if (!year) return void res.status(400).json({ error: "year is required" });
 
     const co = await getCompany(companyId);
-    if (!co) return res.status(404).json({ error: "Company not found" });
+    if (!co) return void res.status(404).json({ error: "Company not found" });
 
     const fiscalEndMonth = parseInt(co.fiscalYearEndMonth ?? "12", 10);
     const fiscalYear = parseInt(year, 10);
@@ -516,13 +516,13 @@ router.post("/year-end-close", requireAuth, requireAdmin, async (req, res) => {
     ) ?? allCoa.find((a) => (a.type as string) === "EQUITY");
 
     if (!retainedEarnings) {
-      return res.status(422).json({
+      return void res.status(422).json({
         error: "No equity account found for the closing offset. Please add a Retained Earnings or Fund Balance account (3000-series).",
       });
     }
 
     if (incomeAccounts.length === 0 && expenseAccounts.length === 0) {
-      return res.status(422).json({
+      return void res.status(422).json({
         error: "No income or expense GL entries found for this fiscal year. Run GL Sync first.",
       });
     }
@@ -696,23 +696,23 @@ router.post("/reopen", requireAuth, async (req, res) => {
 
     // Only MASTER_ADMIN can reopen
     if (role !== "MASTER_ADMIN") {
-      return res.status(403).json({
+      return void res.status(403).json({
         error: "Only a Master Admin can reopen a closed period.",
       });
     }
 
     const { reason } = req.body ?? {};
     if (!reason || reason.trim().length < 10) {
-      return res.status(400).json({
+      return void res.status(400).json({
         error: "A reason of at least 10 characters is required to reopen a period.",
       });
     }
 
     const co = await getCompany(companyId);
-    if (!co) return res.status(404).json({ error: "Company not found" });
+    if (!co) return void res.status(404).json({ error: "Company not found" });
 
     if (!co.closedUntil) {
-      return res.status(400).json({ error: "No closed period to reopen." });
+      return void res.status(400).json({ error: "No closed period to reopen." });
     }
 
     const previousClosedUntil = co.closedUntil;
@@ -762,7 +762,7 @@ router.get("/snapshots/:id", requireAuth, async (req, res) => {
         )
       );
 
-    if (!snapshot) return res.status(404).json({ error: "Snapshot not found" });
+    if (!snapshot) return void res.status(404).json({ error: "Snapshot not found" });
 
     res.json({
       ...snapshot,

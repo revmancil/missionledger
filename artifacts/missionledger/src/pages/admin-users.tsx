@@ -39,6 +39,10 @@ type CompanyFormState = {
   companyCode: string;
   donationsEnabled: boolean;
   zeffyFormUrl: string;
+  /** Write-only: never populated from the API. Blank means "leave the stored secret unchanged". */
+  zeffyWebhookSecret: string;
+  /** Whether a secret is already stored (the value itself is never returned by the API). */
+  hasZeffyWebhookSecret: boolean;
 };
 
 export default function AdminUsersPage() {
@@ -83,6 +87,8 @@ export default function AdminUsersPage() {
           companyCode: c?.companyCode ?? "",
           donationsEnabled: !!c?.donationsEnabled,
           zeffyFormUrl: c?.zeffyFormUrl ?? "",
+          zeffyWebhookSecret: "",
+          hasZeffyWebhookSecret: !!c?.hasZeffyWebhookSecret,
         });
       } else {
         setCompanyForm(null);
@@ -110,6 +116,11 @@ export default function AdminUsersPage() {
           email: companyForm.email,
           donationsEnabled: companyForm.donationsEnabled,
           zeffyFormUrl: companyForm.zeffyFormUrl.trim() || null,
+          // Only send when the admin actually typed a value; blank keeps the existing
+          // secret so saving unrelated settings cannot wipe it.
+          ...(companyForm.zeffyWebhookSecret.trim()
+            ? { zeffyWebhookSecret: companyForm.zeffyWebhookSecret.trim() }
+            : {}),
         }),
       });
       const data = await readJsonSafe<any>(res);
@@ -271,6 +282,40 @@ export default function AdminUsersPage() {
                   />
                 </div>
 
+                <div>
+                  <label className="text-sm font-medium">Zeffy Webhook Signing Secret</label>
+                  <p className="text-xs text-muted-foreground mb-1">
+                    Required to accept Zeffy donations. In Zeffy open{" "}
+                    <strong>Settings → Integrations → Webhook</strong> and copy the signing secret
+                    (starts with <code>whsec_</code>). We verify it so nobody can post fake
+                    donations to your books. Leave blank to keep the current secret.
+                  </p>
+                  <Input
+                    type="password"
+                    autoComplete="off"
+                    placeholder={
+                      companyForm.hasZeffyWebhookSecret
+                        ? "•••••••• configured — type only to replace"
+                        : "whsec_..."
+                    }
+                    value={companyForm.zeffyWebhookSecret}
+                    onChange={(e) =>
+                      setCompanyForm((f) => (f ? { ...f, zeffyWebhookSecret: e.target.value } : f))
+                    }
+                  />
+                  <p className="text-xs mt-1">
+                    {companyForm.hasZeffyWebhookSecret ? (
+                      <span className="text-emerald-600">
+                        Signature verification is active.
+                      </span>
+                    ) : (
+                      <span className="text-amber-600">
+                        Not configured — Zeffy donations will be rejected until you save a secret.
+                      </span>
+                    )}
+                  </p>
+                </div>
+
                 <div className="bg-muted/40 rounded-lg p-3 space-y-1">
                   <p className="text-xs font-medium">Your public giving page:</p>
                   <div className="flex items-center gap-2">
@@ -308,7 +353,8 @@ export default function AdminUsersPage() {
                     </Button>
                   </div>
                   <p className="text-xs text-muted-foreground pt-1">
-                    Zeffy webhook URL (add in Zeffy → Settings → Integrations):
+                    Zeffy webhook URL (add in Zeffy → Settings → Integrations, then save the signing
+                    secret above):
                   </p>
                   <div className="flex items-center gap-2">
                     <code className="text-xs bg-white border rounded px-2 py-1 flex-1 truncate">

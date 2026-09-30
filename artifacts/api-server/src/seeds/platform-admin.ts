@@ -77,6 +77,8 @@ export async function seedPlatformAdmin() {
         .insert(users)
         .values({
           companyId: targetCompanyId,
+          // users.user_id is NOT NULL with no DB default; mirror the convention used by
+          // routes/auth.ts and routes/users.ts (lower-cased email).
           userId: ADMIN_USER_ID,
           name: ADMIN_NAME,
           email: ADMIN_EMAIL,

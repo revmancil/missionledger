@@ -35,7 +35,7 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
     const { companyId } = (req as any).user;
     const { description, amount, date, category, fundId, accountId, cashAccountId, vendorId, notes } = req.body ?? {};
     if (!description || !amount || !date || !category) {
-      return res.status(400).json({ error: "Missing required fields" });
+      return void res.status(400).json({ error: "Missing required fields" });
     }
 
     const [created] = await db.insert(expenses).values({
@@ -75,7 +75,7 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
       updatedAt: new Date(),
     }).where(and(eq(expenses.id, req.params.id), eq(expenses.companyId, companyId))).returning();
 
-    if (!updated) return res.status(404).json({ error: "Not found" });
+    if (!updated) return void res.status(404).json({ error: "Not found" });
     res.json({ ...updated, date: updated.date.toISOString(), createdAt: updated.createdAt.toISOString(), updatedAt: updated.updatedAt.toISOString() });
   } catch (error) {
     res.status(500).json({ error: "Internal server error" });

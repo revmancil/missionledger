@@ -6,7 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type UpdateReconciliationItemsBody = {
+export interface ReconciliationItemsUpdateRequest {
   itemIds: string[];
   cleared: boolean;
-};
+}

@@ -64,7 +64,7 @@ router.get("/:id", requireAuth, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
     const [entry] = await db.select().from(journalEntries).where(and(eq(journalEntries.id, req.params.id), eq(journalEntries.companyId, companyId)));
-    if (!entry) return res.status(404).json({ error: "Not found" });
+    if (!entry) return void res.status(404).json({ error: "Not found" });
     res.json(await enrichEntry(entry, companyId));
   } catch (error) {
     res.status(500).json({ error: "Internal server error" });
@@ -75,12 +75,12 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId, email } = (req as any).user;
     const { date, description, memo, referenceNumber, lines } = req.body ?? {};
-    if (!date || !description || !lines?.length) return res.status(400).json({ error: "Missing required fields" });
+    if (!date || !description || !lines?.length) return void res.status(400).json({ error: "Missing required fields" });
 
     const totalDebit = lines.reduce((s: number, l: any) => s + (parseFloat(l.debit) || 0), 0);
     const totalCredit = lines.reduce((s: number, l: any) => s + (parseFloat(l.credit) || 0), 0);
     if (Math.abs(totalDebit - totalCredit) > 0.01) {
-      return res.status(400).json({ error: "Debits must equal credits" });
+      return void res.status(400).json({ error: "Debits must equal credits" });
     }
 
     const entryNumber = await nextJournalEntryNumber(companyId);
@@ -135,8 +135,8 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
     const { date, description, memo, referenceNumber, lines } = req.body ?? {};
 
     const existing = await db.select().from(journalEntries).where(and(eq(journalEntries.id, req.params.id), eq(journalEntries.companyId, companyId))).limit(1);
-    if (!existing.length) return res.status(404).json({ error: "Not found" });
-    if (existing[0].status === "POSTED") return res.status(400).json({ error: "Cannot edit posted entry" });
+    if (!existing.length) return void res.status(404).json({ error: "Not found" });
+    if (existing[0].status === "POSTED") return void res.status(400).json({ error: "Cannot edit posted entry" });
 
     const [updated] = await db.update(journalEntries).set({
       date: date ? new Date(date) : undefined,
@@ -186,8 +186,8 @@ router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
     const existing = await db.select().from(journalEntries).where(and(eq(journalEntries.id, req.params.id), eq(journalEntries.companyId, companyId))).limit(1);
-    if (!existing.length) return res.status(404).json({ error: "Not found" });
-    if (existing[0].status === "POSTED") return res.status(400).json({ error: "Cannot delete posted entry" });
+    if (!existing.length) return void res.status(404).json({ error: "Not found" });
+    if (existing[0].status === "POSTED") return void res.status(400).json({ error: "Cannot delete posted entry" });
 
     await db.delete(journalEntryLines).where(eq(journalEntryLines.journalEntryId, req.params.id));
     await db.delete(journalEntries).where(eq(journalEntries.id, req.params.id));
@@ -284,13 +284,13 @@ router.post("/:id/post", requireAuth, requireAdmin, async (req, res) => {
 
     const [entry] = await db.select().from(journalEntries)
       .where(and(eq(journalEntries.id, req.params.id), eq(journalEntries.companyId, companyId)));
-    if (!entry) return res.status(404).json({ error: "Not found" });
-    if (entry.status === "VOID") return res.status(400).json({ error: "Cannot post a voided entry" });
+    if (!entry) return void res.status(404).json({ error: "Not found" });
+    if (entry.status === "VOID") return void res.status(400).json({ error: "Cannot post a voided entry" });
 
     // Write (or regenerate) GL entries — works for both DRAFT→POSTED and re-posting already-POSTED
     const written = await writeGlEntriesForJe(entry, companyId);
     if (written === 0) {
-      return res.status(422).json({ error: "No valid account lines found — check that all lines have a recognized account selected." });
+      return void res.status(422).json({ error: "No valid account lines found — check that all lines have a recognized account selected." });
     }
 
     const [updated] = await db.update(journalEntries).set({
@@ -318,7 +318,7 @@ router.post("/:id/void", requireAuth, requireAdmin, async (req, res) => {
 
     const [existing] = await db.select().from(journalEntries)
       .where(and(eq(journalEntries.id, req.params.id), eq(journalEntries.companyId, companyId)));
-    if (!existing) return res.status(404).json({ error: "Not found" });
+    if (!existing) return void res.status(404).json({ error: "Not found" });
 
     // Capture affected account IDs before voiding GL entries
     const voidLines = await db.select({ accountId: journalEntryLines.accountId })

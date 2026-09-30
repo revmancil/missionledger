@@ -23,7 +23,7 @@ router.post("/", requireAuth, async (req, res) => {
   try {
     const user = (req as any).user;
     const { subject, body } = req.body;
-    if (!body?.trim()) return res.status(400).json({ error: "Message body is required" });
+    if (!body?.trim()) return void res.status(400).json({ error: "Message body is required" });
     const [msg] = await db.insert(helpMessages).values({
       companyId: user.companyId,
       userEmail: user.email,
@@ -44,9 +44,9 @@ router.post("/:id/reply", requireAdmin, async (req, res) => {
   try {
     const admin = (req as any).user;
     const parent = await db.select().from(helpMessages).where(eq(helpMessages.id, req.params.id));
-    if (!parent.length) return res.status(404).json({ error: "Message not found" });
+    if (!parent.length) return void res.status(404).json({ error: "Message not found" });
     const { body } = req.body;
-    if (!body?.trim()) return res.status(400).json({ error: "Reply body is required" });
+    if (!body?.trim()) return void res.status(400).json({ error: "Reply body is required" });
     const [reply] = await db.insert(helpMessages).values({
       companyId: parent[0].companyId,
       userEmail: admin.email,

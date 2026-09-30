@@ -58,10 +58,10 @@ import type {
   ProfitLossReport,
   Reconciliation,
   ReconciliationItem,
+  ReconciliationItemsUpdateRequest,
   RegisterRequest,
   UpdateBankTransactionRequest,
   UpdateCompanyRequest,
-  UpdateReconciliationItemsBody,
   User,
   UserSession,
   Vendor,
@@ -5504,14 +5504,14 @@ export const getUpdateReconciliationItemsUrl = (id: string) => {
 
 export const updateReconciliationItems = async (
   id: string,
-  updateReconciliationItemsBody: UpdateReconciliationItemsBody,
+  reconciliationItemsUpdateRequest: ReconciliationItemsUpdateRequest,
   options?: RequestInit,
 ): Promise<void> => {
   return customFetch<void>(getUpdateReconciliationItemsUrl(id), {
     ...options,
     method: "PUT",
     headers: { "Content-Type": "application/json", ...options?.headers },
-    body: JSON.stringify(updateReconciliationItemsBody),
+    body: JSON.stringify(reconciliationItemsUpdateRequest),
   });
 };
 
@@ -5522,14 +5522,14 @@ export const getUpdateReconciliationItemsMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof updateReconciliationItems>>,
     TError,
-    { id: string; data: BodyType<UpdateReconciliationItemsBody> },
+    { id: string; data: BodyType<ReconciliationItemsUpdateRequest> },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof updateReconciliationItems>>,
   TError,
-  { id: string; data: BodyType<UpdateReconciliationItemsBody> },
+  { id: string; data: BodyType<ReconciliationItemsUpdateRequest> },
   TContext
 > => {
   const mutationKey = ["updateReconciliationItems"];
@@ -5543,7 +5543,7 @@ export const getUpdateReconciliationItemsMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof updateReconciliationItems>>,
-    { id: string; data: BodyType<UpdateReconciliationItemsBody> }
+    { id: string; data: BodyType<ReconciliationItemsUpdateRequest> }
   > = (props) => {
     const { id, data } = props ?? {};
 
@@ -5557,7 +5557,7 @@ export type UpdateReconciliationItemsMutationResult = NonNullable<
   Awaited<ReturnType<typeof updateReconciliationItems>>
 >;
 export type UpdateReconciliationItemsMutationBody =
-  BodyType<UpdateReconciliationItemsBody>;
+  BodyType<ReconciliationItemsUpdateRequest>;
 export type UpdateReconciliationItemsMutationError = ErrorType<unknown>;
 
 export const useUpdateReconciliationItems = <
@@ -5567,14 +5567,14 @@ export const useUpdateReconciliationItems = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof updateReconciliationItems>>,
     TError,
-    { id: string; data: BodyType<UpdateReconciliationItemsBody> },
+    { id: string; data: BodyType<ReconciliationItemsUpdateRequest> },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationResult<
   Awaited<ReturnType<typeof updateReconciliationItems>>,
   TError,
-  { id: string; data: BodyType<UpdateReconciliationItemsBody> },
+  { id: string; data: BodyType<ReconciliationItemsUpdateRequest> },
   TContext
 > => {
   return useMutation(getUpdateReconciliationItemsMutationOptions(options));
