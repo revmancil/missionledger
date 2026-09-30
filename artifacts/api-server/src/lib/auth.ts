@@ -5,7 +5,12 @@ import { eq, and } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 
-const JWT_SECRET = process.env.JWT_SECRET || "missionledger-secret-key-2024";
+if (!process.env.JWT_SECRET) {
+  throw new Error(
+    "JWT_SECRET environment variable is required but was not provided.",
+  );
+}
+const JWT_SECRET = process.env.JWT_SECRET;
 const COOKIE_NAME = "ml_session";
 
 export interface AuthUser {
