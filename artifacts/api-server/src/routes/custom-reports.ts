@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { pool } from "@workspace/db";
 import { requireAuth } from "../lib/auth";
+import { exposeErrorDetails } from "../lib/errorHandler";
 
 const router = Router();
 
@@ -18,7 +19,8 @@ router.get("/templates", requireAuth, async (req, res) => {
     );
     res.json(result.rows);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    console.error("List report templates error:", err);
+    res.status(500).json({ error: "Internal server error", ...(exposeErrorDetails() ? { details: err.message } : {}) });
   }
 });
 
@@ -35,7 +37,8 @@ router.post("/templates", requireAuth, async (req, res) => {
     );
     res.json({ id, name, description, config });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    console.error("Create report template error:", err);
+    res.status(500).json({ error: "Internal server error", ...(exposeErrorDetails() ? { details: err.message } : {}) });
   }
 });
 
@@ -51,7 +54,8 @@ router.put("/templates/:id", requireAuth, async (req, res) => {
     );
     res.json({ success: true });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    console.error("Update report template error:", err);
+    res.status(500).json({ error: "Internal server error", ...(exposeErrorDetails() ? { details: err.message } : {}) });
   }
 });
 
@@ -64,7 +68,8 @@ router.delete("/templates/:id", requireAuth, async (req, res) => {
     );
     res.json({ success: true });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    console.error("Delete report template error:", err);
+    res.status(500).json({ error: "Internal server error", ...(exposeErrorDetails() ? { details: err.message } : {}) });
   }
 });
 
@@ -396,7 +401,7 @@ router.post("/run", requireAuth, async (req, res) => {
     res.status(400).json({ error: "Unknown reportType" });
   } catch (err: any) {
     console.error("Custom report run error:", err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Internal server error", ...(exposeErrorDetails() ? { details: err.message } : {}) });
   }
 });
 

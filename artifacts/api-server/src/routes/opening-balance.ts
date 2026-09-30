@@ -7,6 +7,7 @@ import { firstSqlRow, sqlRows } from "../lib/sqlRows";
 import { voidGlEntries } from "../lib/gl";
 import { nextJournalEntryNumber, withCompanyJournalLock } from "../lib/nextJournalEntryNumber";
 import { recomputeBankBalanceFromTransactions } from "../lib/bankBalance";
+import { exposeErrorDetails } from "../lib/errorHandler";
 
 function moneyToCents(n: number): number {
   return Math.round(Number(n) * 100 + Number.EPSILON);
@@ -30,14 +31,6 @@ function canonicalCoaIdForGlQuery(
   const k = normCoaKey(trimmed);
   if (k && coaCanonByNorm.has(k)) return coaCanonByNorm.get(k)!;
   return trimmed;
-}
-
-function exposeErrorDetails(): boolean {
-  return (
-    process.env.NODE_ENV === "development" ||
-    process.env.ML_EXPOSE_ERROR_DETAILS === "1" ||
-    process.env.ML_EXPOSE_ERROR_DETAILS === "true"
-  );
 }
 
 const router = Router();

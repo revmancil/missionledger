@@ -593,10 +593,11 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
       return row;
     });
 
-    // Generate double-entry GL records (fire-and-forget, non-blocking to response)
-    await generateGlEntries(created.id, companyId).catch((e) =>
-      console.error("[GL] create error:", e)
-    );
+    // Generate double-entry GL records
+    const glResult = await generateGlEntries(created.id, companyId).catch((e) => {
+      console.error("[GL] create error:", e);
+      return undefined;
+    });
 
     // Keep bank account balance in sync
     recomputeBankBalance(created.bankAccountId, companyId).catch((e) =>
@@ -620,7 +621,14 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
     const lookups = await getLookups(companyId);
     const splits = isSplit ? await loadSplitRowsByTransactionIds([created.id]) : [];
 
-    res.status(201).json(serializeTx(created, splits, lookups));
+    res.status(201).json({
+      ...serializeTx(created, splits, lookups),
+      ...(glResult?.outOfBalance
+        ? {
+            glWarning: `This transaction's splits don't balance (debits $${glResult.totalDebits?.toFixed(2)} vs credits $${glResult.totalCredits?.toFixed(2)}), so it was saved without posting to the General Ledger. Edit it to fix the split amounts.`,
+          }
+        : {}),
+    });
   } catch (err) {
     console.error("Create transaction error:", err);
     res.status(500).json({ error: "Internal server error" });
@@ -851,18 +859,22 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
 
     const isSplit = Array.isArray(rawSplits) && rawSplits.length > 0;
 
-    if (isSplit && amount !== undefined) {
+    // Compare against the effective (post-update) amount even when this request only
+    // changes the splits and leaves `amount` untouched — otherwise editing splits alone
+    // could silently desync them from the existing total.
+    const effectiveAmount = amount !== undefined ? parseFloat(amount) : existing.amount;
+
+    if (isSplit) {
       const sum = rawSplits.reduce((acc: number, s: any) => acc + Number(s.amount), 0);
-      const diff = Math.abs(sum - Number(amount));
+      const diff = Math.abs(sum - effectiveAmount);
       if (diff > 0.005) {
         return void res.status(400).json({
-          error: `Split amounts (${sum.toFixed(2)}) must equal the transaction total (${Number(amount).toFixed(2)})`,
+          error: `Split amounts (${sum.toFixed(2)}) must equal the transaction total (${effectiveAmount.toFixed(2)})`,
         });
       }
     }
 
     // ── Fingerprint update + duplicate check ────────────────────────────────
-    const effectiveAmount = amount !== undefined ? parseFloat(amount) : existing.amount;
     const effectiveDateVal = date ? new Date(`${String(date).slice(0, 10)}T12:00:00.000Z`) : existing.date;
     const effectivePayee   = payee ?? existing.payee;
     const newFingerprint = buildFingerprint(effectiveAmount, effectiveDateVal, effectivePayee);
@@ -921,9 +933,10 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
     });
 
     // Regenerate GL entries to reflect changes
-    await generateGlEntries(updated.id, companyId).catch((e) =>
-      console.error("[GL] update error:", e)
-    );
+    const glResult = await generateGlEntries(updated.id, companyId).catch((e) => {
+      console.error("[GL] update error:", e);
+      return undefined;
+    });
 
     const donorLines = rawDonorLines ?? [];
     if (showDonorSplit && Array.isArray(donorLines) && donorLines.length > 0) {
@@ -975,7 +988,14 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
     const lookups = await getLookups(companyId);
     const splits = isSplit ? await loadSplitRowsByTransactionIds([updated.id]) : [];
 
-    res.json(serializeTx(updated, splits, lookups));
+    res.json({
+      ...serializeTx(updated, splits, lookups),
+      ...(glResult?.outOfBalance
+        ? {
+            glWarning: `This transaction's splits don't balance (debits $${glResult.totalDebits?.toFixed(2)} vs credits $${glResult.totalCredits?.toFixed(2)}), so it was saved without posting to the General Ledger. Edit it to fix the split amounts.`,
+          }
+        : {}),
+    });
   } catch (err) {
     console.error("Update transaction error:", err);
     res.status(500).json({ error: "Internal server error" });

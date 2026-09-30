@@ -1,10 +1,18 @@
 import express, { type Express } from "express";
 import cors from "cors";
+import helmet from "helmet";
 import cookieParser from "cookie-parser";
 import router from "./routes";
 import { WebhookHandlers } from "./lib/webhookHandlers";
+import { apiLimiter } from "./lib/rateLimiters";
+import { globalErrorHandler } from "./lib/errorHandler";
 
 const app: Express = express();
+
+// This is a pure JSON API, never same-origin with its frontend, so cross-origin
+// resource policy must stay permissive — the `cors` middleware below is what
+// actually restricts who can call it.
+app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
 
 const allowedOrigins = [
   process.env.CORS_ORIGIN,
@@ -50,6 +58,10 @@ app.use("/api/zeffy/webhook", express.raw({ type: "*/*" }));
 app.use(express.json({ limit: "15mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
-app.use("/api", router);
+app.use("/api", apiLimiter, router);
+
+// Must be registered after all routes: Express identifies error-handling
+// middleware by its 4-argument signature.
+app.use(globalErrorHandler);
 
 export default app;

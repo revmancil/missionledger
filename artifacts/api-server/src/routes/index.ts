@@ -32,11 +32,12 @@ import passwordResetRouter from "./password-reset";
 import customReportsRouter from "./custom-reports";
 import zeffyRouter from "./zeffy";
 import boardReportRouter from "./board-report";
+import { authLimiter } from "../lib/rateLimiters";
 
 const router: IRouter = Router();
 
 router.use("/healthz", healthRouter);
-router.use("/auth", authRouter);
+router.use("/auth", authLimiter, authRouter);
 router.use("/dashboard", dashboardRouter);
 router.use("/donations", donationsRouter);
 router.use("/donors", donorsRouter);
@@ -64,7 +65,7 @@ router.use("/help-messages", helpMessagesRouter);
 router.use("/stripe", stripeRouter);
 router.use("/plaid", plaidRouter);
 router.use("/financial-summary", financialSummaryRouter);
-router.use("/auth", passwordResetRouter);
+router.use("/auth", authLimiter, passwordResetRouter);
 router.use("/custom-reports", customReportsRouter);
 router.use("/zeffy", zeffyRouter);
 router.use("/board-report", boardReportRouter);

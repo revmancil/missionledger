@@ -92,10 +92,24 @@ function splitEntryType(
 
 // ── Core GL generation ────────────────────────────────────────────────────────
 
+export interface GenerateGlEntriesResult {
+  /** True once balanced entries were written for this transaction. */
+  posted: boolean;
+  /**
+   * True only when entries were computed but rejected for being unbalanced —
+   * distinct from the many normal reasons `posted` can be false (voided,
+   * uncategorized, mirror leg of a transfer, etc.), which callers should not
+   * surface as a warning.
+   */
+  outOfBalance?: boolean;
+  totalDebits?: number;
+  totalCredits?: number;
+}
+
 export async function generateGlEntries(
   txId: string,
   companyId: string
-): Promise<void> {
+): Promise<GenerateGlEntriesResult> {
   // 1. Remove any prior GL entries for this transaction
   await db
     .delete(glEntries)
@@ -109,17 +123,17 @@ export async function generateGlEntries(
     .from(transactions)
     .where(and(eq(transactions.id, txId), eq(transactions.companyId, companyId)));
 
-  if (!tx) return;
+  if (!tx) return { posted: false };
 
   // 3. Voided transactions get no GL entries
-  if (tx.isVoid) return;
+  if (tx.isVoid) return { posted: false };
 
   // 3b. Lines tied to a posted journal entry (e.g. Opening Balance register rows): GL lives on the JE only.
   // Generating TRANSACTION GL here would duplicate or distort the ledger (e.g. trial-balance /sync).
-  if (tx.journalEntryId) return;
+  if (tx.journalEntryId) return { posted: false };
 
   // 3c. Mirror leg of an inter-bank transfer — GL is posted on the paired transaction only.
-  if (tx.excludeFromGl) return;
+  if (tx.excludeFromGl) return { posted: false };
 
   // 4. Resolve fund name (denormalised onto entries)
   let txFundName: string | null = null;
@@ -154,7 +168,7 @@ export async function generateGlEntries(
         console.error(
           `[GL] bank_accounts.gl_account_id ${bank.glAccountId} not found in chart_of_accounts — tx=${txId}. Fix the bank→GL link.`
         );
-        return;
+        return { posted: false };
       }
     }
   }
@@ -177,7 +191,7 @@ export async function generateGlEntries(
       console.error(
         `[GL] transactions.chart_account_id ${tx.chartAccountId} not found in chart_of_accounts — tx=${txId}`
       );
-      return;
+      return { posted: false };
     }
 
     // Bank side (no functional type)
@@ -290,7 +304,7 @@ export async function generateGlEntries(
   const totalDebits  = rawEntries.filter((e) => e.entryType === "DEBIT" ).reduce((s, e) => s + e.amount, 0);
   const totalCredits = rawEntries.filter((e) => e.entryType === "CREDIT").reduce((s, e) => s + e.amount, 0);
 
-  if (rawEntries.length === 0) return;
+  if (rawEntries.length === 0) return { posted: false };
 
   if (Math.abs(totalDebits - totalCredits) > 0.005) {
     console.warn(
@@ -299,7 +313,7 @@ export async function generateGlEntries(
     await db.delete(glEntries).where(
       and(eq(glEntries.transactionId, txId), eq(glEntries.companyId, companyId))
     );
-    return;
+    return { posted: false, outOfBalance: true, totalDebits, totalCredits };
   }
 
   // ── Persist ───────────────────────────────────────────────────────────────
@@ -321,6 +335,8 @@ export async function generateGlEntries(
       functionalType: (e.functionalType as any) ?? null,
     });
   }
+
+  return { posted: true, totalDebits, totalCredits };
 }
 
 /**
