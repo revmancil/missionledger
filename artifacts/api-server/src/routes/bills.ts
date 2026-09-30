@@ -2,6 +2,7 @@ import { Router } from "express";
 import { db, bills, billPayments, vendors } from "@workspace/db";
 import { eq, and, desc, sum } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
+import { postSimpleJournalEntry, voidPostedJournalEntry } from "../lib/postJournalEntry";
 
 const router = Router();
 
@@ -38,6 +39,7 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
     const { companyId } = (req as any).user;
     const { vendorId, description, amount, dueDate, accountId, fundId } = req.body ?? {};
     if (!description || !amount || !dueDate) return void res.status(400).json({ error: "Missing required fields" });
+    if (!accountId) return void res.status(400).json({ error: "An expense account is required so the bill can post to the general ledger when paid." });
 
     const [created] = await db.insert(bills).values({
       companyId,
@@ -60,13 +62,16 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
     const { vendorId, description, amount, dueDate, accountId, fundId, status } = req.body ?? {};
+    if ("accountId" in (req.body ?? {}) && !accountId) {
+      return void res.status(400).json({ error: "An expense account is required so the bill can post to the general ledger when paid." });
+    }
 
     const [updated] = await db.update(bills).set({
       vendorId: vendorId || null,
       description,
       amount: amount ? parseFloat(amount) : undefined,
       dueDate: dueDate ? new Date(dueDate) : undefined,
-      accountId: accountId || null,
+      accountId: accountId || undefined,
       fundId: fundId || null,
       status: status as any,
       updatedAt: new Date(),
@@ -91,6 +96,13 @@ router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
       .limit(1);
     if (!bill) return void res.status(404).json({ error: "Not found" });
 
+    const paymentsToRemove = await db.select({ journalEntryId: billPayments.journalEntryId })
+      .from(billPayments)
+      .where(and(eq(billPayments.billId, bill.id), eq(billPayments.companyId, companyId)));
+    for (const p of paymentsToRemove) {
+      if (p.journalEntryId) await voidPostedJournalEntry(p.journalEntryId, companyId);
+    }
+
     await db.delete(billPayments)
       .where(and(eq(billPayments.billId, bill.id), eq(billPayments.companyId, companyId)));
     await db.delete(bills).where(and(eq(bills.id, bill.id), eq(bills.companyId, companyId)));
@@ -102,21 +114,45 @@ router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
 
 router.post("/:id/payments", requireAuth, requireAdmin, async (req, res) => {
   try {
-    const { companyId } = (req as any).user;
+    const { companyId, email } = (req as any).user;
     const { amount, date, cashAccountId, notes } = req.body ?? {};
     if (!amount || !date) return void res.status(400).json({ error: "Missing required fields" });
+    if (!cashAccountId) return void res.status(400).json({ error: "A cash/bank account is required to record a payment." });
 
     const bill = await db.select().from(bills).where(and(eq(bills.id, req.params.id), eq(bills.companyId, companyId))).limit(1);
     if (!bill.length) return void res.status(404).json({ error: "Bill not found" });
+    if (!bill[0].accountId) {
+      return void res.status(400).json({ error: "This bill has no expense account set. Edit the bill to add one before recording a payment." });
+    }
+
+    const paymentAmount = parseFloat(amount);
 
     const [payment] = await db.insert(billPayments).values({
       billId: req.params.id,
       companyId,
-      amount: parseFloat(amount),
+      amount: paymentAmount,
       date: new Date(date),
-      cashAccountId: cashAccountId || null,
+      cashAccountId,
       notes: notes || null,
     }).returning();
+
+    try {
+      const je = await postSimpleJournalEntry(companyId, {
+        date: payment.date,
+        description: `Bill payment: ${bill[0].description}`,
+        createdBy: email ?? null,
+        lines: [
+          { accountId: bill[0].accountId, debit: paymentAmount, fundId: bill[0].fundId ?? null },
+          { accountId: cashAccountId, credit: paymentAmount, fundId: bill[0].fundId ?? null },
+        ],
+      });
+      await db.update(billPayments).set({ journalEntryId: je.id }).where(eq(billPayments.id, payment.id));
+    } catch (glError) {
+      // Don't leave a payment on record that never hit the ledger.
+      await db.delete(billPayments).where(eq(billPayments.id, payment.id));
+      console.error("Bill payment GL posting failed:", glError);
+      return void res.status(422).json({ error: glError instanceof Error ? glError.message : "Failed to post payment to the general ledger." });
+    }
 
     // Update bill status
     const allPayments = await db.select().from(billPayments)
