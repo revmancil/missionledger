@@ -6,6 +6,7 @@ import {
   auditLogs, financialSnapshots, funds,
 } from "@workspace/db";
 import { requireAuth, requireAdmin } from "../lib/auth";
+import { nextNumberForPrefix, withCompanyJournalLock } from "../lib/nextJournalEntryNumber";
 
 const router = Router();
 
@@ -17,16 +18,6 @@ function lastDayOfMonth(year: number, month: number): Date {
 
 function firstDayOfMonth(year: number, month: number): Date {
   return new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0));
-}
-
-/** Generate a sequential entry number like CE-2025-001 */
-async function nextEntryNumber(companyId: string, prefix: string): Promise<string> {
-  const rows = await db
-    .select()
-    .from(journalEntries)
-    .where(eq(journalEntries.companyId, companyId));
-  const n = rows.length + 1;
-  return `${prefix}-${String(n).padStart(4, "0")}`;
 }
 
 async function getCompany(companyId: string) {
@@ -381,47 +372,48 @@ router.post("/close-period", requireAuth, requireAdmin, async (req, res) => {
       buildBalanceSheet(companyId, periodEnd),
     ]);
 
-    // Save Statement of Activities snapshot
-    await db.insert(financialSnapshots).values({
-      companyId,
-      snapshotType: "STATEMENT_OF_ACTIVITIES",
-      periodLabel,
-      periodStart,
-      periodEnd,
-      data: JSON.stringify(soa),
-      status: "FINALIZED",
-      closedBy: userId,
-      closedByEmail: email ?? null,
-    });
+    // Save both snapshots, lock the period, and audit-log it as one unit — a
+    // mid-write failure must not leave one snapshot saved without the other,
+    // or a snapshot saved without the period actually getting locked.
+    await db.transaction(async (tx) => {
+      await tx.insert(financialSnapshots).values({
+        companyId,
+        snapshotType: "STATEMENT_OF_ACTIVITIES",
+        periodLabel,
+        periodStart,
+        periodEnd,
+        data: JSON.stringify(soa),
+        status: "FINALIZED",
+        closedBy: userId,
+        closedByEmail: email ?? null,
+      });
 
-    // Save Balance Sheet snapshot
-    await db.insert(financialSnapshots).values({
-      companyId,
-      snapshotType: "BALANCE_SHEET",
-      periodLabel,
-      periodStart,
-      periodEnd,
-      data: JSON.stringify(bs),
-      status: "FINALIZED",
-      closedBy: userId,
-      closedByEmail: email ?? null,
-    });
+      await tx.insert(financialSnapshots).values({
+        companyId,
+        snapshotType: "BALANCE_SHEET",
+        periodLabel,
+        periodStart,
+        periodEnd,
+        data: JSON.stringify(bs),
+        status: "FINALIZED",
+        closedBy: userId,
+        closedByEmail: email ?? null,
+      });
 
-    // Set the closed_until date on the company
-    await db
-      .update(companies)
-      .set({ closedUntil: periodEnd, updatedAt: new Date() })
-      .where(eq(companies.id, companyId));
+      await tx
+        .update(companies)
+        .set({ closedUntil: periodEnd, updatedAt: new Date() })
+        .where(eq(companies.id, companyId));
 
-    // Log to audit
-    await db.insert(auditLogs).values({
-      companyId,
-      userId,
-      userEmail: email ?? null,
-      action: "PERIOD_CLOSE",
-      entityType: "PERIOD",
-      entityId: periodLabel,
-      description: `Closed period: ${periodLabel}. Soft lock applied through ${periodEnd.toISOString().substring(0, 10)}.`,
+      await tx.insert(auditLogs).values({
+        companyId,
+        userId,
+        userEmail: email ?? null,
+        action: "PERIOD_CLOSE",
+        entityType: "PERIOD",
+        entityId: periodLabel,
+        description: `Closed period: ${periodLabel}. Soft lock applied through ${periodEnd.toISOString().substring(0, 10)}.`,
+      });
     });
 
     res.json({
@@ -527,111 +519,118 @@ router.post("/year-end-close", requireAuth, requireAdmin, async (req, res) => {
       });
     }
 
-    // Create the Closing Journal Entry
-    const entryNumber = await nextEntryNumber(companyId, `CE-${fiscalYear}`);
+    // Create the Closing Journal Entry — header, lines, and GL entries all in one
+    // locked transaction so a mid-write failure can never leave a POSTED entry
+    // with partial or unbalanced lines, and so concurrent closes can't collide
+    // on the same entry number.
     const closingDate = periodEnd;
+    const je = await withCompanyJournalLock(companyId, async (tx) => {
+      const entryNumber = await nextNumberForPrefix(companyId, `CE-${fiscalYear}`, 4, tx);
 
-    const [je] = await db
-      .insert(journalEntries)
-      .values({
-        companyId,
-        entryNumber,
-        date: closingDate,
-        description: `Year-End Closing Entry — Fiscal Year ${fiscalYear}`,
-        memo: `Closing entries to zero out income and expense accounts for FY${fiscalYear}. Net Income: $${netIncome.toFixed(2)}.`,
-        status: "POSTED",
-        createdBy: userId,
-        postedAt: new Date(),
-      })
-      .returning();
+      const [created] = await tx
+        .insert(journalEntries)
+        .values({
+          companyId,
+          entryNumber,
+          date: closingDate,
+          description: `Year-End Closing Entry — Fiscal Year ${fiscalYear}`,
+          memo: `Closing entries to zero out income and expense accounts for FY${fiscalYear}. Net Income: $${netIncome.toFixed(2)}.`,
+          status: "POSTED",
+          createdBy: userId,
+          postedAt: new Date(),
+        })
+        .returning();
 
-    const glInserts: any[] = [];
+      const glInserts: any[] = [];
 
-    // Debit each income account to zero it out (income accounts have normal credit balances)
-    for (const acct of incomeAccounts) {
-      const netBalance = acct.credits - acct.debits;
-      if (Math.abs(netBalance) < 0.005) continue;
-      await db.insert(journalEntryLines).values({
-        journalEntryId: je.id,
-        companyId,
-        accountId: acct.accountId,
-        debit: netBalance > 0 ? netBalance : 0,
-        credit: netBalance < 0 ? Math.abs(netBalance) : 0,
-        description: `Close income: ${acct.name}`,
-      });
-      glInserts.push({
-        companyId,
-        journalEntryId: je.id,
-        sourceType: "JOURNAL_ENTRY" as const,
-        accountId: acct.accountId,
-        accountCode: acct.code,
-        accountName: acct.name,
-        entryType: netBalance > 0 ? ("DEBIT" as const) : ("CREDIT" as const),
-        amount: Math.abs(netBalance),
-        description: `Close income: ${acct.name}`,
-        date: closingDate,
-        isVoid: false,
-      });
-    }
+      // Debit each income account to zero it out (income accounts have normal credit balances)
+      for (const acct of incomeAccounts) {
+        const netBalance = acct.credits - acct.debits;
+        if (Math.abs(netBalance) < 0.005) continue;
+        await tx.insert(journalEntryLines).values({
+          journalEntryId: created.id,
+          companyId,
+          accountId: acct.accountId,
+          debit: netBalance > 0 ? netBalance : 0,
+          credit: netBalance < 0 ? Math.abs(netBalance) : 0,
+          description: `Close income: ${acct.name}`,
+        });
+        glInserts.push({
+          companyId,
+          journalEntryId: created.id,
+          sourceType: "JOURNAL_ENTRY" as const,
+          accountId: acct.accountId,
+          accountCode: acct.code,
+          accountName: acct.name,
+          entryType: netBalance > 0 ? ("DEBIT" as const) : ("CREDIT" as const),
+          amount: Math.abs(netBalance),
+          description: `Close income: ${acct.name}`,
+          date: closingDate,
+          isVoid: false,
+        });
+      }
 
-    // Credit each expense account to zero it out (expense accounts have normal debit balances)
-    for (const acct of expenseAccounts) {
-      const netBalance = acct.debits - acct.credits;
-      if (Math.abs(netBalance) < 0.005) continue;
-      await db.insert(journalEntryLines).values({
-        journalEntryId: je.id,
-        companyId,
-        accountId: acct.accountId,
-        debit: netBalance < 0 ? Math.abs(netBalance) : 0,
-        credit: netBalance > 0 ? netBalance : 0,
-        description: `Close expense: ${acct.name}`,
-      });
-      glInserts.push({
-        companyId,
-        journalEntryId: je.id,
-        sourceType: "JOURNAL_ENTRY" as const,
-        accountId: acct.accountId,
-        accountCode: acct.code,
-        accountName: acct.name,
-        entryType: netBalance > 0 ? ("CREDIT" as const) : ("DEBIT" as const),
-        amount: Math.abs(netBalance),
-        description: `Close expense: ${acct.name}`,
-        date: closingDate,
-        isVoid: false,
-      });
-    }
+      // Credit each expense account to zero it out (expense accounts have normal debit balances)
+      for (const acct of expenseAccounts) {
+        const netBalance = acct.debits - acct.credits;
+        if (Math.abs(netBalance) < 0.005) continue;
+        await tx.insert(journalEntryLines).values({
+          journalEntryId: created.id,
+          companyId,
+          accountId: acct.accountId,
+          debit: netBalance < 0 ? Math.abs(netBalance) : 0,
+          credit: netBalance > 0 ? netBalance : 0,
+          description: `Close expense: ${acct.name}`,
+        });
+        glInserts.push({
+          companyId,
+          journalEntryId: created.id,
+          sourceType: "JOURNAL_ENTRY" as const,
+          accountId: acct.accountId,
+          accountCode: acct.code,
+          accountName: acct.name,
+          entryType: netBalance > 0 ? ("CREDIT" as const) : ("DEBIT" as const),
+          amount: Math.abs(netBalance),
+          description: `Close expense: ${acct.name}`,
+          date: closingDate,
+          isVoid: false,
+        });
+      }
 
-    // Offset to Retained Earnings
-    if (Math.abs(netIncome) >= 0.005) {
-      await db.insert(journalEntryLines).values({
-        journalEntryId: je.id,
-        companyId,
-        accountId: retainedEarnings.id,
-        debit: netIncome < 0 ? Math.abs(netIncome) : 0,
-        credit: netIncome > 0 ? netIncome : 0,
-        description: `Net income transferred to ${retainedEarnings.name}`,
-      });
-      glInserts.push({
-        companyId,
-        journalEntryId: je.id,
-        sourceType: "JOURNAL_ENTRY" as const,
-        accountId: retainedEarnings.id,
-        accountCode: retainedEarnings.code,
-        accountName: retainedEarnings.name,
-        entryType: netIncome > 0 ? ("CREDIT" as const) : ("DEBIT" as const),
-        amount: Math.abs(netIncome),
-        description: `Net income transferred to ${retainedEarnings.name}`,
-        date: closingDate,
-        isVoid: false,
-      });
-    }
+      // Offset to Retained Earnings
+      if (Math.abs(netIncome) >= 0.005) {
+        await tx.insert(journalEntryLines).values({
+          journalEntryId: created.id,
+          companyId,
+          accountId: retainedEarnings.id,
+          debit: netIncome < 0 ? Math.abs(netIncome) : 0,
+          credit: netIncome > 0 ? netIncome : 0,
+          description: `Net income transferred to ${retainedEarnings.name}`,
+        });
+        glInserts.push({
+          companyId,
+          journalEntryId: created.id,
+          sourceType: "JOURNAL_ENTRY" as const,
+          accountId: retainedEarnings.id,
+          accountCode: retainedEarnings.code,
+          accountName: retainedEarnings.name,
+          entryType: netIncome > 0 ? ("CREDIT" as const) : ("DEBIT" as const),
+          amount: Math.abs(netIncome),
+          description: `Net income transferred to ${retainedEarnings.name}`,
+          date: closingDate,
+          isVoid: false,
+        });
+      }
 
-    // Insert all GL entries
-    for (const e of glInserts) {
-      await db.insert(glEntries).values(e);
-    }
+      // Insert all GL entries
+      for (const e of glInserts) {
+        await tx.insert(glEntries).values(e);
+      }
 
-    // Generate and save both snapshots
+      return { ...created, lineCount: glInserts.length };
+    });
+
+    // Generate and save both snapshots (reads the just-committed closing entries)
     const [soa, bs] = await Promise.all([
       buildStatementOfActivities(companyId, periodStart, periodEnd),
       buildBalanceSheet(companyId, periodEnd),
@@ -675,7 +674,7 @@ router.post("/year-end-close", requireAuth, requireAdmin, async (req, res) => {
       closingEntry: {
         id: je.id,
         entryNumber: je.entryNumber,
-        lineCount: glInserts.length,
+        lineCount: je.lineCount,
       },
       netIncome,
       retainedEarningsAccount: retainedEarnings.name,

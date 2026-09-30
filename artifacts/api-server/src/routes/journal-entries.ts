@@ -3,7 +3,7 @@ import { db, journalEntries, journalEntryLines, accounts, chartOfAccounts, glEnt
 import { eq, and, desc } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
 import { logAudit, snap } from "../lib/audit";
-import { nextJournalEntryNumber } from "../lib/nextJournalEntryNumber";
+import { nextJournalEntryNumber, withCompanyJournalLock } from "../lib/nextJournalEntryNumber";
 import { recomputeBankBalanceByGlAccount } from "../lib/bankBalance";
 
 const router = Router();
@@ -83,30 +83,34 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
       return void res.status(400).json({ error: "Debits must equal credits" });
     }
 
-    const entryNumber = await nextJournalEntryNumber(companyId);
+    const entry = await withCompanyJournalLock(companyId, async (tx) => {
+      const entryNumber = await nextJournalEntryNumber(companyId, tx);
 
-    const [entry] = await db.insert(journalEntries).values({
-      companyId,
-      entryNumber,
-      date: new Date(date),
-      description,
-      memo: memo || null,
-      referenceNumber: referenceNumber || null,
-      status: "DRAFT",
-      createdBy: email || null,
-    }).returning();
-
-    for (const line of lines) {
-      await db.insert(journalEntryLines).values({
-        journalEntryId: entry.id,
+      const [created] = await tx.insert(journalEntries).values({
         companyId,
-        accountId: line.accountId,
-        debit: parseFloat(line.debit) || 0,
-        credit: parseFloat(line.credit) || 0,
-        description: line.description || null,
-        fundId: line.fundId || null,
-      });
-    }
+        entryNumber,
+        date: new Date(date),
+        description,
+        memo: memo || null,
+        referenceNumber: referenceNumber || null,
+        status: "DRAFT",
+        createdBy: email || null,
+      }).returning();
+
+      for (const line of lines) {
+        await tx.insert(journalEntryLines).values({
+          journalEntryId: created.id,
+          companyId,
+          accountId: line.accountId,
+          debit: parseFloat(line.debit) || 0,
+          credit: parseFloat(line.credit) || 0,
+          description: line.description || null,
+          fundId: line.fundId || null,
+        });
+      }
+
+      return created;
+    });
 
     const { id: userId, email: userEmail, name: userName } = (req as any).user;
     logAudit({
@@ -118,7 +122,7 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
       action: "CREATE",
       entityType: "JOURNAL_ENTRY",
       entityId: entry.id,
-      description: `Created journal entry ${entryNumber}: ${description}`,
+      description: `Created journal entry ${entry.entryNumber}: ${description}`,
       newValue: snap(entry as any),
     });
 
@@ -138,28 +142,32 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
     if (!existing.length) return void res.status(404).json({ error: "Not found" });
     if (existing[0].status === "POSTED") return void res.status(400).json({ error: "Cannot edit posted entry" });
 
-    const [updated] = await db.update(journalEntries).set({
-      date: date ? new Date(date) : undefined,
-      description,
-      memo: memo || null,
-      referenceNumber: referenceNumber || null,
-      updatedAt: new Date(),
-    }).where(eq(journalEntries.id, req.params.id)).returning();
+    const updated = await db.transaction(async (tx) => {
+      const [updatedEntry] = await tx.update(journalEntries).set({
+        date: date ? new Date(date) : undefined,
+        description,
+        memo: memo || null,
+        referenceNumber: referenceNumber || null,
+        updatedAt: new Date(),
+      }).where(eq(journalEntries.id, req.params.id)).returning();
 
-    if (lines) {
-      await db.delete(journalEntryLines).where(eq(journalEntryLines.journalEntryId, req.params.id));
-      for (const line of lines) {
-        await db.insert(journalEntryLines).values({
-          journalEntryId: req.params.id,
-          companyId,
-          accountId: line.accountId,
-          debit: parseFloat(line.debit) || 0,
-          credit: parseFloat(line.credit) || 0,
-          description: line.description || null,
-          fundId: line.fundId || null,
-        });
+      if (lines) {
+        await tx.delete(journalEntryLines).where(eq(journalEntryLines.journalEntryId, req.params.id));
+        for (const line of lines) {
+          await tx.insert(journalEntryLines).values({
+            journalEntryId: req.params.id,
+            companyId,
+            accountId: line.accountId,
+            debit: parseFloat(line.debit) || 0,
+            credit: parseFloat(line.credit) || 0,
+            description: line.description || null,
+            fundId: line.fundId || null,
+          });
+        }
       }
-    }
+
+      return updatedEntry;
+    });
 
     const { id: userId2, email: userEmail2, name: userName2 } = (req as any).user;
     logAudit({

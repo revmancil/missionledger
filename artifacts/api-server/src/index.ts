@@ -470,6 +470,14 @@ async function ensureSchema() {
   } catch (err: any) {
     console.error("Schema migration error (reference_number):", err.message);
   }
+  // Defense-in-depth backstop for the advisory-lock-based number allocation in
+  // withCompanyJournalLock. Non-fatal: if any duplicate numbers already exist
+  // from before that fix, this just fails to apply rather than blocking startup.
+  await ensureAlter(
+    "journal_entries.entry_number unique index",
+    `CREATE UNIQUE INDEX IF NOT EXISTS journal_entries_company_entry_number_unique
+       ON public.journal_entries (company_id, entry_number)`,
+  );
   try {
     await pool.query(`ALTER TABLE companies ADD COLUMN IF NOT EXISTS maintenance_mode BOOLEAN NOT NULL DEFAULT FALSE`);
     console.log("Schema check: companies.maintenance_mode OK");

@@ -1,4 +1,4 @@
-import { pgTable, text, real, timestamp, pgEnum } from "drizzle-orm/pg-core";
+import { pgTable, text, real, timestamp, pgEnum, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -18,7 +18,11 @@ export const journalEntries = pgTable("journal_entries", {
   voidedAt: timestamp("voided_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+}, (t) => [
+  // Defense-in-depth: number allocation is serialized by an advisory lock
+  // (see withCompanyJournalLock), but this backstops it at the DB level too.
+  uniqueIndex("journal_entries_company_entry_number_unique").on(t.companyId, t.entryNumber),
+]);
 
 export const journalEntryLines = pgTable("journal_entry_lines", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),

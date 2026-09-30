@@ -5,7 +5,7 @@ import { requireAuth, requireAdmin } from "../lib/auth";
 import { parseYmdToUtcNoon, utcYmdToday } from "../lib/safeIso";
 import { firstSqlRow, sqlRows } from "../lib/sqlRows";
 import { voidGlEntries } from "../lib/gl";
-import { nextJournalEntryNumber } from "../lib/nextJournalEntryNumber";
+import { nextJournalEntryNumber, withCompanyJournalLock } from "../lib/nextJournalEntryNumber";
 import { recomputeBankBalanceFromTransactions } from "../lib/bankBalance";
 
 function moneyToCents(n: number): number {
@@ -315,152 +315,167 @@ router.post("/finalize", requireAuth, requireAdmin, async (req, res) => {
       : [];
     const fundMap = Object.fromEntries(fundsInEntry.map((f) => [f.id, f]));
 
-    const entryNumber = await nextJournalEntryNumber(companyId);
-
-    // ── Pre-flight: propagate void status from any historically-voided JEs whose
-    // GL entries were not properly voided (e.g. from an older code path).
-    await db.execute(sql`
-      UPDATE gl_entries ge
-      SET is_void = true, updated_at = NOW()
-      FROM journal_entries je
-      WHERE ge.journal_entry_id = je.id
-        AND ge.company_id = ${companyId}
-        AND je.status = 'VOID'
-        AND ge.is_void = false
-    `);
-
     // Void existing OB entry (journal entry + its GL entries)
     const [company] = await db.select().from(companies).where(eq(companies.id, companyId));
     if (!company) return void res.status(404).json({ error: "Company not found" });
 
-    if (company.openingBalanceEntryId) {
-      const oldJeId = company.openingBalanceEntryId;
-      await db
-        .update(journalEntries)
-        .set({ status: "VOID", voidedAt: new Date(), updatedAt: new Date() })
-        .where(eq(journalEntries.id, oldJeId));
-      // Void the GL entries so they are excluded from all balance calculations
-      await db
-        .update(glEntries)
-        .set({ isVoid: true, updatedAt: new Date() })
-        .where(and(eq(glEntries.journalEntryId, oldJeId), eq(glEntries.companyId, companyId)));
-    }
+    // Everything below — voiding the prior OB entry, creating the new posted JE,
+    // its lines and GL entries, the register transactions, and the company
+    // pointer update — happens in one locked transaction. A mid-write failure
+    // must never leave a POSTED opening-balance entry with partial lines, and
+    // concurrent finalize calls for the same company must not collide on the
+    // same entry number.
+    const je = await withCompanyJournalLock(companyId, async (tx) => {
+      const entryNumber = await nextJournalEntryNumber(companyId, tx);
 
-    // Create posted JE
-    const [je] = await db
-      .insert(journalEntries)
-      .values({
-        companyId,
-        entryNumber,
-        date: asOf,
-        description: "Opening Balance Entry",
-        memo: `Accounting method: ${accountingMethod ?? "CASH"}. Created by ${email ?? "admin"}.`,
-        status: "POSTED",
-        createdBy: email ?? null,
-        postedAt: new Date(),
-      })
-      .returning();
+      // ── Pre-flight: propagate void status from any historically-voided JEs whose
+      // GL entries were not properly voided (e.g. from an older code path).
+      await tx.execute(sql`
+        UPDATE gl_entries ge
+        SET is_void = true, updated_at = NOW()
+        FROM journal_entries je
+        WHERE ge.journal_entry_id = je.id
+          AND ge.company_id = ${companyId}
+          AND je.status = 'VOID'
+          AND ge.is_void = false
+      `);
 
-    if (!je?.id) {
-      throw new Error("Journal entry insert did not return a row.");
-    }
-
-    // Insert JE lines and GL entries
-    for (const row of rowsToPost) {
-      const acct = acctMap[row.accountId];
-      const fund = fundMap[row.fundId];
-      const amt = Number(row.amount);
-
-      await db.insert(journalEntryLines).values({
-        journalEntryId: je.id,
-        companyId,
-        accountId: row.accountId,
-        debit: row.entryType === "DEBIT" ? amt : 0,
-        credit: row.entryType === "CREDIT" ? amt : 0,
-        fundId: row.fundId,
-        description: row.memo || null,
-      });
-
-      await db.insert(glEntries).values({
-        companyId,
-        journalEntryId: je.id,
-        sourceType: "OPENING_BALANCE",
-        accountId: row.accountId,
-        accountCode: acct?.code ?? "",
-        accountName: acct?.name ?? "",
-        fundId: row.fundId,
-        fundName: fund?.name ?? null,
-        entryType: row.entryType,
-        amount: amt,
-        description: row.memo || "Opening Balance Entry",
-        date: asOf,
-      });
-    }
-
-    // ── Create / refresh bank-register transactions for OB entry ───────────────
-    // Void any transactions from a previous OB posting, and void their TRANSACTION GL
-    // (trial-balance sync may have posted duplicate GL; those rows are keyed by transaction_id only).
-    if (company.openingBalanceEntryId) {
-      const oldJeIdForTx = company.openingBalanceEntryId;
-      const priorObTxs = await db
-        .select({ id: transactions.id })
-        .from(transactions)
-        .where(and(eq(transactions.companyId, companyId), eq(transactions.journalEntryId as any, oldJeIdForTx)));
-      for (const t of priorObTxs) {
-        await voidGlEntries(t.id, companyId);
+      if (company.openingBalanceEntryId) {
+        const oldJeId = company.openingBalanceEntryId;
+        await tx
+          .update(journalEntries)
+          .set({ status: "VOID", voidedAt: new Date(), updatedAt: new Date() })
+          .where(eq(journalEntries.id, oldJeId));
+        // Void the GL entries so they are excluded from all balance calculations
+        await tx
+          .update(glEntries)
+          .set({ isVoid: true, updatedAt: new Date() })
+          .where(and(eq(glEntries.journalEntryId, oldJeId), eq(glEntries.companyId, companyId)));
       }
-      await db
-        .update(transactions)
-        .set({ isVoid: true, status: "VOID", updatedAt: new Date() })
-        .where(
-          and(eq(transactions.companyId, companyId), eq(transactions.journalEntryId as any, oldJeIdForTx)),
-        );
-    }
 
-    // Build normalized gl key → bankAccountId (matches row.accountId case-insensitively)
-    const glToBankId: Record<string, string> = {};
-    for (const ba of linkedBanks) {
-      const g = normCoaKey(ba.glAccountId);
-      if (g) glToBankId[g] = ba.id;
-    }
+      // Create posted JE
+      const [created] = await tx
+        .insert(journalEntries)
+        .values({
+          companyId,
+          entryNumber,
+          date: asOf,
+          description: "Opening Balance Entry",
+          memo: `Accounting method: ${accountingMethod ?? "CASH"}. Created by ${email ?? "admin"}.`,
+          status: "POSTED",
+          createdBy: email ?? null,
+          postedAt: new Date(),
+        })
+        .returning();
 
-    for (const row of rowsToPost) {
-      const bankAccountId = glToBankId[normCoaKey(row.accountId) ?? ""];
-      if (!bankAccountId) continue; // only create transactions for bank account rows
-      // DR to asset account = DEPOSIT in the register (CREDIT type)
-      // CR to asset account = WITHDRAWAL from the register (DEBIT type)
-      const txType: "CREDIT" | "DEBIT" = row.entryType === "DEBIT" ? "CREDIT" : "DEBIT";
-      await db.insert(transactions).values({
-        companyId,
-        bankAccountId,
-        date: asOf,
-        payee: "Opening Balance",
-        amount: Number(row.amount),
-        type: txType,
-        status: "CLEARED",
-        chartAccountId: row.accountId,
-        fundId: row.fundId ?? null,
-        memo: "Opening Balance Entry",
-        referenceNumber: je.entryNumber,
-        journalEntryId: je.id,
-        isVoid: false,
-      });
-    }
+      if (!created?.id) {
+        throw new Error("Journal entry insert did not return a row.");
+      }
+
+      // Insert JE lines and GL entries
+      for (const row of rowsToPost) {
+        const acct = acctMap[row.accountId];
+        const fund = fundMap[row.fundId];
+        const amt = Number(row.amount);
+
+        await tx.insert(journalEntryLines).values({
+          journalEntryId: created.id,
+          companyId,
+          accountId: row.accountId,
+          debit: row.entryType === "DEBIT" ? amt : 0,
+          credit: row.entryType === "CREDIT" ? amt : 0,
+          fundId: row.fundId,
+          description: row.memo || null,
+        });
+
+        await tx.insert(glEntries).values({
+          companyId,
+          journalEntryId: created.id,
+          sourceType: "OPENING_BALANCE",
+          accountId: row.accountId,
+          accountCode: acct?.code ?? "",
+          accountName: acct?.name ?? "",
+          fundId: row.fundId,
+          fundName: fund?.name ?? null,
+          entryType: row.entryType,
+          amount: amt,
+          description: row.memo || "Opening Balance Entry",
+          date: asOf,
+        });
+      }
+
+      // ── Create / refresh bank-register transactions for OB entry ───────────────
+      // Void any transactions from a previous OB posting (their TRANSACTION GL is
+      // voided separately via voidGlEntries, outside this transaction — see note below).
+      if (company.openingBalanceEntryId) {
+        const oldJeIdForTx = company.openingBalanceEntryId;
+        const priorObTxs = await tx
+          .select({ id: transactions.id })
+          .from(transactions)
+          .where(and(eq(transactions.companyId, companyId), eq(transactions.journalEntryId as any, oldJeIdForTx)));
+        for (const t of priorObTxs) {
+          // voidGlEntries runs against the module-level db, not this transaction's
+          // client, so it commits independently. Acceptable: it only ever turns
+          // is_void=true on rows that are being superseded by this same finalize
+          // call, so a failure here just leaves stale GL that the next successful
+          // finalize (or GL sync) will clean up — it can't corrupt the new entry.
+          await voidGlEntries(t.id, companyId);
+        }
+        await tx
+          .update(transactions)
+          .set({ isVoid: true, status: "VOID", updatedAt: new Date() })
+          .where(
+            and(eq(transactions.companyId, companyId), eq(transactions.journalEntryId as any, oldJeIdForTx)),
+          );
+      }
+
+      // Build normalized gl key → bankAccountId (matches row.accountId case-insensitively)
+      const glToBankId: Record<string, string> = {};
+      for (const ba of linkedBanks) {
+        const g = normCoaKey(ba.glAccountId);
+        if (g) glToBankId[g] = ba.id;
+      }
+
+      for (const row of rowsToPost) {
+        const bankAccountId = glToBankId[normCoaKey(row.accountId) ?? ""];
+        if (!bankAccountId) continue; // only create transactions for bank account rows
+        // DR to asset account = DEPOSIT in the register (CREDIT type)
+        // CR to asset account = WITHDRAWAL from the register (DEBIT type)
+        const txType: "CREDIT" | "DEBIT" = row.entryType === "DEBIT" ? "CREDIT" : "DEBIT";
+        await tx.insert(transactions).values({
+          companyId,
+          bankAccountId,
+          date: asOf,
+          payee: "Opening Balance",
+          amount: Number(row.amount),
+          type: txType,
+          status: "CLEARED",
+          chartAccountId: row.accountId,
+          fundId: row.fundId ?? null,
+          memo: "Opening Balance Entry",
+          referenceNumber: created.entryNumber,
+          journalEntryId: created.id,
+          isVoid: false,
+        });
+      }
+
+      // Update company record
+      await tx
+        .update(companies)
+        .set({
+          accountingMethod: (accountingMethod ?? "CASH") as any,
+          openingBalanceEntryId: created.id,
+          openingBalanceDate: asOf,
+          updatedAt: new Date(),
+        })
+        .where(eq(companies.id, companyId));
+
+      return created;
+    });
 
     for (const ba of linkedBanks) {
       await recomputeBankBalanceFromTransactions(ba.id, companyId);
     }
-
-    // Update company record
-    await db
-      .update(companies)
-      .set({
-        accountingMethod: (accountingMethod ?? "CASH") as any,
-        openingBalanceEntryId: je.id,
-        openingBalanceDate: asOf,
-        updatedAt: new Date(),
-      })
-      .where(eq(companies.id, companyId));
 
     res.status(201).json({
       success: true,

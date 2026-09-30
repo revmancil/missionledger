@@ -1,6 +1,6 @@
 import { db, journalEntries, journalEntryLines, chartOfAccounts, accounts, glEntries, funds } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
-import { nextJournalEntryNumber } from "./nextJournalEntryNumber";
+import { nextJournalEntryNumber, withCompanyJournalLock } from "./nextJournalEntryNumber";
 import { recomputeBankBalanceByGlAccount } from "./bankBalance";
 
 export interface SimpleJournalLine {
@@ -51,9 +51,9 @@ export async function postSimpleJournalEntry(
     }
   }
 
-  const entryNumber = await nextJournalEntryNumber(companyId);
+  const entry = await withCompanyJournalLock(companyId, async (tx) => {
+    const entryNumber = await nextJournalEntryNumber(companyId, tx);
 
-  const entry = await db.transaction(async (tx) => {
     const [created] = await tx
       .insert(journalEntries)
       .values({
