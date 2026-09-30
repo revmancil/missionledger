@@ -156,8 +156,14 @@ router.get("/:id/items", requireAuth, async (req, res) => {
 // ── PATCH /:id/items/:itemId — toggle single item ────────────────────────────
 router.patch("/:id/items/:itemId", requireAuth, requireAdmin, async (req, res) => {
   try {
+    const { companyId } = (req as any).user;
     const { cleared } = req.body ?? {};
     if (cleared === undefined) return void res.status(400).json({ error: "cleared is required" });
+
+    const [recon] = await db.select({ id: reconciliations.id }).from(reconciliations)
+      .where(and(eq(reconciliations.id, req.params.id), eq(reconciliations.companyId, companyId)));
+    if (!recon) return void res.status(404).json({ error: "Not found" });
+
     await db.update(reconciliationItems)
       .set({ cleared: !!cleared, updatedAt: new Date() })
       .where(and(
@@ -336,10 +342,18 @@ router.get("/:id/statement", requireAuth, async (req, res) => {
 // ── Legacy ────────────────────────────────────────────────────────────────────
 router.put("/:id/items", requireAuth, requireAdmin, async (req, res) => {
   try {
+    const { companyId } = (req as any).user;
     const { itemIds, cleared } = req.body ?? {};
     if (!itemIds || cleared === undefined) return void res.status(400).json({ error: "Missing fields" });
+
+    const [recon] = await db.select({ id: reconciliations.id }).from(reconciliations)
+      .where(and(eq(reconciliations.id, req.params.id), eq(reconciliations.companyId, companyId)));
+    if (!recon) return void res.status(404).json({ error: "Not found" });
+
     for (const id of itemIds) {
-      await db.update(reconciliationItems).set({ cleared, updatedAt: new Date() }).where(eq(reconciliationItems.id, id));
+      await db.update(reconciliationItems)
+        .set({ cleared, updatedAt: new Date() })
+        .where(and(eq(reconciliationItems.id, id), eq(reconciliationItems.reconciliationId, req.params.id)));
     }
     res.json({ success: true });
   } catch (err) {
