@@ -260,10 +260,18 @@ router.post("/system/maintenance", async (req, res) => {
   }
 });
 
-// ── GET /master-admin/global-coa ──────────────────────────────────────────────
-router.get("/global-coa", async (_req, res) => {
+const COA_ORG_TYPES = ["NONPROFIT", "CHURCH", "MEMBERSHIP"];
+
+// ── GET /master-admin/global-coa?organizationType=NONPROFIT ───────────────────
+router.get("/global-coa", async (req, res) => {
   try {
-    const { rows } = await pool.query(`SELECT code, name, type, parent_code, sort_order FROM coa_templates ORDER BY sort_order ASC`);
+    const organizationType = COA_ORG_TYPES.includes(String(req.query.organizationType))
+      ? String(req.query.organizationType)
+      : "NONPROFIT";
+    const { rows } = await pool.query(
+      `SELECT organization_type, code, name, type, parent_code, sort_order FROM coa_templates WHERE organization_type = $1 ORDER BY sort_order ASC`,
+      [organizationType],
+    );
     res.json(rows);
   } catch (error) {
     console.error("Global COA error:", error);
@@ -274,17 +282,18 @@ router.get("/global-coa", async (_req, res) => {
 // ── POST /master-admin/global-coa ─────────────────────────────────────────────
 router.post("/global-coa", async (req, res) => {
   try {
-    const { code, name, type, parentCode } = req.body ?? {};
+    const { code, name, type, parentCode, organizationType } = req.body ?? {};
     if (!code || !name || !type) return void res.status(400).json({ error: "code, name, and type are required." });
     const validTypes = ["ASSET", "LIABILITY", "EQUITY", "INCOME", "EXPENSE"];
     if (!validTypes.includes(type)) return void res.status(400).json({ error: `type must be one of: ${validTypes.join(", ")}` });
+    const orgType = COA_ORG_TYPES.includes(organizationType) ? organizationType : "NONPROFIT";
 
     const { rows } = await pool.query(`
-      INSERT INTO coa_templates (code, name, type, parent_code, sort_order)
-      VALUES ($1, $2, $3, $4, $5)
-      ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, type = EXCLUDED.type, parent_code = EXCLUDED.parent_code, sort_order = EXCLUDED.sort_order
+      INSERT INTO coa_templates (organization_type, code, name, type, parent_code, sort_order)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      ON CONFLICT (organization_type, code) DO UPDATE SET name = EXCLUDED.name, type = EXCLUDED.type, parent_code = EXCLUDED.parent_code, sort_order = EXCLUDED.sort_order
       RETURNING *
-    `, [code.trim(), name.trim(), type, parentCode || null, parseInt(code) || 0]);
+    `, [orgType, code.trim(), name.trim(), type, parentCode || null, parseInt(code) || 0]);
 
     res.json({ success: true, entry: rows[0] });
   } catch (error) {
@@ -293,10 +302,11 @@ router.post("/global-coa", async (req, res) => {
   }
 });
 
-// ── DELETE /master-admin/global-coa/:code ─────────────────────────────────────
-router.delete("/global-coa/:code", async (req, res) => {
+// ── DELETE /master-admin/global-coa/:organizationType/:code ───────────────────
+router.delete("/global-coa/:organizationType/:code", async (req, res) => {
   try {
-    await pool.query(`DELETE FROM coa_templates WHERE code = $1`, [req.params.code]);
+    const organizationType = COA_ORG_TYPES.includes(req.params.organizationType) ? req.params.organizationType : "NONPROFIT";
+    await pool.query(`DELETE FROM coa_templates WHERE organization_type = $1 AND code = $2`, [organizationType, req.params.code]);
     res.json({ success: true });
   } catch (error) {
     console.error("Global COA delete error:", error);

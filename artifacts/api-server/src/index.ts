@@ -677,6 +677,153 @@ async function ensureSchema() {
   } catch (err: any) {
     console.error("Schema migration error (coa_templates):", err.message);
   }
+  // Church support: make coa_templates organization-type-aware so seedChartOfAccounts
+  // (chart-of-accounts.ts) can pick a template by org type. `code` is now only unique
+  // within an organization_type, not globally — hence dropping the old single-column PK.
+  try {
+    await pool.query(
+      `ALTER TABLE coa_templates ADD COLUMN IF NOT EXISTS organization_type organization_type NOT NULL DEFAULT 'NONPROFIT'`,
+    );
+    await pool.query(`ALTER TABLE coa_templates DROP CONSTRAINT IF EXISTS coa_templates_pkey`);
+    await pool.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS coa_templates_org_type_code_unique ON coa_templates (organization_type, code)`,
+    );
+
+    // Re-sync the NONPROFIT template to the richer list seedChartOfAccounts actually
+    // uses (chart-of-accounts.ts DEFAULT_COA) — the original seed above predates that
+    // list and is missing most of it.
+    await pool.query(`
+      INSERT INTO coa_templates (organization_type, code, name, type, parent_code, sort_order) VALUES
+        ('NONPROFIT','1000','Cash & Bank Accounts','ASSET',NULL,10),
+        ('NONPROFIT','1010','Checking Account','ASSET','1000',11),
+        ('NONPROFIT','1020','Savings Account','ASSET','1000',12),
+        ('NONPROFIT','1100','Accounts Receivable','ASSET',NULL,20),
+        ('NONPROFIT','1200','Pledges Receivable','ASSET',NULL,30),
+        ('NONPROFIT','1500','Property & Equipment','ASSET',NULL,40),
+        ('NONPROFIT','2000','Accounts Payable','LIABILITY',NULL,110),
+        ('NONPROFIT','2100','Accrued Liabilities','LIABILITY',NULL,120),
+        ('NONPROFIT','2200','Deferred Revenue','LIABILITY',NULL,130),
+        ('NONPROFIT','3000','Net Assets','EQUITY',NULL,210),
+        ('NONPROFIT','3100','Unrestricted Net Assets','EQUITY',NULL,211),
+        ('NONPROFIT','3200','Temporarily Restricted','EQUITY',NULL,212),
+        ('NONPROFIT','3300','Permanently Restricted','EQUITY',NULL,213),
+        ('NONPROFIT','4000','Revenue','INCOME',NULL,310),
+        ('NONPROFIT','4100','Individual Contributions','INCOME','4000',311),
+        ('NONPROFIT','4110','Online Donations','INCOME','4000',312),
+        ('NONPROFIT','4120','Cash Offerings','INCOME','4000',313),
+        ('NONPROFIT','4130','Check Donations','INCOME','4000',314),
+        ('NONPROFIT','4200','Grants','INCOME','4000',320),
+        ('NONPROFIT','4210','Government Grants','INCOME','4000',321),
+        ('NONPROFIT','4220','Foundation Grants','INCOME','4000',322),
+        ('NONPROFIT','4300','Membership Dues','INCOME','4000',330),
+        ('NONPROFIT','4400','Program Revenue','INCOME','4000',340),
+        ('NONPROFIT','4500','Special Events Revenue','INCOME','4000',350),
+        ('NONPROFIT','4600','In-Kind Contributions','INCOME','4000',360),
+        ('NONPROFIT','4700','Investment Income','INCOME','4000',370),
+        ('NONPROFIT','4800','Rental Income','INCOME','4000',380),
+        ('NONPROFIT','4900','Miscellaneous Income','INCOME','4000',390),
+        ('NONPROFIT','8000','Expenses','EXPENSE',NULL,410),
+        ('NONPROFIT','8100','Personnel Expenses','EXPENSE','8000',411),
+        ('NONPROFIT','8110','Salaries & Wages','EXPENSE','8100',412),
+        ('NONPROFIT','8120','Payroll Taxes','EXPENSE','8100',413),
+        ('NONPROFIT','8130','Employee Benefits','EXPENSE','8100',414),
+        ('NONPROFIT','8140','Contract Labor','EXPENSE','8100',415),
+        ('NONPROFIT','8200','Occupancy & Facilities','EXPENSE','8000',420),
+        ('NONPROFIT','8210','Rent & Lease','EXPENSE','8200',421),
+        ('NONPROFIT','8220','Utilities','EXPENSE','8200',422),
+        ('NONPROFIT','8230','Maintenance & Repairs','EXPENSE','8200',423),
+        ('NONPROFIT','8300','Program Expenses','EXPENSE','8000',430),
+        ('NONPROFIT','8310','Program Supplies','EXPENSE','8300',431),
+        ('NONPROFIT','8320','Program Services','EXPENSE','8300',432),
+        ('NONPROFIT','8400','Administrative Expenses','EXPENSE','8000',440),
+        ('NONPROFIT','8410','Office Supplies','EXPENSE','8400',441),
+        ('NONPROFIT','8420','Postage & Shipping','EXPENSE','8400',442),
+        ('NONPROFIT','8430','Printing & Copying','EXPENSE','8400',443),
+        ('NONPROFIT','8440','Software & Technology','EXPENSE','8400',444),
+        ('NONPROFIT','8500','Professional Services','EXPENSE','8000',450),
+        ('NONPROFIT','8510','Accounting & Audit','EXPENSE','8500',451),
+        ('NONPROFIT','8520','Legal Fees','EXPENSE','8500',452),
+        ('NONPROFIT','8530','Consulting Fees','EXPENSE','8500',453),
+        ('NONPROFIT','8600','Travel & Transportation','EXPENSE','8000',460),
+        ('NONPROFIT','8610','Mileage & Vehicle','EXPENSE','8600',461),
+        ('NONPROFIT','8620','Airfare & Lodging','EXPENSE','8600',462),
+        ('NONPROFIT','8700','Marketing & Communications','EXPENSE','8000',470),
+        ('NONPROFIT','8710','Advertising','EXPENSE','8700',471),
+        ('NONPROFIT','8720','Website & Social Media','EXPENSE','8700',472),
+        ('NONPROFIT','8800','Fundraising Expenses','EXPENSE','8000',480),
+        ('NONPROFIT','8900','Depreciation','EXPENSE','8000',490),
+        ('NONPROFIT','8950','Insurance','EXPENSE','8000',491),
+        ('NONPROFIT','8990','Miscellaneous Expenses','EXPENSE','8000',499)
+      ON CONFLICT (organization_type, code) DO NOTHING;
+    `);
+
+    // CHURCH template: same asset/liability/equity backbone, church-specific income/expense.
+    await pool.query(`
+      INSERT INTO coa_templates (organization_type, code, name, type, parent_code, sort_order) VALUES
+        ('CHURCH','1000','Cash & Bank Accounts','ASSET',NULL,10),
+        ('CHURCH','1010','Checking Account','ASSET','1000',11),
+        ('CHURCH','1020','Savings Account','ASSET','1000',12),
+        ('CHURCH','1100','Accounts Receivable','ASSET',NULL,20),
+        ('CHURCH','1200','Pledges Receivable','ASSET',NULL,30),
+        ('CHURCH','1500','Property & Equipment','ASSET',NULL,40),
+        ('CHURCH','2000','Accounts Payable','LIABILITY',NULL,110),
+        ('CHURCH','2100','Accrued Liabilities','LIABILITY',NULL,120),
+        ('CHURCH','2200','Deferred Revenue','LIABILITY',NULL,130),
+        ('CHURCH','3000','Net Assets','EQUITY',NULL,210),
+        ('CHURCH','3100','Unrestricted Net Assets','EQUITY',NULL,211),
+        ('CHURCH','3200','Temporarily Restricted','EQUITY',NULL,212),
+        ('CHURCH','3300','Permanently Restricted','EQUITY',NULL,213),
+        ('CHURCH','4000','Revenue','INCOME',NULL,310),
+        ('CHURCH','4100','Tithes & Offerings','INCOME','4000',311),
+        ('CHURCH','4110','Online & Mobile Giving','INCOME','4000',312),
+        ('CHURCH','4120','Plate & Loose Offering','INCOME','4000',313),
+        ('CHURCH','4200','Building Fund / Capital Campaign','INCOME','4000',320),
+        ('CHURCH','4300','Missions & Outreach Giving','INCOME','4000',330),
+        ('CHURCH','4400','Designated & Restricted Gifts','INCOME','4000',340),
+        ('CHURCH','4500','Fundraising & Events Revenue','INCOME','4000',350),
+        ('CHURCH','4600','In-Kind Contributions','INCOME','4000',360),
+        ('CHURCH','4700','Investment Income','INCOME','4000',370),
+        ('CHURCH','4800','Facility Rental Income','INCOME','4000',380),
+        ('CHURCH','4900','Miscellaneous Income','INCOME','4000',390),
+        ('CHURCH','8000','Expenses','EXPENSE',NULL,410),
+        ('CHURCH','8100','Personnel Expenses','EXPENSE','8000',411),
+        ('CHURCH','8110','Pastoral Staff Salaries','EXPENSE','8100',412),
+        ('CHURCH','8115','Clergy Housing Allowance','EXPENSE','8100',413),
+        ('CHURCH','8120','Ministry Staff Salaries','EXPENSE','8100',414),
+        ('CHURCH','8130','Payroll Taxes','EXPENSE','8100',415),
+        ('CHURCH','8140','Employee Benefits','EXPENSE','8100',416),
+        ('CHURCH','8150','Guest Speakers & Contract Labor','EXPENSE','8100',417),
+        ('CHURCH','8200','Occupancy & Facilities','EXPENSE','8000',420),
+        ('CHURCH','8210','Mortgage / Rent','EXPENSE','8200',421),
+        ('CHURCH','8220','Utilities','EXPENSE','8200',422),
+        ('CHURCH','8230','Maintenance & Repairs','EXPENSE','8200',423),
+        ('CHURCH','8240','Property Insurance','EXPENSE','8200',424),
+        ('CHURCH','8300','Ministry Programs','EXPENSE','8000',430),
+        ('CHURCH','8310','Worship & Music Ministry','EXPENSE','8300',431),
+        ('CHURCH','8320','Christian Education / Sunday School','EXPENSE','8300',432),
+        ('CHURCH','8330','Youth Ministry','EXPENSE','8300',433),
+        ('CHURCH','8340','Missions & Benevolence','EXPENSE','8300',434),
+        ('CHURCH','8350','Outreach & Evangelism','EXPENSE','8300',435),
+        ('CHURCH','8400','Administrative Expenses','EXPENSE','8000',440),
+        ('CHURCH','8410','Office Supplies','EXPENSE','8400',441),
+        ('CHURCH','8420','Postage & Shipping','EXPENSE','8400',442),
+        ('CHURCH','8430','Printing & Copying','EXPENSE','8400',443),
+        ('CHURCH','8440','Software & Technology','EXPENSE','8400',444),
+        ('CHURCH','8500','Professional Services','EXPENSE','8000',450),
+        ('CHURCH','8510','Accounting & Audit','EXPENSE','8500',451),
+        ('CHURCH','8520','Legal Fees','EXPENSE','8500',452),
+        ('CHURCH','8600','Denominational Dues & Assessments','EXPENSE','8000',460),
+        ('CHURCH','8700','Travel & Transportation','EXPENSE','8000',470),
+        ('CHURCH','8800','Fundraising & Event Expenses','EXPENSE','8000',480),
+        ('CHURCH','8900','Depreciation','EXPENSE','8000',490),
+        ('CHURCH','8990','Miscellaneous Expenses','EXPENSE','8000',499)
+      ON CONFLICT (organization_type, code) DO NOTHING;
+    `);
+
+    console.log("Schema check: coa_templates organization_type + CHURCH template OK");
+  } catch (err: any) {
+    console.error("Schema migration error (coa_templates organization_type):", err.message);
+  }
   // Backfill: add any missing default COA accounts to companies that were seeded before the full COA was introduced
   try {
     await pool.query(`

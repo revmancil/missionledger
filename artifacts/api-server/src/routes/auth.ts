@@ -292,7 +292,7 @@ router.post("/register", async (req, res) => {
     await getOrCreateDefaultAccounts(company.id);
 
     const { seedChartOfAccounts } = await import("./chart-of-accounts");
-    await seedChartOfAccounts(company.id);
+    await seedChartOfAccounts(company.id, organizationType);
 
     const { funds } = await import("@workspace/db");
     await db.insert(funds).values({

@@ -14,7 +14,7 @@ function hasDeliverableEmail(email: string): boolean {
   return e.includes("@") && !e.endsWith("@local.missionledger");
 }
 
-type UiRole = "PRIMARY_ADMIN" | "ADMIN" | "USER" | "BOARD";
+type UiRole = "PRIMARY_ADMIN" | "ADMIN" | "USER" | "BOARD" | "PASTOR";
 
 type ManagedUser = {
   id: string;
@@ -27,7 +27,7 @@ type ManagedUser = {
   isActive: boolean;
 };
 
-const ROLE_OPTIONS: UiRole[] = ["PRIMARY_ADMIN", "ADMIN", "USER", "BOARD"];
+const ROLE_OPTIONS: UiRole[] = ["PRIMARY_ADMIN", "ADMIN", "PASTOR", "USER", "BOARD"];
 
 type CompanyFormState = {
   name: string;

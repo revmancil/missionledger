@@ -167,7 +167,8 @@ export async function requireAuth<P = RouteParams>(req: Request<P>, res: Respons
 
 export function requireAdmin<P = RouteParams>(req: Request<P>, res: Response, next: NextFunction): void {
   const user = (req as any).user as AuthUser;
-  if (user?.role !== "ADMIN" && user?.role !== "MASTER_ADMIN") {
+  // PASTOR is admin-equivalent — the church-org counterpart to ADMIN, not a lesser role.
+  if (user?.role !== "ADMIN" && user?.role !== "MASTER_ADMIN" && user?.role !== "PASTOR") {
     res.status(403).json({ error: "Forbidden" });
     return;
   }

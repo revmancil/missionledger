@@ -13,7 +13,13 @@ async function apiFetch(path: string, options?: RequestInit) {
   return data;
 }
 
-type CoaEntry = { code: string; name: string; type: string; parent_code?: string; sort_order: number };
+type CoaEntry = { organization_type: string; code: string; name: string; type: string; parent_code?: string; sort_order: number };
+
+const ORG_TYPES = [
+  { value: "NONPROFIT", label: "Nonprofit" },
+  { value: "CHURCH", label: "Church" },
+  { value: "MEMBERSHIP", label: "Membership Org" },
+] as const;
 
 const TYPES = ["ASSET", "LIABILITY", "EQUITY", "INCOME", "EXPENSE"] as const;
 const TYPE_COLORS: Record<string, string> = {
@@ -26,6 +32,7 @@ const TYPE_COLORS: Record<string, string> = {
 
 export default function AdminGlobalCoaPage() {
   const [, setLocation] = useLocation();
+  const [orgType, setOrgType] = useState<string>("NONPROFIT");
   const [entries, setEntries] = useState<CoaEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving]   = useState<string | null>(null);
@@ -49,12 +56,12 @@ export default function AdminGlobalCoaPage() {
   async function load() {
     setLoading(true);
     try {
-      const data = await apiFetch("/api/master-admin/global-coa");
+      const data = await apiFetch(`/api/master-admin/global-coa?organizationType=${encodeURIComponent(orgType)}`);
       setEntries(data);
     } catch { } finally { setLoading(false); }
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [orgType]);
 
   async function handleSaveEntry(e: React.FormEvent) {
     e.preventDefault();
@@ -65,7 +72,7 @@ export default function AdminGlobalCoaPage() {
       await apiFetch("/api/master-admin/global-coa", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: form.code.trim(), name: form.name.trim(), type: form.type, parentCode: form.parentCode.trim() || undefined }),
+        body: JSON.stringify({ code: form.code.trim(), name: form.name.trim(), type: form.type, parentCode: form.parentCode.trim() || undefined, organizationType: orgType }),
       });
       setForm({ code: "", name: "", type: "ASSET", parentCode: "" });
       setShowAdd(false);
@@ -74,10 +81,10 @@ export default function AdminGlobalCoaPage() {
   }
 
   async function handleDelete(code: string) {
-    if (!confirm(`Remove "${code}" from the default COA template? This only affects new signups.`)) return;
+    if (!confirm(`Remove "${code}" from the ${orgType} COA template? This only affects new signups.`)) return;
     setDeleting(code);
     try {
-      await apiFetch(`/api/master-admin/global-coa/${encodeURIComponent(code)}`, { method: "DELETE" });
+      await apiFetch(`/api/master-admin/global-coa/${encodeURIComponent(orgType)}/${encodeURIComponent(code)}`, { method: "DELETE" });
       await load();
     } catch { } finally { setDeleting(null); }
   }
@@ -95,9 +102,27 @@ export default function AdminGlobalCoaPage() {
         <div className="flex items-start gap-3 p-4 rounded-xl border border-blue-800/50 bg-blue-950/30 text-sm text-blue-300">
           <BookOpen className="h-4 w-4 shrink-0 mt-0.5 text-blue-400" />
           <div>
-            <strong>Global Chart of Accounts Template</strong> — These accounts are automatically copied to every new organization on signup.
-            Changes here do <em>not</em> affect existing organizations. Add, remove, or rename entries as needed for new nonprofits.
+            <strong>Chart of Accounts Templates</strong> — each organization type below has its own starting template, copied onto every
+            new signup of that type. Changes here do <em>not</em> affect already-existing organizations.
           </div>
+        </div>
+
+        {/* Org type tabs */}
+        <div className="flex gap-1 border-b border-slate-800">
+          {ORG_TYPES.map(t => (
+            <button
+              key={t.value}
+              onClick={() => setOrgType(t.value)}
+              className={cn(
+                "px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors",
+                orgType === t.value
+                  ? "border-emerald-500 text-emerald-400"
+                  : "border-transparent text-slate-500 hover:text-slate-300",
+              )}
+            >
+              {t.label}
+            </button>
+          ))}
         </div>
 
         {/* Add entry */}

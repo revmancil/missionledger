@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, chartOfAccounts } from "@workspace/db";
+import { db, chartOfAccounts, coaTemplates } from "@workspace/db";
 import { eq, asc, sql, and } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
 import { toIsoString, parseYmdToUtcDayBounds, utcYmdToday } from "../lib/safeIso";
@@ -132,7 +132,18 @@ export const DEFAULT_COA: Array<{
   { code: "8990", name: "Miscellaneous Expenses",      type: "EXPENSE", isSystem: true, sortOrder: 499 },
 ];
 
-export async function seedChartOfAccounts(companyId: string): Promise<void> {
+type SeedAccount = {
+  code: string;
+  name: string;
+  type: "ASSET" | "LIABILITY" | "EQUITY" | "INCOME" | "EXPENSE";
+  description?: string | null;
+  isSystem?: boolean;
+  sortOrder?: number;
+  parentCode?: string | null;
+};
+
+/** organizationType mirrors companies.organization_type; "NONPROFIT"/"MEMBERSHIP" both fall back to the nonprofit template. */
+export async function seedChartOfAccounts(companyId: string, organizationType?: string): Promise<void> {
   const existing = await db
     .select({ id: chartOfAccounts.id })
     .from(chartOfAccounts)
@@ -141,8 +152,32 @@ export async function seedChartOfAccounts(companyId: string): Promise<void> {
 
   if (existing.length > 0) return; // already seeded
 
+  const wantedType = organizationType === "CHURCH" ? "CHURCH" : "NONPROFIT";
+
+  let template: SeedAccount[] = [];
+  try {
+    const rows = await db
+      .select()
+      .from(coaTemplates)
+      .where(eq(coaTemplates.organizationType, wantedType as any))
+      .orderBy(asc(coaTemplates.sortOrder));
+    template = rows.map((r) => ({
+      code: r.code,
+      name: r.name,
+      type: r.type,
+      sortOrder: r.sortOrder,
+      parentCode: r.parentCode,
+    }));
+  } catch (err) {
+    console.error("[seedChartOfAccounts] coa_templates query failed, falling back to hardcoded DEFAULT_COA:", err);
+  }
+
+  // Defensive fallback so a signup never ends up with zero accounts: an empty/missing
+  // coa_templates table (fresh DB before the admin seeds it, or a query failure).
+  if (template.length === 0) template = DEFAULT_COA;
+
   const codeToId: Record<string, string> = {};
-  for (const acct of DEFAULT_COA) {
+  for (const acct of template) {
     const [created] = await db
       .insert(chartOfAccounts)
       .values({
@@ -160,7 +195,7 @@ export async function seedChartOfAccounts(companyId: string): Promise<void> {
     codeToId[acct.code] = created.id;
   }
 
-  for (const acct of DEFAULT_COA) {
+  for (const acct of template) {
     if (!acct.parentCode) continue;
     const id = codeToId[acct.code];
     const pid = codeToId[acct.parentCode];

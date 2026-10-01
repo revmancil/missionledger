@@ -17,6 +17,7 @@ import {
 import { AppLayout } from "@/components/layout/AppLayout";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
+import { givingNavLabel, givingStatementTitle } from "@/lib/org-terminology";
 import { toast } from "sonner";
 
 async function apiFetch(path: string, opts?: RequestInit): Promise<Response> {
@@ -101,7 +102,7 @@ function useDonorYears() {
 }
 
 /* ─── Print Statement ──────────────────────────────────────────────────── */
-function buildStatementHtml(donor: DonorSummary, gifts: GiftRecord[], year: string, orgName: string) {
+function buildStatementHtml(donor: DonorSummary, gifts: GiftRecord[], year: string, orgName: string, organizationType?: string | null) {
   const yearLabel = year && year !== "all" ? `Year ${year}` : "All Time";
   const rows = gifts.map(g => `
     <tr>
@@ -130,7 +131,7 @@ function buildStatementHtml(donor: DonorSummary, gifts: GiftRecord[], year: stri
       @media print { body { padding: 20px; } }
     </style>
     </head><body>
-    <h1>Donor Giving Statement</h1>
+    <h1>${givingStatementTitle(organizationType)}</h1>
     <div class="org">${orgName} &bull; ${yearLabel}</div>
     <div class="meta">
       <div><label>Donor</label><br/><span>${donor.donorName}</span></div>
@@ -155,8 +156,8 @@ function buildStatementHtml(donor: DonorSummary, gifts: GiftRecord[], year: stri
     </body></html>`;
 }
 
-function printStatement(donor: DonorSummary, gifts: GiftRecord[], year: string, orgName: string) {
-  const html = buildStatementHtml(donor, gifts, year, orgName);
+function printStatement(donor: DonorSummary, gifts: GiftRecord[], year: string, orgName: string, organizationType?: string | null) {
+  const html = buildStatementHtml(donor, gifts, year, orgName, organizationType);
 
   // Use a hidden iframe to print — works even when popup windows are blocked
   const iframe = document.createElement("iframe");
@@ -188,8 +189,8 @@ function printStatement(donor: DonorSummary, gifts: GiftRecord[], year: string, 
   };
 }
 
-function downloadStatement(donor: DonorSummary, gifts: GiftRecord[], year: string, orgName: string) {
-  const html = buildStatementHtml(donor, gifts, year, orgName);
+function downloadStatement(donor: DonorSummary, gifts: GiftRecord[], year: string, orgName: string, organizationType?: string | null) {
+  const html = buildStatementHtml(donor, gifts, year, orgName, organizationType);
   const blob = new Blob([html], { type: "text/html" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -315,7 +316,7 @@ function MergeDonorsDialog({
 
 /* ─── Donor Row ─────────────────────────────────────────────────────────── */
 function DonorRow({
-  donor, rank, expanded, onToggle, year, orgName, isAdmin, onMergeFromName,
+  donor, rank, expanded, onToggle, year, orgName, organizationType, isAdmin, onMergeFromName,
 }: {
   donor: DonorSummary;
   rank: number;
@@ -323,6 +324,7 @@ function DonorRow({
   onToggle: () => void;
   year: string;
   orgName: string;
+  organizationType?: string | null;
   isAdmin: boolean;
   onMergeFromName: (name: string) => void;
 }) {
@@ -372,7 +374,7 @@ function DonorRow({
               onClick={(e) => {
                 e.stopPropagation();
                 if (history) {
-                  printStatement(donor, history, year, orgName);
+                  printStatement(donor, history, year, orgName, organizationType);
                 } else {
                   // Expand the row to load history first, then the user can print from the expanded view
                   onToggle();
@@ -441,7 +443,7 @@ function DonorRow({
                     size="sm"
                     variant="outline"
                     className="h-7 text-xs gap-1.5"
-                    onClick={() => downloadStatement(donor, history, year, orgName)}
+                    onClick={() => downloadStatement(donor, history, year, orgName, organizationType)}
                     title="Download as HTML file — open in browser then print"
                   >
                     <Download className="h-3.5 w-3.5" />
@@ -451,7 +453,7 @@ function DonorRow({
                     size="sm"
                     variant="outline"
                     className="h-7 text-xs gap-1.5"
-                    onClick={() => printStatement(donor, history, year, orgName)}
+                    onClick={() => printStatement(donor, history, year, orgName, organizationType)}
                   >
                     <Printer className="h-3.5 w-3.5" />
                     Print Statement
@@ -509,7 +511,7 @@ export default function DonorGivingPage() {
                 <Heart className="w-5 h-5 text-emerald-700" />
               </div>
               <div>
-                <h1 className="text-xl font-bold text-foreground">Donor Giving</h1>
+                <h1 className="text-xl font-bold text-foreground">{givingNavLabel(user?.organizationType)}</h1>
                 <p className="text-sm text-muted-foreground hidden sm:block">Track donor contributions from bank register and donation records</p>
               </div>
             </div>
@@ -634,6 +636,7 @@ export default function DonorGivingPage() {
                       onToggle={() => toggleDonor(donor.donorName)}
                       year={year}
                       orgName={orgName}
+                      organizationType={user?.organizationType}
                       isAdmin={isAdmin}
                       onMergeFromName={(name) => {
                         setMergeSeed(name);

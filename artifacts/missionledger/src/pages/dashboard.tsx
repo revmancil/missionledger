@@ -15,6 +15,7 @@ import { authJsonFetch, readJsonSafe, logApiFailure } from "@/lib/auth-fetch";
 import { useLocation } from "wouter";
 import { useFinancialSync } from "@/lib/financial-sync";
 import { Link } from "wouter";
+import { useAuth } from "@/hooks/use-auth";
 
 const BASE = import.meta.env.BASE_URL;
 
@@ -182,6 +183,8 @@ interface Readiness990 {
 export default function Dashboard() {
   const [, navigate] = useLocation();
   const { version } = useFinancialSync();
+  const { user } = useAuth();
+  const is990Applicable = user?.organizationType !== "CHURCH";
   const [data, setData] = useState<DashData | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
@@ -237,14 +240,16 @@ export default function Dashboard() {
     try {
       const [dashRes, readRes] = await Promise.all([
         authJsonFetch("api/dashboard"),
-        authJsonFetch("api/reports/990-readiness"),
+        is990Applicable ? authJsonFetch("api/reports/990-readiness") : Promise.resolve(null),
       ]);
       if (dashRes.ok) setData(await dashRes.json());
       else logApiFailure("/api/dashboard", dashRes, await readJsonSafe(dashRes));
-      if (readRes.ok) setReadiness(await readRes.json());
-      else logApiFailure("/api/reports/990-readiness", readRes, await readJsonSafe(readRes));
+      if (readRes) {
+        if (readRes.ok) setReadiness(await readRes.json());
+        else logApiFailure("/api/reports/990-readiness", readRes, await readJsonSafe(readRes));
+      }
     } finally { setLoading(false); }
-  }, []);
+  }, [is990Applicable]);
 
   const handleGlobalSync = useCallback(async () => {
     setSyncing(true);

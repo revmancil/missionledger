@@ -17,17 +17,19 @@ function assertExpectedCompany(req: any, actualCompanyId: string): string | null
   return null;
 }
 
-function mapLegacyRoleToUi(role: string | null | undefined): "PRIMARY_ADMIN" | "ADMIN" | "USER" | "BOARD" {
+function mapLegacyRoleToUi(role: string | null | undefined): "PRIMARY_ADMIN" | "ADMIN" | "USER" | "BOARD" | "PASTOR" {
   if (role === "MASTER_ADMIN") return "PRIMARY_ADMIN";
   if (role === "ADMIN") return "ADMIN";
   if (role === "OFFICER") return "BOARD";
+  if (role === "PASTOR") return "PASTOR";
   return "USER";
 }
 
-function mapUiRoleToLegacy(role: string | null | undefined): "MASTER_ADMIN" | "ADMIN" | "VIEWER" | "OFFICER" {
+function mapUiRoleToLegacy(role: string | null | undefined): "MASTER_ADMIN" | "ADMIN" | "VIEWER" | "OFFICER" | "PASTOR" {
   if (role === "PRIMARY_ADMIN") return "MASTER_ADMIN";
   if (role === "ADMIN") return "ADMIN";
   if (role === "BOARD") return "OFFICER";
+  if (role === "PASTOR") return "PASTOR";
   return "VIEWER";
 }
 

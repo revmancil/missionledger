@@ -103,13 +103,6 @@ export async function seedPlatformAdmin() {
 
       console.log(`[seed] Created platform admin: ${ADMIN_EMAIL}`);
     }
-
-    // 3. Also promote any existing user named Mancil Carroll to platform admin
-    await db
-      .update(users)
-      .set({ isPlatformAdmin: true, role: "MASTER_ADMIN" })
-      .where(eq(users.name, ADMIN_NAME));
-
   } catch (err) {
     console.error("[seed] Platform admin seed error:", err);
   }

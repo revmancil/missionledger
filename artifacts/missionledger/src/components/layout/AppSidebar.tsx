@@ -20,6 +20,7 @@ import { Badge } from "@/components/ui/badge";
 import { useState } from "react";
 import { toast } from "sonner";
 import { ChangePasswordDialog } from "@/components/ChangePasswordDialog";
+import { givingNavLabel } from "@/lib/org-terminology";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -252,7 +253,7 @@ export function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
                     )}
                   >
                     <item.icon className={cn("w-5 h-5 shrink-0", isActive ? "text-primary" : "text-muted-foreground")} />
-                    {item.label}
+                    {item.href === "/donor-giving" ? givingNavLabel(user?.organizationType) : item.label}
                   </Link>
                 );
               })}

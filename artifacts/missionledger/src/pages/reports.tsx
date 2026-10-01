@@ -844,7 +844,10 @@ export default function ReportsPage() {
           { id: "gl",        label: "General Ledger",       icon: <BookOpen className="w-3.5 h-3.5" /> },
           { id: "journal",   label: "General Journal",      icon: <FileText className="w-3.5 h-3.5" /> },
           { id: "register",  label: "Transaction Register", icon: <Table2 className="w-3.5 h-3.5" /> },
-          { id: "prep990",   label: "990 Prep",             icon: <ShieldCheck className="w-3.5 h-3.5" /> },
+          // Form 990 is an IRS nonprofit filing; churches generally don't file it.
+          ...(user?.organizationType !== "CHURCH"
+            ? [{ id: "prep990" as const, label: "990 Prep", icon: <ShieldCheck className="w-3.5 h-3.5" /> }]
+            : []),
         ] as { id: Tab; label: string; icon: React.ReactNode }[]).map(t => (
           <button
             key={t.id}
