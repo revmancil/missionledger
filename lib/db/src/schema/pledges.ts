@@ -10,6 +10,8 @@ export const pledges = pgTable("pledges", {
   companyId: text("company_id").notNull(),
   donorName: text("donor_name").notNull(),
   donorEmail: text("donor_email"),
+  donorId: text("donor_id"),
+  campaignId: text("campaign_id"),
   totalAmount: numeric("total_amount", { precision: 15, scale: 2, mode: "number" }).notNull().$type<number>(),
   paidAmount: numeric("paid_amount", { precision: 15, scale: 2, mode: "number" }).notNull().default(0).$type<number>(),
   pledgeDate: timestamp("pledge_date").notNull(),

@@ -9,6 +9,8 @@
 export interface CreatePledgeRequest {
   donorName: string;
   donorEmail?: string;
+  donorId?: string;
+  campaignId?: string;
   totalAmount: number;
   pledgeDate: string;
   startDate?: string;

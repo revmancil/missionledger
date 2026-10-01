@@ -63,6 +63,19 @@ interface GiftRecord {
   source: "bank_register" | "donation_record";
 }
 
+interface GiverInfo {
+  id: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  address: string | null;
+}
+
+interface DonorHistoryResponse {
+  giver: GiverInfo | null;
+  gifts: GiftRecord[];
+}
+
 function useDonors(year: string) {
   return useQuery<DonorSummary[]>({
     queryKey: ["donors", year],
@@ -78,7 +91,7 @@ function useDonors(year: string) {
 }
 
 function useDonorHistory(donorName: string | null, year: string) {
-  return useQuery<GiftRecord[]>({
+  return useQuery<DonorHistoryResponse>({
     queryKey: ["donor-history", donorName, year],
     enabled: !!donorName,
     queryFn: async () => {
@@ -102,7 +115,7 @@ function useDonorYears() {
 }
 
 /* ─── Print Statement ──────────────────────────────────────────────────── */
-function buildStatementHtml(donor: DonorSummary, gifts: GiftRecord[], year: string, orgName: string, organizationType?: string | null) {
+function buildStatementHtml(donor: DonorSummary, gifts: GiftRecord[], year: string, orgName: string, organizationType?: string | null, giver?: GiverInfo | null) {
   const yearLabel = year && year !== "all" ? `Year ${year}` : "All Time";
   const rows = gifts.map(g => `
     <tr>
@@ -133,6 +146,7 @@ function buildStatementHtml(donor: DonorSummary, gifts: GiftRecord[], year: stri
     </head><body>
     <h1>${givingStatementTitle(organizationType)}</h1>
     <div class="org">${orgName} &bull; ${yearLabel}</div>
+    ${giver?.address ? `<div style="font-size:13px;color:#555;margin-bottom:16px;">${giver.address}</div>` : ""}
     <div class="meta">
       <div><label>Donor</label><br/><span>${donor.donorName}</span></div>
       <div><label>Total Given</label><br/><span>${fmt(donor.totalGiven)}</span></div>
@@ -156,8 +170,8 @@ function buildStatementHtml(donor: DonorSummary, gifts: GiftRecord[], year: stri
     </body></html>`;
 }
 
-function printStatement(donor: DonorSummary, gifts: GiftRecord[], year: string, orgName: string, organizationType?: string | null) {
-  const html = buildStatementHtml(donor, gifts, year, orgName, organizationType);
+function printStatement(donor: DonorSummary, gifts: GiftRecord[], year: string, orgName: string, organizationType?: string | null, giver?: GiverInfo | null) {
+  const html = buildStatementHtml(donor, gifts, year, orgName, organizationType, giver);
 
   // Use a hidden iframe to print — works even when popup windows are blocked
   const iframe = document.createElement("iframe");
@@ -189,8 +203,8 @@ function printStatement(donor: DonorSummary, gifts: GiftRecord[], year: string, 
   };
 }
 
-function downloadStatement(donor: DonorSummary, gifts: GiftRecord[], year: string, orgName: string, organizationType?: string | null) {
-  const html = buildStatementHtml(donor, gifts, year, orgName, organizationType);
+function downloadStatement(donor: DonorSummary, gifts: GiftRecord[], year: string, orgName: string, organizationType?: string | null, giver?: GiverInfo | null) {
+  const html = buildStatementHtml(donor, gifts, year, orgName, organizationType, giver);
   const blob = new Blob([html], { type: "text/html" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -328,7 +342,9 @@ function DonorRow({
   isAdmin: boolean;
   onMergeFromName: (name: string) => void;
 }) {
-  const { data: history, isLoading } = useDonorHistory(expanded ? donor.donorName : null, year);
+  const { data: historyData, isLoading } = useDonorHistory(expanded ? donor.donorName : null, year);
+  const history = historyData?.gifts;
+  const giver = historyData?.giver;
 
   return (
     <>
@@ -374,7 +390,7 @@ function DonorRow({
               onClick={(e) => {
                 e.stopPropagation();
                 if (history) {
-                  printStatement(donor, history, year, orgName, organizationType);
+                  printStatement(donor, history, year, orgName, organizationType, giver);
                 } else {
                   // Expand the row to load history first, then the user can print from the expanded view
                   onToggle();
@@ -443,7 +459,7 @@ function DonorRow({
                     size="sm"
                     variant="outline"
                     className="h-7 text-xs gap-1.5"
-                    onClick={() => downloadStatement(donor, history, year, orgName, organizationType)}
+                    onClick={() => downloadStatement(donor, history, year, orgName, organizationType, giver)}
                     title="Download as HTML file — open in browser then print"
                   >
                     <Download className="h-3.5 w-3.5" />
@@ -453,7 +469,7 @@ function DonorRow({
                     size="sm"
                     variant="outline"
                     className="h-7 text-xs gap-1.5"
-                    onClick={() => printStatement(donor, history, year, orgName, organizationType)}
+                    onClick={() => printStatement(donor, history, year, orgName, organizationType, giver)}
                   >
                     <Printer className="h-3.5 w-3.5" />
                     Print Statement

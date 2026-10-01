@@ -1733,6 +1733,12 @@ components:
         donorEmail:
           type: string
           nullable: true
+        donorId:
+          type: string
+          nullable: true
+        campaignId:
+          type: string
+          nullable: true
         totalAmount:
           type: number
         pledgeDate:
@@ -1767,6 +1773,10 @@ components:
         donorName:
           type: string
         donorEmail:
+          type: string
+        donorId:
+          type: string
+        campaignId:
           type: string
         totalAmount:
           type: number

@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { requireAuth, requireAdmin } from "../lib/auth";
-import { pool } from "@workspace/db";
+import { pool, db, donors } from "@workspace/db";
+import { eq, and, ilike } from "drizzle-orm";
 
 const router = Router();
 
@@ -250,10 +251,21 @@ router.get("/:name/history", requireAuth, async (req, res) => {
       ORDER BY date DESC
     `, [companyId, donorName]);
 
-    res.json(rows.map(r => ({
-      ...r,
-      date: r.date instanceof Date ? r.date.toISOString() : r.date,
-    })));
+    // Prefer the real directory record's contact info on the statement when one
+    // exists for this name — falls back to nothing (just the name) otherwise.
+    const [giver] = await db
+      .select({ id: donors.id, name: donors.name, email: donors.email, phone: donors.phone, address: donors.address })
+      .from(donors)
+      .where(and(eq(donors.companyId, companyId), ilike(donors.name, donorName)))
+      .limit(1);
+
+    res.json({
+      giver: giver ?? null,
+      gifts: rows.map(r => ({
+        ...r,
+        date: r.date instanceof Date ? r.date.toISOString() : r.date,
+      })),
+    });
   } catch (error: any) {
     console.error("Get donor history error:", error);
     res.status(500).json({ error: "Internal server error" });

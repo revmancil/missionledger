@@ -32,6 +32,8 @@ import passwordResetRouter from "./password-reset";
 import customReportsRouter from "./custom-reports";
 import zeffyRouter from "./zeffy";
 import boardReportRouter from "./board-report";
+import donorDirectoryRouter from "./donor-directory";
+import pledgeCampaignsRouter from "./pledge-campaigns";
 import { authLimiter } from "../lib/rateLimiters";
 
 const router: IRouter = Router();
@@ -69,5 +71,7 @@ router.use("/auth", authLimiter, passwordResetRouter);
 router.use("/custom-reports", customReportsRouter);
 router.use("/zeffy", zeffyRouter);
 router.use("/board-report", boardReportRouter);
+router.use("/donor-directory", donorDirectoryRouter);
+router.use("/pledge-campaigns", pledgeCampaignsRouter);
 
 export default router;

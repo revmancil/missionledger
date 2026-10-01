@@ -26,13 +26,15 @@ router.get("/", requireAuth, async (req, res) => {
 router.post("/", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
-    const { donorName, donorEmail, totalAmount, pledgeDate, startDate, endDate, frequency, fundId, notes } = req.body ?? {};
+    const { donorName, donorEmail, donorId, campaignId, totalAmount, pledgeDate, startDate, endDate, frequency, fundId, notes } = req.body ?? {};
     if (!donorName || !totalAmount || !pledgeDate) return void res.status(400).json({ error: "Missing required fields" });
 
     const [created] = await db.insert(pledges).values({
       companyId,
       donorName,
       donorEmail: donorEmail || null,
+      donorId: donorId || null,
+      campaignId: campaignId || null,
       totalAmount: parseFloat(totalAmount),
       paidAmount: 0,
       pledgeDate: new Date(pledgeDate),
@@ -61,11 +63,13 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
 router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
-    const { donorName, donorEmail, totalAmount, pledgeDate, startDate, endDate, frequency, fundId, status, notes } = req.body ?? {};
+    const { donorName, donorEmail, donorId, campaignId, totalAmount, pledgeDate, startDate, endDate, frequency, fundId, status, notes } = req.body ?? {};
 
     const [updated] = await db.update(pledges).set({
       donorName,
       donorEmail: donorEmail || null,
+      donorId: donorId !== undefined ? (donorId || null) : undefined,
+      campaignId: campaignId !== undefined ? (campaignId || null) : undefined,
       totalAmount: totalAmount ? parseFloat(totalAmount) : undefined,
       pledgeDate: pledgeDate ? new Date(pledgeDate) : undefined,
       startDate: startDate ? new Date(startDate) : null,

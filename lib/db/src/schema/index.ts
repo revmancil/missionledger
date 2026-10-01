@@ -7,6 +7,8 @@ export * from "./expenses";
 export * from "./vendors";
 export * from "./bills";
 export * from "./pledges";
+export * from "./donors";
+export * from "./pledgeCampaigns";
 export * from "./journalEntries";
 export * from "./bankAccounts";
 export * from "./bankTransactions";

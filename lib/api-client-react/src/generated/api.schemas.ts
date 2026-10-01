@@ -243,6 +243,8 @@ export interface Pledge {
   id: string;
   donorName: string;
   donorEmail?: string | null;
+  donorId?: string | null;
+  campaignId?: string | null;
   totalAmount: number;
   pledgeDate: string;
   startDate?: string | null;
@@ -259,6 +261,8 @@ export interface Pledge {
 export interface CreatePledgeRequest {
   donorName: string;
   donorEmail?: string;
+  donorId?: string;
+  campaignId?: string;
   totalAmount: number;
   pledgeDate: string;
   startDate?: string;

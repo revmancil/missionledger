@@ -27,6 +27,7 @@ import PeriodClosePage from "@/pages/period-close";
 import ReportsPage from "@/pages/reports";
 import CustomReportsPage from "@/pages/custom-reports";
 import DonorGivingPage from "@/pages/donor-giving";
+import DonorDirectoryPage from "@/pages/donor-directory";
 import BillingPage from "@/pages/billing";
 import ForgotPasswordPage from "@/pages/auth/forgot-password";
 import ResetPasswordPage from "@/pages/auth/reset-password";
@@ -141,6 +142,7 @@ function Router() {
       <Route path="/budget"><SubscriptionGatedRoute component={BudgetPage} /></Route>
       <Route path="/board-report"><SubscriptionGatedRoute component={BoardReportPage} /></Route>
       <Route path="/donor-giving"><SubscriptionGatedRoute component={DonorGivingPage} /></Route>
+      <Route path="/donor-directory"><SubscriptionGatedRoute component={DonorDirectoryPage} /></Route>
       <Route path="/master-admin"><Redirect to="/admin" /></Route>
       <Route path="/billing"><ProtectedRoute component={BillingPage} /></Route>
       <Route path="/admin-users"><SubscriptionGatedRoute component={AdminUsersPage} /></Route>

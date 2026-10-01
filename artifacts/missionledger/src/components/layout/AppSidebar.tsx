@@ -4,7 +4,7 @@ import {
   HandHeart, LogOut, BarChart3, Building,
   Banknote, ClipboardList, RefreshCcw, Wand2, Scale, CalendarCheck,
   ChevronDown, ArrowLeftRight, Shield, AlertTriangle, CheckCircle2,
-  CreditCard, PenLine, X, Heart, Target, SlidersHorizontal, Presentation,
+  CreditCard, PenLine, X, Heart, Target, SlidersHorizontal, Presentation, Users,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
@@ -20,7 +20,7 @@ import { Badge } from "@/components/ui/badge";
 import { useState } from "react";
 import { toast } from "sonner";
 import { ChangePasswordDialog } from "@/components/ChangePasswordDialog";
-import { givingNavLabel } from "@/lib/org-terminology";
+import { givingNavLabel, giverDirectoryLabel } from "@/lib/org-terminology";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -40,6 +40,7 @@ const navGroups = [
     items: [
       { href: "/pledges", label: "Pledges", icon: HandHeart },
       { href: "/donor-giving", label: "Donor Giving", icon: Heart },
+      { href: "/donor-directory", label: "Givers Directory", icon: Users },
     ]
   },
   {
@@ -89,6 +90,7 @@ export function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
     "/budget",
     "/pledges",
     "/donor-giving",
+    "/donor-directory",
     "/vendors",
   ]);
 
@@ -253,7 +255,11 @@ export function AppSidebar({ isOpen, onClose }: AppSidebarProps) {
                     )}
                   >
                     <item.icon className={cn("w-5 h-5 shrink-0", isActive ? "text-primary" : "text-muted-foreground")} />
-                    {item.href === "/donor-giving" ? givingNavLabel(user?.organizationType) : item.label}
+                    {item.href === "/donor-giving"
+                      ? givingNavLabel(user?.organizationType)
+                      : item.href === "/donor-directory"
+                        ? giverDirectoryLabel(user?.organizationType)
+                        : item.label}
                   </Link>
                 );
               })}

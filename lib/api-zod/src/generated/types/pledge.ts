@@ -10,6 +10,8 @@ export interface Pledge {
   id: string;
   donorName: string;
   donorEmail?: string | null;
+  donorId?: string | null;
+  campaignId?: string | null;
   totalAmount: number;
   pledgeDate: string;
   startDate?: string | null;

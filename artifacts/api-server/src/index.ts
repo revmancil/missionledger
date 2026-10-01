@@ -606,6 +606,45 @@ async function ensureSchema() {
     `CREATE UNIQUE INDEX IF NOT EXISTS password_reset_tokens_token_unique ON password_reset_tokens (token)`,
   );
 
+  // Giver/member directory (Phase 2) — a real donor entity, separate from the
+  // free-text donorName fields on donations/pledges, which stay as-is.
+  await ensureAlter(
+    "donors table",
+    `CREATE TABLE IF NOT EXISTS donors (
+      id TEXT PRIMARY KEY NOT NULL,
+      company_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      email TEXT,
+      phone TEXT,
+      address TEXT,
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      notes TEXT,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+    )`,
+  );
+  await ensureAlter("donations.donor_id", `ALTER TABLE donations ADD COLUMN IF NOT EXISTS donor_id TEXT`);
+  await ensureAlter("pledges.donor_id", `ALTER TABLE pledges ADD COLUMN IF NOT EXISTS donor_id TEXT`);
+
+  // Pledge/giving campaigns (Phase 3) — a named goal individual pledges can roll up under.
+  await ensureAlter(
+    "pledge_campaigns table",
+    `CREATE TABLE IF NOT EXISTS pledge_campaigns (
+      id TEXT PRIMARY KEY NOT NULL,
+      company_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT,
+      fund_id TEXT,
+      goal_amount NUMERIC(15,2) NOT NULL,
+      start_date TIMESTAMP,
+      end_date TIMESTAMP,
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+    )`,
+  );
+  await ensureAlter("pledges.campaign_id", `ALTER TABLE pledges ADD COLUMN IF NOT EXISTS campaign_id TEXT`);
+
   try {
     await pool.query(`ALTER TYPE "role" ADD VALUE IF NOT EXISTS 'OFFICER'`);
     console.log("Schema check: role.OFFICER OK");

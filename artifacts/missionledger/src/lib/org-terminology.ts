@@ -14,3 +14,7 @@ export function givingNavLabel(organizationType: string | null | undefined): str
 export function givingStatementTitle(organizationType: string | null | undefined): string {
   return isChurchOrg(organizationType) ? "Giving Statement" : "Donor Giving Statement";
 }
+
+export function giverDirectoryLabel(organizationType: string | null | undefined): string {
+  return isChurchOrg(organizationType) ? "Members & Givers" : "Givers Directory";
+}

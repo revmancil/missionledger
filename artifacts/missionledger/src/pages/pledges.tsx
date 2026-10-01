@@ -1,14 +1,17 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { useGetPledges, useCreatePledge, useDeletePledge } from "@workspace/api-client-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatCurrency, formatDate } from "@/lib/utils";
-import { Plus, Trash2, Search, HandHeart } from "lucide-react";
+import { Plus, Trash2, Search, HandHeart, Target } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { useGetFunds } from "@workspace/api-client-react";
+import { GiverCombobox } from "@/components/GiverCombobox";
+import { authJsonFetch, readJsonSafe } from "@/lib/auth-fetch";
+import { CampaignsPanel } from "@/components/CampaignsPanel";
 
 const STATUS_COLORS: Record<string, string> = {
   ACTIVE: "bg-blue-100 text-blue-700",
@@ -17,6 +20,12 @@ const STATUS_COLORS: Record<string, string> = {
   DEFAULTED: "bg-red-100 text-red-700",
 };
 
+interface CampaignOption {
+  id: string;
+  name: string;
+  isActive: boolean;
+}
+
 export default function PledgesPage() {
   const { data: pledges = [], isLoading } = useGetPledges();
   const createPledge = useCreatePledge();
@@ -24,6 +33,15 @@ export default function PledgesPage() {
   const { data: funds = [] } = useGetFunds();
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const [campaignOptions, setCampaignOptions] = useState<CampaignOption[]>([]);
+  const [campaignsRefreshKey, setCampaignsRefreshKey] = useState(0);
+
+  useEffect(() => {
+    authJsonFetch("/api/pledge-campaigns")
+      .then((res) => (res.ok ? readJsonSafe<CampaignOption[]>(res) : null))
+      .then((data) => setCampaignOptions((data ?? []).filter((c) => c.isActive)))
+      .catch(() => {});
+  }, [campaignsRefreshKey]);
 
   const filtered = (pledges as any[]).filter((p) =>
     p.donorName.toLowerCase().includes(search.toLowerCase()) ||
@@ -38,6 +56,8 @@ export default function PledgesPage() {
         data: {
           donorName: fd.get("donorName") as string,
           donorEmail: (fd.get("donorEmail") as string) || undefined,
+          donorId: (fd.get("donorId") as string) || undefined,
+          campaignId: (fd.get("campaignId") as string) || undefined,
           totalAmount: Number(fd.get("totalAmount")),
           pledgeDate: fd.get("pledgeDate") as string,
           startDate: (fd.get("startDate") as string) || undefined,
@@ -45,7 +65,7 @@ export default function PledgesPage() {
           frequency: (fd.get("frequency") as string) || undefined,
           fundId: (fd.get("fundId") as string) || undefined,
           notes: fd.get("notes") as string,
-        },
+        } as any,
       });
       toast.success("Pledge recorded successfully");
       setOpen(false);
@@ -72,7 +92,7 @@ export default function PledgesPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-sm font-medium">Donor Name</label>
-                  <Input name="donorName" required />
+                  <GiverCombobox nameFieldName="donorName" idFieldName="donorId" required />
                 </div>
                 <div className="space-y-1">
                   <label className="text-sm font-medium">Donor Email</label>
@@ -118,6 +138,15 @@ export default function PledgesPage() {
                   </select>
                 </div>
               </div>
+              {campaignOptions.length > 0 && (
+                <div className="space-y-1">
+                  <label className="text-sm font-medium">Campaign (optional)</label>
+                  <select name="campaignId" className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
+                    <option value="">-- No Campaign --</option>
+                    {campaignOptions.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+              )}
               <div className="space-y-1">
                 <label className="text-sm font-medium">Notes</label>
                 <Input name="notes" />
@@ -131,6 +160,8 @@ export default function PledgesPage() {
           </DialogContent>
         </Dialog>
       </div>
+
+      <CampaignsPanel onChanged={() => setCampaignsRefreshKey((k) => k + 1)} />
 
       <div className="bg-card rounded-xl border border-border shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
