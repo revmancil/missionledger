@@ -587,6 +587,25 @@ async function ensureSchema() {
     `CREATE UNIQUE INDEX IF NOT EXISTS org_users_user_company_unique ON organization_users (user_id, company_id)`,
   );
 
+  // password_reset_tokens was added to the Drizzle schema but never carried over
+  // into production by any migration or this file, so /forgot-password has been
+  // failing with "relation does not exist" since the feature shipped.
+  await ensureAlter(
+    "password_reset_tokens table",
+    `CREATE TABLE IF NOT EXISTS password_reset_tokens (
+      id TEXT PRIMARY KEY NOT NULL,
+      user_id TEXT NOT NULL,
+      token TEXT NOT NULL,
+      expires_at TIMESTAMP NOT NULL,
+      used BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    )`,
+  );
+  await ensureAlter(
+    "password_reset_tokens token unique index",
+    `CREATE UNIQUE INDEX IF NOT EXISTS password_reset_tokens_token_unique ON password_reset_tokens (token)`,
+  );
+
   try {
     await pool.query(`ALTER TYPE "role" ADD VALUE IF NOT EXISTS 'OFFICER'`);
     console.log("Schema check: role.OFFICER OK");
