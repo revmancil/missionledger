@@ -285,11 +285,19 @@ export default function Dashboard() {
       const raw = sessionStorage.getItem("ml_registration_info");
       if (!raw) return;
       const parsed = JSON.parse(raw);
-      if (parsed?.companyId) setRegistrationInfo(parsed);
+      // Only show this for the company it was actually set for — otherwise it's a
+      // leftover from registering a different org earlier in the same browser tab,
+      // and logging into (or switching to) a different company afterward would
+      // keep showing it since nothing else ever clears this sessionStorage key.
+      if (parsed?.companyId && user?.companyId && parsed.companyId === user.companyId) {
+        setRegistrationInfo(parsed);
+      } else {
+        setRegistrationInfo(null);
+      }
     } catch {
       // no-op
     }
-  }, []);
+  }, [user?.companyId]);
 
   if (loading) {
     return (
