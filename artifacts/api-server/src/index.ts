@@ -878,7 +878,68 @@ async function ensureSchema() {
       ON CONFLICT (organization_type, code) DO NOTHING;
     `);
 
-    console.log("Schema check: coa_templates organization_type + CHURCH template OK");
+    // MEMBERSHIP template (associations/clubs): same backbone, income from dues/events/
+    // sponsorships rather than donations. Most of these orgs are 501(c)(7), not 501(c)(3) —
+    // no "Individual Contributions"/"Grants" framing here.
+    await pool.query(`
+      INSERT INTO coa_templates (organization_type, code, name, type, parent_code, sort_order) VALUES
+        ('MEMBERSHIP','1000','Cash & Bank Accounts','ASSET',NULL,10),
+        ('MEMBERSHIP','1010','Checking Account','ASSET','1000',11),
+        ('MEMBERSHIP','1020','Savings Account','ASSET','1000',12),
+        ('MEMBERSHIP','1100','Accounts Receivable','ASSET',NULL,20),
+        ('MEMBERSHIP','1200','Dues Receivable','ASSET',NULL,30),
+        ('MEMBERSHIP','1500','Property & Equipment','ASSET',NULL,40),
+        ('MEMBERSHIP','2000','Accounts Payable','LIABILITY',NULL,110),
+        ('MEMBERSHIP','2100','Accrued Liabilities','LIABILITY',NULL,120),
+        ('MEMBERSHIP','2200','Deferred Revenue','LIABILITY',NULL,130),
+        ('MEMBERSHIP','2300','Deferred Membership Dues','LIABILITY',NULL,140),
+        ('MEMBERSHIP','3000','Net Assets','EQUITY',NULL,210),
+        ('MEMBERSHIP','3100','Unrestricted Net Assets','EQUITY',NULL,211),
+        ('MEMBERSHIP','3200','Temporarily Restricted','EQUITY',NULL,212),
+        ('MEMBERSHIP','3300','Permanently Restricted','EQUITY',NULL,213),
+        ('MEMBERSHIP','4000','Revenue','INCOME',NULL,310),
+        ('MEMBERSHIP','4100','Membership Dues','INCOME','4000',311),
+        ('MEMBERSHIP','4110','New Member Dues','INCOME','4000',312),
+        ('MEMBERSHIP','4120','Renewal Dues','INCOME','4000',313),
+        ('MEMBERSHIP','4200','Event & Conference Revenue','INCOME','4000',320),
+        ('MEMBERSHIP','4300','Sponsorships','INCOME','4000',330),
+        ('MEMBERSHIP','4400','Fundraising Revenue','INCOME','4000',340),
+        ('MEMBERSHIP','4500','Merchandise Sales','INCOME','4000',350),
+        ('MEMBERSHIP','4600','Advertising Revenue','INCOME','4000',360),
+        ('MEMBERSHIP','4700','Investment Income','INCOME','4000',370),
+        ('MEMBERSHIP','4900','Miscellaneous Income','INCOME','4000',390),
+        ('MEMBERSHIP','8000','Expenses','EXPENSE',NULL,410),
+        ('MEMBERSHIP','8100','Personnel Expenses','EXPENSE','8000',411),
+        ('MEMBERSHIP','8110','Salaries & Wages','EXPENSE','8100',412),
+        ('MEMBERSHIP','8120','Payroll Taxes','EXPENSE','8100',413),
+        ('MEMBERSHIP','8130','Employee Benefits','EXPENSE','8100',414),
+        ('MEMBERSHIP','8140','Contract Labor','EXPENSE','8100',415),
+        ('MEMBERSHIP','8200','Occupancy & Facilities','EXPENSE','8000',420),
+        ('MEMBERSHIP','8210','Rent & Lease','EXPENSE','8200',421),
+        ('MEMBERSHIP','8220','Utilities','EXPENSE','8200',422),
+        ('MEMBERSHIP','8230','Maintenance & Repairs','EXPENSE','8200',423),
+        ('MEMBERSHIP','8300','Member Programs & Events','EXPENSE','8000',430),
+        ('MEMBERSHIP','8310','Conference & Event Expenses','EXPENSE','8300',431),
+        ('MEMBERSHIP','8320','Member Communications','EXPENSE','8300',432),
+        ('MEMBERSHIP','8330','Chapter & Affiliate Support','EXPENSE','8300',433),
+        ('MEMBERSHIP','8400','Administrative Expenses','EXPENSE','8000',440),
+        ('MEMBERSHIP','8410','Office Supplies','EXPENSE','8400',441),
+        ('MEMBERSHIP','8420','Postage & Shipping','EXPENSE','8400',442),
+        ('MEMBERSHIP','8430','Printing & Copying','EXPENSE','8400',443),
+        ('MEMBERSHIP','8440','Software & Technology','EXPENSE','8400',444),
+        ('MEMBERSHIP','8500','Professional Services','EXPENSE','8000',450),
+        ('MEMBERSHIP','8510','Accounting & Audit','EXPENSE','8500',451),
+        ('MEMBERSHIP','8520','Legal Fees','EXPENSE','8500',452),
+        ('MEMBERSHIP','8600','Travel & Transportation','EXPENSE','8000',460),
+        ('MEMBERSHIP','8700','Marketing & Communications','EXPENSE','8000',470),
+        ('MEMBERSHIP','8800','Fundraising & Event Expenses','EXPENSE','8000',480),
+        ('MEMBERSHIP','8900','Depreciation','EXPENSE','8000',490),
+        ('MEMBERSHIP','8950','Insurance','EXPENSE','8000',491),
+        ('MEMBERSHIP','8990','Miscellaneous Expenses','EXPENSE','8000',499)
+      ON CONFLICT (organization_type, code) DO NOTHING;
+    `);
+
+    console.log("Schema check: coa_templates organization_type + CHURCH/MEMBERSHIP templates OK");
   } catch (err: any) {
     console.error("Schema migration error (coa_templates organization_type):", err.message);
   }

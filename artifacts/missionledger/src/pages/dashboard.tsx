@@ -16,6 +16,7 @@ import { useLocation } from "wouter";
 import { useFinancialSync } from "@/lib/financial-sync";
 import { Link } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
+import { is501c3Oriented } from "@/lib/org-terminology";
 
 const BASE = import.meta.env.BASE_URL;
 
@@ -184,7 +185,7 @@ export default function Dashboard() {
   const [, navigate] = useLocation();
   const { version } = useFinancialSync();
   const { user } = useAuth();
-  const is990Applicable = user?.organizationType !== "CHURCH";
+  const is990Applicable = is501c3Oriented(user?.organizationType);
   const [data, setData] = useState<DashData | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);

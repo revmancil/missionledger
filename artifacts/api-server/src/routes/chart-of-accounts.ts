@@ -142,7 +142,7 @@ type SeedAccount = {
   parentCode?: string | null;
 };
 
-/** organizationType mirrors companies.organization_type; "NONPROFIT"/"MEMBERSHIP" both fall back to the nonprofit template. */
+/** organizationType mirrors companies.organization_type; anything else falls back to the nonprofit template. */
 export async function seedChartOfAccounts(companyId: string, organizationType?: string): Promise<void> {
   const existing = await db
     .select({ id: chartOfAccounts.id })
@@ -152,7 +152,8 @@ export async function seedChartOfAccounts(companyId: string, organizationType?: 
 
   if (existing.length > 0) return; // already seeded
 
-  const wantedType = organizationType === "CHURCH" ? "CHURCH" : "NONPROFIT";
+  const wantedType =
+    organizationType === "CHURCH" ? "CHURCH" : organizationType === "MEMBERSHIP" ? "MEMBERSHIP" : "NONPROFIT";
 
   let template: SeedAccount[] = [];
   try {

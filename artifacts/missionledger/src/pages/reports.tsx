@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { useAuth } from "@/hooks/use-auth";
+import { is501c3Oriented } from "@/lib/org-terminology";
 import { useGetProfitLossReport, useGetBalanceSheetReport, useGetCashFlowReport, useGetFunds } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -844,8 +845,9 @@ export default function ReportsPage() {
           { id: "gl",        label: "General Ledger",       icon: <BookOpen className="w-3.5 h-3.5" /> },
           { id: "journal",   label: "General Journal",      icon: <FileText className="w-3.5 h-3.5" /> },
           { id: "register",  label: "Transaction Register", icon: <Table2 className="w-3.5 h-3.5" /> },
-          // Form 990 is an IRS nonprofit filing; churches generally don't file it.
-          ...(user?.organizationType !== "CHURCH"
+          // The Public Support Test on this tab is a 501(c)(3) concept; churches are generally
+          // 990-exempt and membership/social orgs are typically 501(c)(7), not 501(c)(3).
+          ...(is501c3Oriented(user?.organizationType)
             ? [{ id: "prep990" as const, label: "990 Prep", icon: <ShieldCheck className="w-3.5 h-3.5" /> }]
             : []),
         ] as { id: Tab; label: string; icon: React.ReactNode }[]).map(t => (
