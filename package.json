@@ -10,6 +10,9 @@
   },
   "devDependencies": {
     "@esbuild/win32-x64": "0.27.3",
+    "@rollup/rollup-win32-x64-msvc": "^4.63.5",
+    "@tailwindcss/oxide-win32-x64-msvc": "4.2.1",
+    "lightningcss-win32-x64-msvc": "^1.33.0",
     "prettier": "^3.8.1",
     "typescript": "~5.9.2"
   }

@@ -353,11 +353,48 @@ function DeepDivesSection() {
 // ─── Product Visuals ──────────────────────────────────────────────────────────
 
 const PRODUCT_TILES = [
-  { icon: Layers, label: "Fund balances by fund" },
-  { icon: Heart, label: "Donor pledges and recurring donations" },
-  { icon: RefreshCcw, label: "Month-end reconciliation workflow" },
-  { icon: Lock, label: "Audit logs and permissions" },
-  { icon: FileText, label: "Board-ready financial reports" },
+  {
+    image: "dashboard.png",
+    label: "Executive Dashboard",
+    description: "Cash on hand, cash flow, and spending by category at a glance.",
+    wide: true,
+  },
+  {
+    image: "board-report.png",
+    label: "Board Member Report",
+    description: "Board-ready financials your directors can actually read.",
+  },
+  {
+    image: "990-prep.png",
+    label: "990 Prep",
+    description: "Public support test and IRS line-item mapping, done automatically.",
+  },
+  {
+    image: "funds.png",
+    label: "Fund Accounting",
+    description: "Track restricted and unrestricted funds the way nonprofits actually operate.",
+  },
+  {
+    image: "reconciliation.png",
+    label: "Bank Reconciliation",
+    description: "Reconcile against your statement in minutes, not hours.",
+  },
+  {
+    image: "budget.png",
+    label: "Budget Manager",
+    description: "Build and track budgets against real-time actuals.",
+    objectPosition: "center",
+  },
+  {
+    image: "period-close.png",
+    label: "Period & Year-End Close",
+    description: "Lock periods, generate statements, and keep a clean audit trail.",
+  },
+  {
+    image: "opening-balances.png",
+    label: "Opening Balances Wizard",
+    description: "Get started quickly with a guided setup for cash or accrual basis.",
+  },
 ];
 
 function ProductVisualsSection() {
@@ -372,18 +409,27 @@ function ProductVisualsSection() {
           </p>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
           {PRODUCT_TILES.map((tile, i) => (
             <div
               key={i}
-              className={`rounded-2xl border border-border bg-card flex flex-col items-center justify-center gap-4 p-10 shadow-sm hover:shadow-md transition-all group ${
-                i === 4 ? "col-span-2 md:col-span-1" : ""
+              className={`rounded-2xl border border-border bg-card overflow-hidden shadow-sm hover:shadow-md transition-all group ${
+                tile.wide ? "sm:col-span-2" : ""
               }`}
             >
-              <div className="w-16 h-16 rounded-xl bg-primary/10 text-primary flex items-center justify-center group-hover:scale-110 transition-transform">
-                <tile.icon className="w-8 h-8" />
+              <div className={`bg-muted/40 overflow-hidden ${tile.wide ? "aspect-[16/9]" : "aspect-[4/3]"}`}>
+                <img
+                  src={`${import.meta.env.BASE_URL}images/screenshots/${tile.image}`}
+                  alt={tile.label}
+                  style={{ objectPosition: tile.objectPosition ?? "top" }}
+                  className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform duration-300"
+                  loading="lazy"
+                />
               </div>
-              <p className="text-sm font-medium text-center text-muted-foreground">{tile.label}</p>
+              <div className="p-5">
+                <p className="font-bold text-sm">{tile.label}</p>
+                <p className="text-sm text-muted-foreground mt-1 leading-relaxed">{tile.description}</p>
+              </div>
             </div>
           ))}
         </div>
