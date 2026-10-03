@@ -1,9 +1,9 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, Fragment } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, parseISO } from "date-fns";
 import {
   Heart, ChevronDown, ChevronRight, Printer, Download,
-  TrendingUp, Users, Gift, Search, X, GitMerge,
+  TrendingUp, Users, Gift, Search, X, GitMerge, Paperclip,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,6 +15,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { AppLayout } from "@/components/layout/AppLayout";
+import { AttachmentPanel } from "@/components/AttachmentPanel";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
 import { givingNavLabel, givingStatementTitle, givingStatementDisclaimer } from "@/lib/org-terminology";
@@ -344,6 +345,7 @@ function DonorRow({
   const { data: historyData, isLoading } = useDonorHistory(expanded ? donor.donorName : null, year);
   const history = historyData?.gifts;
   const giver = historyData?.giver;
+  const [attachGiftId, setAttachGiftId] = useState<string | null>(null);
 
   return (
     <>
@@ -423,33 +425,62 @@ function DonorRow({
                       <th className="text-left px-3 py-2 text-xs font-semibold text-muted-foreground uppercase hidden lg:table-cell">Note</th>
                       <th className="text-left px-3 py-2 text-xs font-semibold text-muted-foreground uppercase hidden sm:table-cell">Source</th>
                       <th className="text-right px-3 py-2 text-xs font-semibold text-muted-foreground uppercase">Amount</th>
+                      <th className="w-[52px] px-3 py-2 text-xs font-semibold text-muted-foreground uppercase">Docs</th>
                     </tr>
                   </thead>
                   <tbody>
                     {history.map((g) => (
-                      <tr key={g.id} className="border-b border-border/50 last:border-0 hover:bg-muted/20">
-                        <td className="px-3 py-2 text-sm">{fmtDate(g.date)}</td>
-                        <td className="px-3 py-2 text-sm hidden sm:table-cell text-muted-foreground">{g.description || "—"}</td>
-                        <td className="px-3 py-2 text-sm hidden md:table-cell text-muted-foreground">{g.fundName || "—"}</td>
-                        <td className="px-3 py-2 text-sm hidden lg:table-cell text-muted-foreground">{g.memo || "—"}</td>
-                        <td className="px-3 py-2 hidden sm:table-cell">
-                          <Badge variant="outline" className={cn(
-                            "text-[10px]",
-                            g.source === "bank_register"
-                              ? "text-blue-700 border-blue-200 bg-blue-50"
-                              : "text-violet-700 border-violet-200 bg-violet-50"
-                          )}>
-                            {g.source === "bank_register" ? "Bank Register" : "Donation Record"}
-                          </Badge>
-                        </td>
-                        <td className="px-3 py-2 text-right font-medium text-emerald-700 tabular-nums">{fmt(g.amount)}</td>
-                      </tr>
+                      <Fragment key={g.id}>
+                        <tr className="border-b border-border/50 last:border-0 hover:bg-muted/20">
+                          <td className="px-3 py-2 text-sm">{fmtDate(g.date)}</td>
+                          <td className="px-3 py-2 text-sm hidden sm:table-cell text-muted-foreground">{g.description || "—"}</td>
+                          <td className="px-3 py-2 text-sm hidden md:table-cell text-muted-foreground">{g.fundName || "—"}</td>
+                          <td className="px-3 py-2 text-sm hidden lg:table-cell text-muted-foreground">{g.memo || "—"}</td>
+                          <td className="px-3 py-2 hidden sm:table-cell">
+                            <Badge variant="outline" className={cn(
+                              "text-[10px]",
+                              g.source === "bank_register"
+                                ? "text-blue-700 border-blue-200 bg-blue-50"
+                                : "text-violet-700 border-violet-200 bg-violet-50"
+                            )}>
+                              {g.source === "bank_register" ? "Bank Register" : "Donation Record"}
+                            </Badge>
+                          </td>
+                          <td className="px-3 py-2 text-right font-medium text-emerald-700 tabular-nums">{fmt(g.amount)}</td>
+                          <td className="px-3 py-2 text-center">
+                            <button
+                              type="button"
+                              title="Attach or view documents"
+                              onClick={() => setAttachGiftId(attachGiftId === g.id ? null : g.id)}
+                              className={cn(
+                                "p-1 rounded hover:bg-blue-50",
+                                attachGiftId === g.id ? "text-blue-600" : "text-muted-foreground hover:text-blue-600",
+                              )}
+                            >
+                              <Paperclip className="h-3.5 w-3.5" />
+                            </button>
+                          </td>
+                        </tr>
+                        {attachGiftId === g.id && (
+                          <tr className="bg-muted/20">
+                            <td colSpan={7} className="px-3 py-2">
+                              <AttachmentPanel
+                                entityType={g.source === "bank_register" ? "TRANSACTION" : "DONATION"}
+                                entityId={g.id}
+                                variant="compact"
+                                title="Gift documents"
+                              />
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
                     ))}
                   </tbody>
                   <tfoot>
                     <tr className="bg-muted/30">
                       <td colSpan={5} className="px-3 py-2 text-xs font-semibold text-muted-foreground uppercase">Total</td>
                       <td className="px-3 py-2 text-right font-bold text-emerald-700">{fmt(donor.totalGiven)}</td>
+                      <td className="px-3 py-2"></td>
                     </tr>
                   </tfoot>
                 </table>

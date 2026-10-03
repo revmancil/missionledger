@@ -34,6 +34,7 @@ import zeffyRouter from "./zeffy";
 import boardReportRouter from "./board-report";
 import donorDirectoryRouter from "./donor-directory";
 import pledgeCampaignsRouter from "./pledge-campaigns";
+import attachmentsRouter from "./attachments";
 import { authLimiter } from "../lib/rateLimiters";
 
 const router: IRouter = Router();
@@ -73,5 +74,6 @@ router.use("/zeffy", zeffyRouter);
 router.use("/board-report", boardReportRouter);
 router.use("/donor-directory", donorDirectoryRouter);
 router.use("/pledge-campaigns", pledgeCampaignsRouter);
+router.use("/attachments", attachmentsRouter);
 
 export default router;

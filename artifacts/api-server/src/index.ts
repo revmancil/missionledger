@@ -1314,6 +1314,35 @@ async function ensureSchema() {
     "reconciliations.statement_file_data",
     `ALTER TABLE reconciliations ADD COLUMN IF NOT EXISTS statement_file_data TEXT`,
   );
+
+  // attachments — generic document attachments for record types
+  // (BILL | EXPENSE | DONATION | TRANSACTION | JOURNAL_ENTRY).
+  await ensureAlterThrow(
+    "attachments table",
+    `CREATE TABLE IF NOT EXISTS public.attachments (
+       id                TEXT PRIMARY KEY DEFAULT gen_random_uuid(),
+       company_id        TEXT NOT NULL,
+       entity_type       TEXT NOT NULL,
+       entity_id         TEXT NOT NULL,
+       file_name         TEXT NOT NULL,
+       mime_type         TEXT NOT NULL DEFAULT 'application/octet-stream',
+       file_size         INTEGER NOT NULL DEFAULT 0,
+       file_data         TEXT NOT NULL,
+       extracted_json    TEXT,
+       uploaded_by       TEXT,
+       uploaded_by_name  TEXT,
+       created_at        TIMESTAMP NOT NULL DEFAULT NOW()
+     )`,
+  );
+  await ensureAlterThrow(
+    "attachments_company_entity_idx",
+    `CREATE INDEX IF NOT EXISTS attachments_company_entity_idx
+       ON public.attachments (company_id, entity_type, entity_id)`,
+  );
+  await ensureAlterThrow(
+    "attachments.extracted_json",
+    `ALTER TABLE public.attachments ADD COLUMN IF NOT EXISTS extracted_json TEXT`,
+  );
 }
 
 async function main() {

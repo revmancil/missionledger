@@ -5,6 +5,7 @@ import {
   Banknote, ClipboardList, RefreshCcw, Wand2, Scale, CalendarCheck,
   ChevronDown, ArrowLeftRight, Shield, AlertTriangle, CheckCircle2,
   CreditCard, PenLine, X, Heart, Target, SlidersHorizontal, Presentation, Users,
+  Receipt, FileText,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
@@ -41,6 +42,13 @@ const navGroups = [
       { href: "/pledges", label: "Pledges", icon: HandHeart },
       { href: "/donor-giving", label: "Donor Giving", icon: Heart },
       { href: "/donor-directory", label: "Givers Directory", icon: Users },
+    ]
+  },
+  {
+    label: "Payables",
+    items: [
+      { href: "/bills", label: "Bills", icon: FileText },
+      { href: "/expenses", label: "Expenses", icon: Receipt },
     ]
   },
   {

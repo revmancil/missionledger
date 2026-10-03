@@ -28,6 +28,24 @@ if (Number.isNaN(port) || port <= 0) {
 
 const basePath = process.env.BASE_PATH || "/";
 
+// Dev/preview only: forward `/api/*` to the local API server so the browser sees
+// a single, same-origin app — exactly like production, where `vercel.json`
+// rewrites `/api/:path*` to the deployed API. Without this, raw
+// `fetch(`${BASE}/api/…`)` calls (which — unlike the generated `customFetch` —
+// do not consult `VITE_API_BASE_URL`) hit the Vite dev server and receive
+// `index.html`, so auth/subscription/sub-resource loading fails and the
+// authenticated app hangs on "Loading session…".
+// `vite build` never binds a server, so this has no effect on the bundle.
+// Override the target with API_PROXY_TARGET (defaults to the local API).
+const apiProxyTarget = process.env.API_PROXY_TARGET || "http://127.0.0.1:8080";
+const apiProxy = {
+  "/api": {
+    target: apiProxyTarget,
+    changeOrigin: true,
+    secure: false,
+  },
+};
+
 export default defineConfig({
   base: basePath,
   plugins: [
@@ -64,6 +82,7 @@ export default defineConfig({
     port,
     host: "0.0.0.0",
     allowedHosts: true,
+    proxy: apiProxy,
     fs: {
       strict: true,
       deny: ["**/.*"],
@@ -73,5 +92,6 @@ export default defineConfig({
     port,
     host: "0.0.0.0",
     allowedHosts: true,
+    proxy: apiProxy,
   },
 });

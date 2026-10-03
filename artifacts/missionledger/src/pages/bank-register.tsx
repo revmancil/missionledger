@@ -27,6 +27,7 @@ import { useFinancialSync } from "@/lib/financial-sync";
 import { authJsonFetch, logApiFailure, readJsonSafe } from "@/lib/auth-fetch";
 import { apiUrl } from "@/lib/api-base";
 import { useAuth } from "@/hooks/use-auth";
+import { AttachmentPanel } from "@/components/AttachmentPanel";
 
 /** Path must start with `/api/…` (or full http URL). Uses VITE_API_BASE_URL when the API is on another host. */
 function apiFetch(path: string, init?: RequestInit) {
@@ -1586,6 +1587,9 @@ export default function BankRegisterPage() {
                                 )}
                               </div>
                             )}
+                            <div className="mt-3 max-w-2xl">
+                              <AttachmentPanel entityType="TRANSACTION" entityId={tx.id} variant="compact" />
+                            </div>
                           </div>
                         )}
                       </td>
