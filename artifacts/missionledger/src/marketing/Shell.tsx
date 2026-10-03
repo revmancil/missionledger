@@ -56,8 +56,8 @@ export function Header() {
   return (
     <header
       className={cn(
-        "sticky top-0 z-50 transition-all duration-300",
-        scrolled ? "ml-glass border-b border-border/70 shadow-sm" : "border-b border-transparent",
+        "sticky top-0 z-50 border-b bg-background transition-[box-shadow,border-color] duration-300",
+        scrolled ? "border-border/70 shadow-sm" : "border-transparent",
       )}
     >
       <Container>
