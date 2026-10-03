@@ -8,7 +8,7 @@ export interface AuditParams {
   userEmail?: string | null;
   userName?: string | null;
   action: "CREATE" | "UPDATE" | "DELETE" | "VOID" | "LOGIN" | "LOGOUT" | "PERIOD_CLOSE" | "PERIOD_REOPEN" | "RESTORE";
-  entityType: "TRANSACTION" | "JOURNAL_ENTRY" | "ACCOUNT" | "FUND" | "USER" | "SESSION" | "PERIOD" | "OPENING_BALANCE";
+  entityType: "TRANSACTION" | "JOURNAL_ENTRY" | "ACCOUNT" | "FUND" | "USER" | "SESSION" | "PERIOD" | "OPENING_BALANCE" | "ATTACHMENT" | "VENDOR";
   entityId?: string | null;
   description: string;
   oldValue?: Record<string, unknown> | null;

@@ -25,3 +25,4 @@ export * from "./organizationUsers";
 export * from "./helpMessages";
 export * from "./passwordResetTokens";
 export * from "./boardGovernance";
+export * from "./attachments";
