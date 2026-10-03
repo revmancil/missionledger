@@ -2,6 +2,15 @@ import { useEffect, useState, type ComponentType } from "react";
 
 import { modules as discoveredModules } from "./.generated/mockup-components";
 
+import { useHashRoute } from "./marketing/router";
+import { SiteLayout } from "./marketing/Site";
+import Home from "./marketing/pages/Home";
+import Features from "./marketing/pages/Features";
+import Pricing from "./marketing/pages/Pricing";
+import About from "./marketing/pages/About";
+import Security from "./marketing/pages/Security";
+import Compare from "./marketing/pages/Compare";
+
 type ModuleMap = Record<string, () => Promise<Record<string, unknown>>>;
 
 function _resolveComponent(
@@ -128,9 +137,33 @@ function getPreviewPath(): string | null {
   return match ? match[1] : null;
 }
 
+function MarketingApp() {
+  const route = useHashRoute();
+
+  const Page =
+    route === "features"
+      ? Features
+      : route === "pricing"
+        ? Pricing
+        : route === "about"
+          ? About
+          : route === "security"
+            ? Security
+            : route === "compare"
+              ? Compare
+              : Home;
+
+  return (
+    <SiteLayout route={route}>
+      <Page />
+    </SiteLayout>
+  );
+}
+
 function App() {
   const previewPath = getPreviewPath();
 
+  // The component-preview canvas (/preview/*) is preserved for tooling.
   if (previewPath) {
     return (
       <PreviewRenderer
@@ -140,7 +173,8 @@ function App() {
     );
   }
 
-  return <Gallery />;
+  // Everything else renders the redesigned marketing-site prototype.
+  return <MarketingApp />;
 }
 
 export default App;

@@ -159,3 +159,78 @@
 ::-webkit-scrollbar-thumb:hover {
   background: hsl(var(--muted-foreground) / 0.5);
 }
+
+/* =====================================================================
+   Marketing site (redesigned) — utilities & motion
+   Purely additive. Brand tokens (primary/accent/Outfit) already exist
+   above, so the redesigned public pages inherit them naturally.
+   ===================================================================== */
+
+/* Soft aurora glow used behind heroes and CTA bands */
+.ml-glow {
+  background:
+    radial-gradient(60% 55% at 50% 0%, hsl(var(--accent) / 0.20), transparent 70%),
+    radial-gradient(45% 45% at 88% 18%, hsl(var(--primary) / 0.14), transparent 70%),
+    radial-gradient(45% 45% at 8% 30%, hsl(var(--accent) / 0.12), transparent 72%);
+}
+
+/* Faint grid with a radial mask */
+.ml-grid {
+  background-image:
+    linear-gradient(to right, hsl(var(--border) / 0.7) 1px, transparent 1px),
+    linear-gradient(to bottom, hsl(var(--border) / 0.7) 1px, transparent 1px);
+  background-size: 44px 44px;
+  -webkit-mask-image: radial-gradient(ellipse 75% 65% at 50% 35%, #000 25%, transparent 78%);
+  mask-image: radial-gradient(ellipse 75% 65% at 50% 35%, #000 25%, transparent 78%);
+}
+
+.ml-glass {
+  background: hsl(var(--background) / 0.72);
+  backdrop-filter: blur(14px) saturate(150%);
+  -webkit-backdrop-filter: blur(14px) saturate(150%);
+}
+
+/* Cards that lift on hover */
+.ml-lift {
+  transition: transform 0.32s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.32s ease, border-color 0.32s ease;
+}
+.ml-lift:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 24px 48px -24px hsl(var(--primary) / 0.4);
+}
+
+/* Scroll-reveal */
+@keyframes ml-fade-up {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: none; }
+}
+.ml-reveal { opacity: 0; }
+.ml-reveal.is-visible {
+  animation: ml-fade-up 0.7s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes ml-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-12px); }
+}
+.ml-float { animation: ml-float 6.5s ease-in-out infinite; }
+
+@keyframes ml-marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+.ml-marquee {
+  display: flex;
+  width: max-content;
+  animation: ml-marquee 34s linear infinite;
+}
+.ml-marquee:hover { animation-play-state: paused; }
+
+.ml-no-scrollbar::-webkit-scrollbar { display: none; }
+.ml-no-scrollbar { scrollbar-width: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ml-reveal { opacity: 1; }
+  .ml-reveal.is-visible { animation: none; }
+  .ml-float, .ml-marquee { animation: none; }
+}
