@@ -12,6 +12,8 @@ import {
   ShieldCheck,
   Star,
   PlayCircle,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -347,7 +349,45 @@ function FeatureBento() {
 
 function ScreenshotTour() {
   const [active, setActive] = React.useState(0);
+  const stripRef = React.useRef<HTMLDivElement | null>(null);
+  const [atStart, setAtStart] = React.useState(true);
+  const [atEnd, setAtEnd] = React.useState(false);
   const current = SCREENSHOTS[active];
+
+  const updateEdges = React.useCallback(() => {
+    const el = stripRef.current;
+    if (!el) return;
+    setAtStart(el.scrollLeft <= 2);
+    setAtEnd(el.scrollLeft + el.clientWidth >= el.scrollWidth - 2);
+  }, []);
+
+  React.useEffect(() => {
+    const el = stripRef.current;
+    if (!el) return;
+    updateEdges();
+    el.addEventListener("scroll", updateEdges, { passive: true });
+    window.addEventListener("resize", updateEdges);
+    return () => {
+      el.removeEventListener("scroll", updateEdges);
+      window.removeEventListener("resize", updateEdges);
+    };
+  }, [updateEdges]);
+
+  const scrollStrip = (dir: -1 | 1) => {
+    const el = stripRef.current;
+    if (!el) return;
+    el.scrollBy({ left: dir * Math.round(el.clientWidth * 0.8), behavior: "smooth" });
+  };
+
+  const select = (i: number) => {
+    setActive(i);
+    const el = stripRef.current;
+    const card = el?.children[i] as HTMLElement | undefined;
+    if (el && card) {
+      const target = card.offsetLeft - el.clientWidth / 2 + card.clientWidth / 2;
+      el.scrollTo({ left: target, behavior: "smooth" });
+    }
+  };
 
   return (
     <Section className="bg-card">
@@ -378,26 +418,58 @@ function ScreenshotTour() {
         </div>
       </Reveal>
 
-      <div className="ml-no-scrollbar mt-6 flex gap-3 overflow-x-auto pb-1">
-        {SCREENSHOTS.map((s, i) => (
-          <button
-            key={s.src}
-            onClick={() => setActive(i)}
-            className={cn(
-              "flex-shrink-0 rounded-xl border px-4 py-3 text-left transition-all",
-              i === active
-                ? "border-primary bg-primary/5 ring-1 ring-primary/30"
-                : "border-border bg-background hover:border-primary/40",
-            )}
-          >
-            <span className="block text-sm font-semibold text-foreground">
-              {s.label}
-            </span>
-            <span className="mt-0.5 block max-w-[15rem] text-xs text-muted-foreground">
-              {s.caption}
-            </span>
-          </button>
-        ))}
+      <div className="relative mt-6">
+        <div
+          ref={stripRef}
+          className="ml-no-scrollbar flex gap-3 overflow-x-auto scroll-smooth pb-1"
+        >
+          {SCREENSHOTS.map((s, i) => (
+            <button
+              key={s.src}
+              onClick={() => select(i)}
+              className={cn(
+                "flex-shrink-0 rounded-xl border px-4 py-3 text-left transition-all",
+                i === active
+                  ? "border-primary bg-primary/5 ring-1 ring-primary/30"
+                  : "border-border bg-background hover:border-primary/40",
+              )}
+            >
+              <span className="block text-sm font-semibold text-foreground">
+                {s.label}
+              </span>
+              <span className="mt-0.5 block max-w-[15rem] text-xs text-muted-foreground">
+                {s.caption}
+              </span>
+            </button>
+          ))}
+        </div>
+
+        {!atStart && (
+          <>
+            <div className="pointer-events-none absolute inset-y-0 left-0 w-10 bg-gradient-to-r from-card to-transparent" />
+            <button
+              type="button"
+              aria-label="Scroll screenshots left"
+              onClick={() => scrollStrip(-1)}
+              className="absolute left-1 top-1/2 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-full border border-border bg-background text-foreground shadow-md transition-colors hover:bg-muted"
+            >
+              <ChevronLeft className="h-5 w-5" />
+            </button>
+          </>
+        )}
+        {!atEnd && (
+          <>
+            <div className="pointer-events-none absolute inset-y-0 right-0 w-10 bg-gradient-to-l from-card to-transparent" />
+            <button
+              type="button"
+              aria-label="Scroll screenshots right"
+              onClick={() => scrollStrip(1)}
+              className="absolute right-1 top-1/2 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-full border border-border bg-background text-foreground shadow-md transition-colors hover:bg-muted"
+            >
+              <ChevronRight className="h-5 w-5" />
+            </button>
+          </>
+        )}
       </div>
     </Section>
   );
