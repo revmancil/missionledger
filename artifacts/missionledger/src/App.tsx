@@ -8,7 +8,22 @@ import { FinancialSyncProvider } from "@/lib/financial-sync";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 // Pages
-import LandingPage from "@/pages/landing";
+import { SiteLayout } from "@/marketing/Shell";
+import MarketingHome from "@/marketing/pages/Home";
+import MarketingFeatures from "@/marketing/pages/Features";
+import MarketingPricing from "@/marketing/pages/Pricing";
+import MarketingAbout from "@/marketing/pages/About";
+import MarketingSecurity from "@/marketing/pages/Security";
+import MarketingCompare from "@/marketing/pages/Compare";
+
+/** Wraps a marketing page in the shared public site shell. */
+function MarketingPage({ component: Page }: { component: React.ComponentType }) {
+  return (
+    <SiteLayout>
+      <Page />
+    </SiteLayout>
+  );
+}
 import LoginPage from "@/pages/auth/login";
 import RegisterPage from "@/pages/auth/register";
 import DashboardPage from "@/pages/dashboard";
@@ -43,11 +58,6 @@ import BoardReportPage from "@/pages/board-report";
 import AdminUsersPage from "@/pages/admin-users";
 import GivePage from "@/pages/give";
 import FundLedgerPage from "@/pages/fund-ledger";
-import PricingPage from "@/pages/pricing";
-import FeaturesPage from "@/pages/features";
-import CompareQuickbooksPage from "@/pages/compare-quickbooks";
-import AboutPage from "@/pages/about";
-import SecurityPage from "@/pages/security";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -109,7 +119,7 @@ function SubscriptionGatedRoute({ component: Component }: { component: React.Com
 function Router() {
   return (
     <Switch>
-      <Route path="/" component={LandingPage} />
+      <Route path="/">{() => <MarketingPage component={MarketingHome} />}</Route>
       <Route path="/login" component={LoginPage} />
       <Route path="/register" component={RegisterPage} />
       <Route path="/forgot-password" component={ForgotPasswordPage} />
@@ -117,11 +127,11 @@ function Router() {
       <Route path="/terms" component={TermsPage} />
       <Route path="/privacy" component={PrivacyPage} />
       <Route path="/give" component={GivePage} />
-      <Route path="/pricing" component={PricingPage} />
-      <Route path="/features" component={FeaturesPage} />
-      <Route path="/about" component={AboutPage} />
-      <Route path="/security" component={SecurityPage} />
-      <Route path="/compare/quickbooks" component={CompareQuickbooksPage} />
+      <Route path="/pricing">{() => <MarketingPage component={MarketingPricing} />}</Route>
+      <Route path="/features">{() => <MarketingPage component={MarketingFeatures} />}</Route>
+      <Route path="/about">{() => <MarketingPage component={MarketingAbout} />}</Route>
+      <Route path="/security">{() => <MarketingPage component={MarketingSecurity} />}</Route>
+      <Route path="/compare/quickbooks">{() => <MarketingPage component={MarketingCompare} />}</Route>
 
       <Route path="/dashboard"><SubscriptionGatedRoute component={DashboardPage} /></Route>
       <Route path="/funds/:id/ledger"><SubscriptionGatedRoute component={FundLedgerPage} /></Route>
