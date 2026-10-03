@@ -52,14 +52,16 @@ function Hero() {
       <div className="pointer-events-none absolute inset-0 -z-10 ml-grid opacity-60" />
 
       <Container>
-        <div className="grid items-center gap-14 lg:grid-cols-[1.05fr_0.95fr]">
-          <div>
-            <Reveal>
-              <Brand className="h-20 w-auto drop-shadow-sm sm:h-24" />
-            </Reveal>
+        <Reveal>
+          <div className="flex justify-center">
+            <Brand className="h-28 w-auto drop-shadow-sm sm:h-32 lg:h-40" />
+          </div>
+        </Reveal>
 
+        <div className="mt-12 grid items-center gap-14 lg:grid-cols-[1.05fr_0.95fr]">
+          <div>
             <Reveal delay={40}>
-              <span className="mt-7 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-card/70 px-3 py-1 text-xs font-semibold text-primary backdrop-blur">
+              <span className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-card/70 px-3 py-1 text-xs font-semibold text-primary backdrop-blur">
                 <Sparkles className="h-3.5 w-3.5" />
                 Built for nonprofits, churches & associations
               </span>
