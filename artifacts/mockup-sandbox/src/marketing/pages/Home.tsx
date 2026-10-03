@@ -55,7 +55,11 @@ function Hero() {
         <div className="grid items-center gap-14 lg:grid-cols-[1.05fr_0.95fr]">
           <div>
             <Reveal>
-              <span className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-card/70 px-3 py-1 text-xs font-semibold text-primary backdrop-blur">
+              <Brand className="h-20 w-auto drop-shadow-sm sm:h-24" />
+            </Reveal>
+
+            <Reveal delay={40}>
+              <span className="mt-7 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-card/70 px-3 py-1 text-xs font-semibold text-primary backdrop-blur">
                 <Sparkles className="h-3.5 w-3.5" />
                 Built for nonprofits, churches & associations
               </span>

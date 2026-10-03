@@ -104,7 +104,7 @@ export function Brand({
         alt="MissionLedger"
         onError={() => setBroken(true)}
         onClick={onClick}
-        className={cn("h-9 w-auto object-contain", onClick && "cursor-pointer", className)}
+        className={cn("h-12 w-auto object-contain", onClick && "cursor-pointer", className)}
       />
     );
   }
