@@ -330,7 +330,7 @@ router.post("/reset-password", async (req, res) => {
     if (!user) return void res.status(404).json({ error: "User not found." });
 
     const hashed = await hashPassword(newPassword);
-    await db.update(users).set({ password: hashed } as any).where(eq(users.id, userId));
+    await db.update(users).set({ password: hashed, passwordChangedAt: new Date() } as any).where(eq(users.id, userId));
 
     console.log(`[ADMIN] Password reset for user ${user.email} (${userId}) by platform admin`);
     res.json({ success: true, message: `Password reset for ${user.email}` });

@@ -42,6 +42,10 @@ export function ChangePasswordDialog() {
       if (!res.ok) {
         throw new Error((data as { error?: string }).error || "Failed to change password");
       }
+      // Changing the password signs out every older session; the API sends back a fresh
+      // token so this device stays signed in.
+      const freshToken = (data as { token?: string }).token;
+      if (freshToken) localStorage.setItem("ml_token", freshToken);
       toast.success("Password updated.");
       setOpen(false);
       setCurrentPassword("");

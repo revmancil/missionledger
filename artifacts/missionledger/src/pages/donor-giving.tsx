@@ -18,6 +18,7 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
 import { givingNavLabel, givingStatementTitle, givingStatementDisclaimer } from "@/lib/org-terminology";
+import { escapeHtml } from "@/lib/escape-html";
 import { toast } from "sonner";
 
 async function apiFetch(path: string, opts?: RequestInit): Promise<Response> {
@@ -116,19 +117,24 @@ function useDonorYears() {
 
 /* ─── Print Statement ──────────────────────────────────────────────────── */
 function buildStatementHtml(donor: DonorSummary, gifts: GiftRecord[], year: string, orgName: string, organizationType?: string | null, giver?: GiverInfo | null) {
-  const yearLabel = year && year !== "all" ? `Year ${year}` : "All Time";
+  // Donor names, descriptions, memos and addresses come from third parties (Zeffy payers,
+  // imported bank payees), and this HTML is written into a same-origin document — every
+  // data field must be escaped, or a crafted name could run script with the user's session.
+  const yearLabel = escapeHtml(year && year !== "all" ? `Year ${year}` : "All Time");
+  const safeDonorName = escapeHtml(donor.donorName);
   const rows = gifts.map(g => `
     <tr>
       <td>${fmtDate(g.date)}</td>
-      <td>${g.description || "Gift"}</td>
-      <td>${g.fundName || "—"}</td>
-      <td>${g.memo || "—"}</td>
+      <td>${escapeHtml(g.description || "Gift")}</td>
+      <td>${escapeHtml(g.fundName || "—")}</td>
+      <td>${escapeHtml(g.memo || "—")}</td>
       <td style="text-align:right">${fmt(g.amount)}</td>
     </tr>
   `).join("");
 
   return `<!DOCTYPE html><html><head>
-    <title>Donor Statement — ${donor.donorName}</title>
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:">
+    <title>Donor Statement — ${safeDonorName}</title>
     <style>
       body { font-family: Arial, sans-serif; padding: 40px; color: #111; font-size: 13px; }
       h1 { font-size: 20px; margin: 0 0 4px; }
@@ -145,10 +151,10 @@ function buildStatementHtml(donor: DonorSummary, gifts: GiftRecord[], year: stri
     </style>
     </head><body>
     <h1>${givingStatementTitle(organizationType)}</h1>
-    <div class="org">${orgName} &bull; ${yearLabel}</div>
-    ${giver?.address ? `<div style="font-size:13px;color:#555;margin-bottom:16px;">${giver.address}</div>` : ""}
+    <div class="org">${escapeHtml(orgName)} &bull; ${yearLabel}</div>
+    ${giver?.address ? `<div style="font-size:13px;color:#555;margin-bottom:16px;white-space:pre-line;">${escapeHtml(giver.address)}</div>` : ""}
     <div class="meta">
-      <div><label>Donor</label><br/><span>${donor.donorName}</span></div>
+      <div><label>Donor</label><br/><span>${safeDonorName}</span></div>
       <div><label>Total Given</label><br/><span>${fmt(donor.totalGiven)}</span></div>
       <div><label>Number of Gifts</label><br/><span>${donor.giftCount}</span></div>
       <div><label>Gift Period</label><br/><span>${fmtDate(donor.firstGift)} – ${fmtDate(donor.lastGift)}</span></div>

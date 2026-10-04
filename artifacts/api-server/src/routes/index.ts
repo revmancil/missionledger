@@ -39,7 +39,21 @@ import { authLimiter } from "../lib/rateLimiters";
 const router: IRouter = Router();
 
 router.use("/healthz", healthRouter);
-router.use("/auth", authLimiter, authRouter);
+// Throttle only the credential-handling endpoints. Session endpoints like /auth/me are
+// hit on every page load and must not share a 20-per-15-minutes budget.
+router.post(
+  [
+    "/auth/login",
+    "/auth/admin-login",
+    "/auth/register",
+    "/auth/find-user-id",
+    "/auth/forgot-password",
+    "/auth/reset-password",
+    "/auth/change-password",
+  ],
+  authLimiter,
+);
+router.use("/auth", authRouter);
 router.use("/dashboard", dashboardRouter);
 router.use("/donations", donationsRouter);
 router.use("/donors", donorsRouter);
@@ -67,7 +81,7 @@ router.use("/help-messages", helpMessagesRouter);
 router.use("/stripe", stripeRouter);
 router.use("/plaid", plaidRouter);
 router.use("/financial-summary", financialSummaryRouter);
-router.use("/auth", authLimiter, passwordResetRouter);
+router.use("/auth", passwordResetRouter);
 router.use("/custom-reports", customReportsRouter);
 router.use("/zeffy", zeffyRouter);
 router.use("/board-report", boardReportRouter);

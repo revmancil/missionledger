@@ -23,11 +23,9 @@ export function logAudit(params: AuditParams): void {
     oldValue, newValue,
   } = params;
 
-  const ipAddress = req
-    ? (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim()
-      ?? req.socket?.remoteAddress
-      ?? null
-    : null;
+  // req.ip honors the configured trusted-proxy depth; the raw leftmost X-Forwarded-For
+  // entry is whatever the client chose to send.
+  const ipAddress = req ? (req.ip ?? req.socket?.remoteAddress ?? null) : null;
 
   db.insert(auditLogs).values({
     companyId,

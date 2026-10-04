@@ -4,6 +4,7 @@ import { users, companies } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import { isSubscriptionExemptPath, pathIsOrUnder, requestPath } from "./requestPath";
 
 if (!process.env.JWT_SECRET) {
   throw new Error(
@@ -25,6 +26,23 @@ export interface AuthUser {
   organizationType: string;
   isPlatformAdmin: boolean;
   impersonatedBy?: string;
+}
+
+/** Copy of just the identity fields, safe to re-sign (a decoded token also carries iat/exp, which jwt.sign rejects). */
+export function toAuthUser(u: AuthUser): AuthUser {
+  return {
+    id: u.id,
+    userId: u.userId,
+    email: u.email,
+    name: u.name,
+    role: u.role,
+    companyId: u.companyId,
+    companyName: u.companyName,
+    companyCode: u.companyCode,
+    organizationType: u.organizationType,
+    isPlatformAdmin: u.isPlatformAdmin,
+    ...(u.impersonatedBy ? { impersonatedBy: u.impersonatedBy } : {}),
+  };
 }
 
 export function signToken(user: AuthUser): string {
@@ -67,95 +85,132 @@ export async function requireAuth<P = RouteParams>(req: Request<P>, res: Respons
     return;
   }
 
-  const user = verifyToken(token);
-  if (!user) {
+  const claims = verifyToken(token) as (AuthUser & { iat?: number }) | null;
+  if (!claims) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }
 
-  // Enforce company-level guards on every request
-  if (user.companyId && !user.isPlatformAdmin) {
-    let rows: Record<string, unknown>[];
-    try {
-      const result = await pool.query(
-        `SELECT is_active, subscription_status, created_at, is_comped FROM companies WHERE id = $1 LIMIT 1`,
-        [user.companyId],
-      );
-      rows = result.rows as Record<string, unknown>[];
-    } catch (e) {
-      console.error("requireAuth: company lookup failed:", e);
-      res.status(503).json({
-        error: "SERVICE_UNAVAILABLE",
-        message: "Could not verify your organization. Try again in a moment.",
-      });
+  // The signed token is only proof of *who* logged in and when. Whether that person may
+  // still act — and with which role — is decided from the database on every request, so
+  // deleting, deactivating, demoting or removing a user takes effect immediately instead of
+  // lingering until the 7-day token expires.
+  let row: Record<string, any> | undefined;
+  try {
+    const result = await pool.query(
+      `SELECT u.is_active            AS u_active,
+              u.is_platform_admin    AS u_platform_admin,
+              u.role                 AS u_role,
+              u.company_id           AS u_company_id,
+              EXTRACT(EPOCH FROM u.password_changed_at)::float8 AS pw_changed_epoch,
+              ou.role                AS ou_role,
+              ou.is_active           AS ou_active,
+              c.is_active            AS c_active,
+              c.subscription_status  AS c_subscription_status,
+              c.created_at           AS c_created_at,
+              c.is_comped            AS c_is_comped
+         FROM users u
+         LEFT JOIN organization_users ou ON ou.user_id = u.id AND ou.company_id = $2
+         LEFT JOIN companies c ON c.id = $2
+        WHERE u.id = $1
+        LIMIT 1`,
+      [claims.id, claims.companyId ?? ""],
+    );
+    row = result.rows[0];
+  } catch (e) {
+    console.error("requireAuth: user/company lookup failed:", e);
+    res.status(503).json({
+      error: "SERVICE_UNAVAILABLE",
+      message: "Could not verify your session. Try again in a moment.",
+    });
+    return;
+  }
+
+  if (!row || !row.u_active) {
+    res.status(401).json({ error: "Unauthorized", message: "This user account is no longer active." });
+    return;
+  }
+
+  // A password change or reset signs out every session issued before it.
+  const pwChangedEpoch = row.pw_changed_epoch == null ? 0 : Math.floor(Number(row.pw_changed_epoch));
+  if (pwChangedEpoch && (!claims.iat || claims.iat < pwChangedEpoch)) {
+    res.status(401).json({ error: "SESSION_EXPIRED", message: "Your password was changed. Please sign in again." });
+    return;
+  }
+
+  // Platform-admin status in the token only counts while the database still agrees.
+  const isPlatformAdmin = !!claims.isPlatformAdmin && row.u_platform_admin === true;
+  let role = claims.role;
+
+  if (claims.impersonatedBy) {
+    if (!isPlatformAdmin) {
+      res.status(401).json({ error: "Unauthorized" });
       return;
     }
-    const company = rows[0];
+  } else if (!isPlatformAdmin) {
+    // Same membership rule as /auth/login: an active organization_users row for this
+    // company, or the user's legacy home company.
+    const orgMember = row.ou_role != null && row.ou_active === true;
+    if (!orgMember && row.u_company_id !== claims.companyId) {
+      res.status(403).json({ error: "NOT_A_MEMBER", message: "You no longer have access to this organization." });
+      return;
+    }
+    role = orgMember ? row.ou_role : row.u_role;
+  }
 
-    if (company) {
-      // 1. Account suspension
-      if (!company.is_active) {
-        res.status(403).json({ error: "ACCOUNT_SUSPENDED", message: "Your organization account has been suspended. Please contact support." });
-        return;
-      }
+  const user: AuthUser = { ...claims, role, isPlatformAdmin };
 
-      // 2. Comped accounts bypass subscription gating entirely
-      if (company.is_comped) {
-        (req as any).user = user;
-        next();
-        return;
-      }
+  // Enforce company-level guards on every request
+  if (user.companyId && !user.isPlatformAdmin && row.c_active !== null && row.c_active !== undefined) {
+    // 1. Account suspension
+    if (!row.c_active) {
+      res.status(403).json({ error: "ACCOUNT_SUSPENDED", message: "Your organization account has been suspended. Please contact support." });
+      return;
+    }
 
-      // 3. Subscription gate — exempt billing/auth/health routes so users can pay
-      const url = (req as any).originalUrl ?? "";
-      const isExempt =
-        url.includes("/api/stripe") ||
-        url.includes("/api/auth") ||
-        url.includes("/api/healthz");
-
-      if (!isExempt) {
-        const subscriptionStatus = company.subscription_status;
-        const createdAt = company.created_at;
-        if (subscriptionStatus === "ACTIVE") {
-          // valid — fall through
-        } else if (subscriptionStatus === "TRIAL") {
-          // `createdAt` comes from a raw pg row (Record<string, unknown>); coerce to string.
-          const trialExpiry = new Date(String(createdAt));
-          trialExpiry.setDate(trialExpiry.getDate() + 14);
-          if (new Date() > trialExpiry) {
-            res.status(402).json({
-              error: "SUBSCRIPTION_REQUIRED",
-              message: "Your free trial has expired. Please subscribe to continue using MissionLedger.",
-            });
-            return;
-          }
-        } else {
-          // INACTIVE or CANCELLED
+    // 2. Subscription gate — comped accounts skip it, and billing/auth/health routes are
+    //    exempt so users can pay. (Comped accounts must still fall through to the role
+    //    checks below.)
+    if (!row.c_is_comped && !isSubscriptionExemptPath((req as any).originalUrl)) {
+      const subscriptionStatus = row.c_subscription_status;
+      if (subscriptionStatus === "ACTIVE") {
+        // valid — fall through
+      } else if (subscriptionStatus === "TRIAL") {
+        const trialExpiry = new Date(String(row.c_created_at));
+        trialExpiry.setDate(trialExpiry.getDate() + 14);
+        if (new Date() > trialExpiry) {
           res.status(402).json({
             error: "SUBSCRIPTION_REQUIRED",
-            message: "An active subscription is required to access this feature.",
+            message: "Your free trial has expired. Please subscribe to continue using MissionLedger.",
           });
           return;
         }
+      } else {
+        // INACTIVE or CANCELLED
+        res.status(402).json({
+          error: "SUBSCRIPTION_REQUIRED",
+          message: "An active subscription is required to access this feature.",
+        });
+        return;
       }
     }
   }
 
   // Board users are read-only at API level, except report/custom-report creation flows.
   const method = (req.method || "GET").toUpperCase();
-  if (["POST", "PUT", "PATCH", "DELETE"].includes(method) && user?.role === "OFFICER") {
-    const url = (req as any).originalUrl ?? "";
+  if (["POST", "PUT", "PATCH", "DELETE"].includes(method) && user.role === "OFFICER") {
+    const path = requestPath((req as any).originalUrl);
     const boardWriteAllowlist = [
       "/api/custom-reports/run",
       "/api/custom-reports/templates",
       "/api/auth/logout",
       "/api/auth/switch-org",
     ];
-    if (!boardWriteAllowlist.some((p) => url.startsWith(p))) {
+    if (!boardWriteAllowlist.some((p) => pathIsOrUnder(path, p))) {
       res.status(403).json({ error: "READ_ONLY_ROLE", message: "Board role is read-only." });
       return;
     }
-    if (url.startsWith("/api/custom-reports/templates") && method !== "POST") {
+    if (pathIsOrUnder(path, "/api/custom-reports/templates") && method !== "POST") {
       res.status(403).json({ error: "READ_ONLY_ROLE", message: "Board role is read-only." });
       return;
     }

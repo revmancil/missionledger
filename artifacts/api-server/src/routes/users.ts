@@ -1,8 +1,9 @@
 import { Router } from "express";
 import { db, users, companies, organizationUsers, pool } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
-import { requireAuth, requireAdmin, hashPassword } from "../lib/auth";
-import { isEmailConfigured, sendTeamMemberWelcomeEmail } from "../lib/email";
+import { requireAuth, requireAdmin, hashPassword, comparePassword } from "../lib/auth";
+import { isEmailConfigured, sendTeamMemberWelcomeEmail, sendSecurityNoticeEmail } from "../lib/email";
+import { logAudit } from "../lib/audit";
 import { getPublicFrontendBase } from "../lib/frontendUrl";
 
 const router = Router();
@@ -73,6 +74,108 @@ async function countPrimaryAdmins(companyId: string): Promise<number> {
     [companyId]
   );
   return parseInt(rows[0]?.cnt ?? "0", 10);
+}
+
+type PersonRef = { id: string; email: string | null; name: string | null };
+
+function displayName(p: PersonRef): string {
+  return p.name || p.email || "A team member";
+}
+
+async function listPrimaryAdmins(companyId: string): Promise<PersonRef[]> {
+  const { rows } = await pool.query(
+    `SELECT DISTINCT u.id, u.email, u.name
+       FROM users u
+      WHERE u.company_id = $1
+        AND u.is_active = true
+        AND (
+              u.role = 'MASTER_ADMIN'
+           OR EXISTS (
+                SELECT 1 FROM organization_users ou
+                 WHERE ou.user_id = u.id
+                   AND ou.company_id = $1
+                   AND ou.is_primary = true
+                   AND ou.is_active = true
+              )
+            )`,
+    [companyId],
+  );
+  return rows as PersonRef[];
+}
+
+/**
+ * Ownership of an organization's books changed hands. Leave an audit trail and tell every
+ * Primary Admin involved, so a hostile or mistaken change is noticed within minutes.
+ */
+async function announcePrimaryAdminChange(
+  req: any,
+  kind: "granted" | "transferred",
+  target: PersonRef,
+): Promise<void> {
+  const actor = req.user as { id: string; email: string | null; name: string | null; companyId: string };
+  const companyId = actor.companyId;
+
+  logAudit({
+    req,
+    companyId,
+    userId: actor.id,
+    userEmail: actor.email,
+    userName: actor.name,
+    action: "UPDATE",
+    entityType: "USER",
+    entityId: target.id,
+    description:
+      kind === "transferred"
+        ? `Primary Admin ownership transferred from ${displayName(actor)} to ${displayName(target)}`
+        : `${displayName(target)} was made a Primary Admin by ${displayName(actor)}`,
+    oldValue: kind === "transferred" ? { primaryAdmin: actor.email } : null,
+    newValue: { primaryAdmin: target.email, kind },
+  });
+
+  try {
+    const [co] = await db.select({ name: companies.name }).from(companies).where(eq(companies.id, companyId)).limit(1);
+    const org = co?.name ?? "your organization";
+    const others = (await listPrimaryAdmins(companyId)).filter((p) => p.id !== actor.id && p.id !== target.id);
+
+    const notices: { to: string | null; subject: string; headline: string; detail: string }[] = [
+      {
+        to: target.email,
+        subject: `You are now a Primary Admin of ${org}`,
+        headline: "You are now a Primary Admin",
+        detail:
+          kind === "transferred"
+            ? `${displayName(actor)} transferred Primary Admin ownership of ${org} to you.`
+            : `${displayName(actor)} made you a Primary Admin of ${org}.`,
+      },
+      ...(kind === "transferred"
+        ? [{
+            to: actor.email,
+            subject: `Primary Admin ownership of ${org} was transferred`,
+            headline: "Ownership transferred",
+            detail: `You transferred Primary Admin ownership of ${org} to ${displayName(target)}. Your role is now Admin.`,
+          }]
+        : []),
+      ...others.map((p) => ({
+        to: p.email,
+        subject: `Primary Admin change for ${org}`,
+        headline: "Primary Admin change",
+        detail:
+          kind === "transferred"
+            ? `${displayName(actor)} transferred Primary Admin ownership of ${org} to ${displayName(target)}.`
+            : `${displayName(actor)} added ${displayName(target)} as a Primary Admin of ${org}.`,
+      })),
+    ];
+
+    for (const n of notices) {
+      const to = (n.to ?? "").trim();
+      if (!to.includes("@") || to.endsWith("@local.missionledger")) continue;
+      sendSecurityNoticeEmail({ to, subject: n.subject, headline: n.headline, detail: n.detail }).catch((err) =>
+        console.error("Primary Admin notice email failed:", err?.message ?? err),
+      );
+    }
+  } catch (err) {
+    console.error("Primary Admin notification failed:", err);
+  }
 }
 
 // ── GET /users/me ─────────────────────────────────────────────────────────────
@@ -190,6 +293,10 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
       isActive: true,
     }).onConflictDoNothing();
 
+    if (legacyRole === "MASTER_ADMIN") {
+      await announcePrimaryAdminChange(req, "granted", { id: created.id, email: created.email, name: created.name });
+    }
+
     const emailStr = String(created.email ?? "");
     const isPlaceholderEmail = emailStr.endsWith("@local.missionledger");
     if (!isPlaceholderEmail && emailStr.includes("@")) {
@@ -290,6 +397,11 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
     if (targetIsPrimary && legacyRole && legacyRole !== "MASTER_ADMIN") {
       return void res.status(400).json({ error: "Use 'Make Primary Admin' transfer to change Primary Admin ownership." });
     }
+    // Granting Primary Admin is owner-only (POST enforces the same rule). Without this, any
+    // Admin or Pastor could PUT their own role to PRIMARY_ADMIN, then remove the real owner.
+    if (legacyRole === "MASTER_ADMIN" && !requesterIsPrimary) {
+      return void res.status(403).json({ error: "Only a Primary Admin can grant Primary Admin." });
+    }
 
     const updateData: any = { updatedAt: new Date() };
     if (name !== undefined) updateData.name = name || null;
@@ -297,15 +409,42 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
     if (legacyRole) updateData.role = legacyRole;
     if (typeof isActive === "boolean") updateData.isActive = isActive;
     if (email) updateData.email = email.toLowerCase();
-    if (password) updateData.password = await hashPassword(password);
+    if (password) {
+      updateData.password = await hashPassword(password);
+      updateData.passwordChangedAt = new Date();
+    }
+
+    const [before] = await db.select({ role: users.role }).from(users)
+      .where(and(eq(users.id, req.params.id), eq(users.companyId, companyId))).limit(1);
 
     const [updated] = await db.update(users).set(updateData)
       .where(and(eq(users.id, req.params.id), eq(users.companyId, companyId))).returning();
 
     if (!updated) return void res.status(404).json({ error: "Not found" });
     if (legacyRole) {
-      await db.update(organizationUsers).set({ role: legacyRole as any })
+      await db.update(organizationUsers)
+        .set({ role: legacyRole as any, ...(legacyRole === "MASTER_ADMIN" ? { isPrimary: true } : {}) })
         .where(and(eq(organizationUsers.userId, updated.id), eq(organizationUsers.companyId, companyId)));
+
+      if (before && before.role !== legacyRole) {
+        const actor = (req as any).user;
+        logAudit({
+          req,
+          companyId,
+          userId: actor.id,
+          userEmail: actor.email,
+          userName: actor.name,
+          action: "UPDATE",
+          entityType: "USER",
+          entityId: updated.id,
+          description: `Role changed for ${updated.email}: ${before.role} → ${legacyRole}`,
+          oldValue: { role: before.role },
+          newValue: { role: legacyRole },
+        });
+      }
+      if (legacyRole === "MASTER_ADMIN" && !targetIsPrimary) {
+        await announcePrimaryAdminChange(req, "granted", { id: updated.id, email: updated.email, name: updated.name });
+      }
     }
 
     res.json({
@@ -350,6 +489,10 @@ router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
+// Ownership transfer: the caller steps down to Admin and the target becomes Primary Admin.
+// (Adding an additional co-owner without stepping down is done by setting a user's role to
+// Primary Admin.) Requires the caller's password so a hijacked session can't give the
+// organization away.
 router.post("/:id/make-primary", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId, id: currentUserId } = (req as any).user;
@@ -357,22 +500,49 @@ router.post("/:id/make-primary", requireAuth, requireAdmin, async (req, res) => 
     if (mismatch) return void res.status(409).json({ error: mismatch });
     const requesterIsPrimary = await isPrimaryAdmin(currentUserId, companyId);
     if (!requesterIsPrimary) {
-      return void res.status(403).json({ error: "Only the current Primary Admin can designate a new Primary Admin." });
+      return void res.status(403).json({ error: "Only a Primary Admin can transfer Primary Admin ownership." });
     }
     const targetUserId = req.params.id;
+    if (targetUserId === currentUserId) {
+      return void res.status(400).json({ error: "You are already a Primary Admin." });
+    }
+
+    const { currentPassword } = req.body ?? {};
+    if (typeof currentPassword !== "string" || !currentPassword) {
+      return void res.status(400).json({ error: "Enter your password to confirm the ownership transfer." });
+    }
+    const [me] = await db.select({ password: users.password }).from(users).where(eq(users.id, currentUserId)).limit(1);
+    if (!me || !(await comparePassword(currentPassword, me.password))) {
+      return void res.status(403).json({ error: "Your password is incorrect." });
+    }
+
     const [target] = await db.select().from(users).where(and(eq(users.id, targetUserId), eq(users.companyId, companyId))).limit(1);
     if (!target) return void res.status(404).json({ error: "User not found" });
+    if (!target.isActive) return void res.status(400).json({ error: "That user is deactivated. Reactivate them first." });
+    if (await isPrimaryAdmin(targetUserId, companyId)) {
+      return void res.status(400).json({ error: "That user is already a Primary Admin." });
+    }
 
-    await db.update(organizationUsers).set({ isPrimary: false, role: "ADMIN" as any })
-      .where(and(eq(organizationUsers.companyId, companyId), eq(organizationUsers.isPrimary, true)));
-    await db.update(organizationUsers).set({ isPrimary: true, role: "MASTER_ADMIN" as any })
-      .where(and(eq(organizationUsers.userId, targetUserId), eq(organizationUsers.companyId, companyId)));
+    await db.transaction(async (tx) => {
+      await tx.insert(organizationUsers)
+        .values({ userId: targetUserId, companyId, role: "MASTER_ADMIN" as any, isPrimary: true, isActive: true })
+        .onConflictDoUpdate({
+          target: [organizationUsers.userId, organizationUsers.companyId],
+          set: { role: "MASTER_ADMIN" as any, isPrimary: true, isActive: true },
+        });
+      await tx.update(users).set({ role: "MASTER_ADMIN" as any }).where(eq(users.id, targetUserId));
 
-    await db.update(users).set({ role: "ADMIN" as any }).where(eq(users.id, currentUserId));
-    await db.update(users).set({ role: "MASTER_ADMIN" as any }).where(eq(users.id, targetUserId));
+      // Only the caller steps down; any other co-owners keep their ownership.
+      await tx.update(organizationUsers).set({ isPrimary: false, role: "ADMIN" as any })
+        .where(and(eq(organizationUsers.userId, currentUserId), eq(organizationUsers.companyId, companyId)));
+      await tx.update(users).set({ role: "ADMIN" as any }).where(eq(users.id, currentUserId));
+    });
+
+    await announcePrimaryAdminChange(req, "transferred", { id: target.id, email: target.email, name: target.name });
 
     res.json({ success: true, newPrimaryAdminUserId: targetUserId });
   } catch (error) {
+    console.error("make-primary error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });

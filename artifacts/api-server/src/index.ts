@@ -587,6 +587,13 @@ async function ensureSchema() {
     `CREATE UNIQUE INDEX IF NOT EXISTS org_users_user_company_unique ON organization_users (user_id, company_id)`,
   );
 
+  // Sessions issued before this timestamp are rejected, so a password change/reset
+  // signs out every other device. Fatal: every Drizzle select on users now reads it.
+  await ensureAlterThrow(
+    "users.password_changed_at",
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMP`,
+  );
+
   // password_reset_tokens was added to the Drizzle schema but never carried over
   // into production by any migration or this file, so /forgot-password has been
   // failing with "relation does not exist" since the feature shipped.

@@ -132,6 +132,28 @@ export async function sendSubscriptionConfirmedEmail(toEmail: string, orgName: s
   });
 }
 
+/** Plain security notice to one recipient (ownership changes etc.). All dynamic text is escaped. */
+export async function sendSecurityNoticeEmail(opts: {
+  to: string;
+  subject: string;
+  headline: string;
+  detail: string;
+}): Promise<void> {
+  await send({
+    to: opts.to,
+    subject: opts.subject,
+    html: `
+      <div style="font-family: sans-serif; max-width: 520px; margin: 0 auto; padding: 32px 24px; color: #1a1a2e;">
+        <h2 style="font-size: 20px; font-weight: 600; margin: 0 0 12px;">${escapeHtml(opts.headline)}</h2>
+        <p style="color: #444; font-size: 15px; line-height: 1.6; margin: 0 0 16px;">${escapeHtml(opts.detail)}</p>
+        <p style="color: #999; font-size: 13px; margin: 24px 0 0; line-height: 1.5;">
+          If you did not expect this change, sign in and review your team under Admin Users, and contact MissionLedger support right away.
+        </p>
+      </div>
+    `,
+  });
+}
+
 export async function sendPasswordResetEmail(toEmail: string, resetUrl: string): Promise<void> {
   const resend = getResend();
 

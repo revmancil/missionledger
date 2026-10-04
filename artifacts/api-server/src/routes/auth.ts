@@ -9,9 +9,11 @@ import {
   comparePassword,
   signToken,
   AuthUser,
+  toAuthUser,
   getOrCreateDefaultAccounts,
   COOKIE_NAME_EXPORT as COOKIE_NAME,
 } from "../lib/auth";
+import { loginAccountLimiter } from "../lib/rateLimiters";
 
 const router = Router();
 
@@ -24,14 +26,18 @@ function generateCompanyCode(orgName?: string): string {
   return letters + digits;
 }
 
-function setCookieAndRespond(res: any, authUser: AuthUser, status = 200) {
-  const token = signToken(authUser);
+function setSessionCookie(res: any, token: string) {
   res.cookie(COOKIE_NAME, token, {
     httpOnly: true,
     secure: true,
     sameSite: "none",
     maxAge: 7 * 24 * 60 * 60 * 1000,
   });
+}
+
+function setCookieAndRespond(res: any, authUser: AuthUser, status = 200) {
+  const token = signToken(authUser);
+  setSessionCookie(res, token);
   res.status(status).json({ ...authUser, token });
 }
 
@@ -75,7 +81,7 @@ router.post("/find-user-id", async (req, res) => {
 });
 
 // POST /auth/login
-router.post("/login", async (req, res) => {
+router.post("/login", loginAccountLimiter, async (req, res) => {
   try {
     const { companyCode, email, userId, password } = req.body ?? {};
     if (!companyCode || !password || (!email && !userId)) {
@@ -422,6 +428,8 @@ router.post("/switch-org", requireAuth, async (req, res) => {
 
     const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
     if (!user) return void res.status(404).json({ error: "User not found" });
+    // Without this a deactivated user could keep minting fresh 7-day tokens.
+    if (!user.isActive) return void res.status(403).json({ error: "This user account is no longer active." });
 
     const [membership] = await db.select().from(organizationUsers)
       .where(and(eq(organizationUsers.userId, userId), eq(organizationUsers.companyId, companyId)))
@@ -449,7 +457,7 @@ router.post("/switch-org", requireAuth, async (req, res) => {
 
 // POST /auth/admin-login — dedicated platform admin login (email + password only, no company code)
 // Hard security: only accepts users with isPlatformAdmin = true
-router.post("/admin-login", async (req, res) => {
+router.post("/admin-login", loginAccountLimiter, async (req, res) => {
   try {
     const { email, password } = req.body ?? {};
     if (!email || !password) {
@@ -531,9 +539,14 @@ router.post("/change-password", requireAuth, async (req, res) => {
     }
 
     const hashed = await hashPassword(newPassword);
-    await db.update(users).set({ password: hashed, updatedAt: new Date() }).where(eq(users.id, userId));
+    const now = new Date();
+    await db.update(users).set({ password: hashed, passwordChangedAt: now, updatedAt: now }).where(eq(users.id, userId));
 
-    res.json({ success: true });
+    // Every session issued before now is now invalid (including this one), so hand the
+    // caller a fresh token instead of signing them out of the device they just used.
+    const token = signToken(toAuthUser((req as any).user as AuthUser));
+    setSessionCookie(res, token);
+    res.json({ success: true, token });
   } catch (err) {
     console.error("Change password error:", err);
     res.status(500).json({ error: "Internal server error" });

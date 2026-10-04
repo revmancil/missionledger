@@ -1,9 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "wouter";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { Mail } from "lucide-react";
 import { authJsonFetch, readJsonSafe } from "@/lib/auth-fetch";
@@ -54,6 +56,9 @@ export default function AdminUsersPage() {
   const [companySaving, setCompanySaving] = useState(false);
   const [form, setForm] = useState({ name: "", userId: "", email: "", password: "", role: "USER" as UiRole });
   const [welcomeSendingId, setWelcomeSendingId] = useState<string | null>(null);
+  const [transferTarget, setTransferTarget] = useState<ManagedUser | null>(null);
+  const [transferPassword, setTransferPassword] = useState("");
+  const [transferring, setTransferring] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -209,16 +214,41 @@ export default function AdminUsersPage() {
     }
   }
 
-  async function makePrimary(id: string) {
+  async function makePrimary(id: string, currentPassword: string) {
     const res = await authJsonFetch(`api/users/${id}/make-primary`, {
       method: "POST",
       headers: {
+        "Content-Type": "application/json",
         ...(companyInfo?.companyId ? { "x-company-id-expected": companyInfo.companyId } : {}),
       },
+      body: JSON.stringify({ currentPassword }),
     });
     const data = await readJsonSafe<any>(res);
     if (!res.ok) throw new Error(data?.error ?? "Failed to set new Primary Admin");
   }
+
+  async function confirmTransfer(e: FormEvent) {
+    e.preventDefault();
+    if (!transferTarget) return;
+    setTransferring(true);
+    try {
+      await makePrimary(transferTarget.id, transferPassword);
+      toast.success(`${transferTarget.name || transferTarget.email} is now a Primary Admin. Your role is now Admin.`);
+      setTransferTarget(null);
+      setTransferPassword("");
+      await load();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to transfer ownership");
+    } finally {
+      setTransferring(false);
+    }
+  }
+
+  // Only a Primary Admin can grant Primary Admin; do not offer the option to anyone else.
+  const canGrantPrimary = !!companyInfo?.isPrimaryAdmin;
+  const roleOptionsFor = (u?: ManagedUser) =>
+    canGrantPrimary || u?.isPrimaryAdmin ? ROLE_OPTIONS : ROLE_OPTIONS.filter((r) => r !== "PRIMARY_ADMIN");
+  const primaryCount = users.filter((u) => u.isPrimaryAdmin).length;
 
   return (
     <AppLayout title="Admin Users">
@@ -385,6 +415,15 @@ export default function AdminUsersPage() {
           </div>
         )}
 
+        {!loading && canGrantPrimary && primaryCount === 1 && (
+          <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-200">
+            <strong>You are the only Primary Admin.</strong> If you become unavailable, nobody else can manage ownership
+            of this organization. Add a second Primary Admin (a trusted board member or pastor) by setting their role
+            to <em>Primary Admin</em> below, so the organization can never be locked out. To hand the organization over
+            completely, use <em>Transfer ownership</em> on their row.
+          </div>
+        )}
+
         <div className="rounded-xl border border-border bg-card p-4 space-y-3">
           <h3 className="font-semibold">Add User</h3>
           <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
@@ -393,7 +432,7 @@ export default function AdminUsersPage() {
             <Input placeholder="Email" type="email" value={form.email} onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))} />
             <Input placeholder="Temporary Password" type="password" value={form.password} onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))} />
             <select className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={form.role} onChange={(e) => setForm((p) => ({ ...p, role: e.target.value as UiRole }))}>
-              {ROLE_OPTIONS.map((r) => <option key={r} value={r}>{r.replace("_", " ")}</option>)}
+              {roleOptionsFor().map((r) => <option key={r} value={r}>{r.replace("_", " ")}</option>)}
             </select>
           </div>
           <div className="flex flex-col gap-1">
@@ -433,7 +472,7 @@ export default function AdminUsersPage() {
                         }
                       }}
                     >
-                      {ROLE_OPTIONS.map((r) => <option key={r} value={r}>{r.replace("_", " ")}</option>)}
+                      {roleOptionsFor(u).map((r) => <option key={r} value={r}>{r.replace("_", " ")}</option>)}
                     </select>
                     {hasDeliverableEmail(u.email) && (
                       <Button
@@ -448,21 +487,16 @@ export default function AdminUsersPage() {
                         {welcomeSendingId === u.id ? "Sending…" : "Welcome email"}
                       </Button>
                     )}
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={async () => {
-                        try {
-                          await makePrimary(u.id);
-                          toast.success("Primary Admin updated.");
-                          await load();
-                        } catch (err: any) {
-                          toast.error(err.message || "Failed to assign Primary Admin");
-                        }
-                      }}
-                    >
-                      Make Primary
-                    </Button>
+                    {canGrantPrimary && !u.isPrimaryAdmin && u.isActive && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => { setTransferPassword(""); setTransferTarget(u); }}
+                        title="Make this user the Primary Admin and step down to Admin"
+                      >
+                        Transfer ownership
+                      </Button>
+                    )}
                     <Button
                       variant="destructive"
                       size="sm"
@@ -486,6 +520,46 @@ export default function AdminUsersPage() {
           )}
         </div>
       </div>
+
+      <Dialog
+        open={!!transferTarget}
+        onOpenChange={(open) => {
+          if (!open && !transferring) { setTransferTarget(null); setTransferPassword(""); }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Transfer Primary Admin ownership</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={confirmTransfer} className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              <strong>{transferTarget?.name || transferTarget?.email}</strong> will become a Primary Admin of this
+              organization, and you will become a regular Admin. Any other Primary Admins keep their access, and everyone
+              involved is notified by email. To add a Primary Admin without stepping down, change their role to Primary
+              Admin instead.
+            </p>
+            <div className="space-y-2">
+              <Label htmlFor="transfer-password">Confirm with your password</Label>
+              <Input
+                id="transfer-password"
+                type="password"
+                autoComplete="current-password"
+                value={transferPassword}
+                onChange={(e) => setTransferPassword(e.target.value)}
+                required
+              />
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" disabled={transferring} onClick={() => { setTransferTarget(null); setTransferPassword(""); }}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={transferring || !transferPassword}>
+                {transferring ? "Transferring…" : "Transfer ownership"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </AppLayout>
   );
 }

@@ -77,8 +77,12 @@ router.post("/reset-password", async (req, res) => {
     }
 
     const hashed = await hashPassword(password);
-    await db.update(users).set({ password: hashed, updatedAt: new Date() }).where(eq(users.id, record.userId));
-    await db.update(passwordResetTokens).set({ used: true }).where(eq(passwordResetTokens.id, record.id));
+    const now = new Date();
+    // passwordChangedAt signs out every existing session, which is the point of a reset
+    // after a suspected compromise.
+    await db.update(users).set({ password: hashed, passwordChangedAt: now, updatedAt: now }).where(eq(users.id, record.userId));
+    // Burn every outstanding link for this user, not just the one used.
+    await db.update(passwordResetTokens).set({ used: true }).where(eq(passwordResetTokens.userId, record.userId));
 
     res.json({ ok: true });
   } catch (err) {

@@ -9,6 +9,14 @@ import { globalErrorHandler } from "./lib/errorHandler";
 
 const app: Express = express();
 
+// Behind Render's load balancer, req.ip is the proxy's address unless Express is told how
+// many proxy hops to trust — which makes every client share the same rate-limit buckets.
+// Trust exactly N hops (never `true`: that lets clients forge X-Forwarded-For and dodge
+// the limiters). Raise TRUST_PROXY_HOPS only after confirming how many proxies sit in
+// front of the API; see the verification steps in the deploy notes.
+const trustProxyHops = Number.parseInt(process.env.TRUST_PROXY_HOPS ?? "1", 10);
+app.set("trust proxy", Number.isInteger(trustProxyHops) && trustProxyHops >= 0 ? trustProxyHops : 1);
+
 // This is a pure JSON API, never same-origin with its frontend, so cross-origin
 // resource policy must stay permissive — the `cors` middleware below is what
 // actually restricts who can call it.
