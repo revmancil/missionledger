@@ -6,6 +6,7 @@ import router from "./routes";
 import { WebhookHandlers } from "./lib/webhookHandlers";
 import { apiLimiter } from "./lib/rateLimiters";
 import { globalErrorHandler } from "./lib/errorHandler";
+import { allowedOrigins } from "./lib/origins";
 
 const app: Express = express();
 
@@ -17,23 +18,25 @@ const app: Express = express();
 const trustProxyHops = Number.parseInt(process.env.TRUST_PROXY_HOPS ?? "1", 10);
 app.set("trust proxy", Number.isInteger(trustProxyHops) && trustProxyHops >= 0 ? trustProxyHops : 1);
 
+// Safety net for every res.json(): credentials stored in the database must never reach a
+// browser, even if a route forgets to strip them from a row it returns.
+const NEVER_SERIALIZE = new Set(["plaidAccessToken", "totpSecret", "zeffyWebhookSecret", "password"]);
+app.set("json replacer", (key: string, value: unknown) => (NEVER_SERIALIZE.has(key) ? undefined : value));
+
 // This is a pure JSON API, never same-origin with its frontend, so cross-origin
 // resource policy must stay permissive — the `cors` middleware below is what
 // actually restricts who can call it.
 app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
 
-const allowedOrigins = [
-  process.env.CORS_ORIGIN,
-  process.env.CORS_ORIGIN_2,
-  process.env.CORS_ORIGIN_3,
-].filter(Boolean);
-
+// Also the CSRF defense: SameSite=None session cookies ride along on cross-site requests, but
+// browsers always send an Origin header on cross-site POSTs, and this rejects any that is not
+// allow-listed (see lib/origins.ts).
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
-      callback(new Error("Not allowed by CORS"));
+      callback(Object.assign(new Error("Not allowed by CORS"), { status: 403 }));
     }
   },
   credentials: true,
@@ -64,7 +67,6 @@ app.post(
 app.use("/api/zeffy/webhook", express.raw({ type: "*/*" }));
 
 app.use(express.json({ limit: "15mb" }));
-app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 app.use("/api", apiLimiter, router);
 

@@ -50,6 +50,8 @@ router.post(
     "/auth/forgot-password",
     "/auth/reset-password",
     "/auth/change-password",
+    "/auth/mfa/enable",
+    "/auth/mfa/disable",
   ],
   authLimiter,
 );

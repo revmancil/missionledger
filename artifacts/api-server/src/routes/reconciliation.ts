@@ -5,6 +5,7 @@ import {
 } from "@workspace/db";
 import { eq, and, desc } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
+import { foreignIdError } from "../lib/ownership";
 import { parseYmdToUtcNoon, isOnOrBeforeUtcYmd } from "../lib/safeIso";
 
 function serializeRecon(r: any) {
@@ -38,6 +39,10 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
     const { bankAccountId, statementDate, statementBalance, openingBalance: openingBalanceInput } = req.body ?? {};
+    {
+      const bad = await foreignIdError(companyId, { bankAccount: bankAccountId });
+      if (bad) return void res.status(400).json({ error: bad });
+    }
     if (!bankAccountId || !statementDate || statementBalance === undefined)
       return void res.status(400).json({ error: "bankAccountId, statementDate, statementBalance are required" });
 

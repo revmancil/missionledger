@@ -2,6 +2,7 @@ import { Router } from "express";
 import { db, pledgeCampaigns, pledges } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
+import { foreignIdError } from "../lib/ownership";
 
 const router = Router();
 
@@ -46,6 +47,10 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
     const { name, description, fundId, goalAmount, startDate, endDate } = req.body ?? {};
+    {
+      const bad = await foreignIdError(companyId, { fund: fundId });
+      if (bad) return void res.status(400).json({ error: bad });
+    }
     if (!name || !goalAmount) return void res.status(400).json({ error: "Name and goal amount are required" });
 
     const [created] = await db.insert(pledgeCampaigns).values({
@@ -69,6 +74,10 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
     const { name, description, fundId, goalAmount, startDate, endDate, isActive } = req.body ?? {};
+    {
+      const bad = await foreignIdError(companyId, { fund: fundId });
+      if (bad) return void res.status(400).json({ error: bad });
+    }
 
     const [updated] = await db.update(pledgeCampaigns).set({
       name: name !== undefined ? name : undefined,

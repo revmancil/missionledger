@@ -2,6 +2,7 @@ import { Router } from "express";
 import { db, bills, billPayments, vendors } from "@workspace/db";
 import { eq, and, desc, sum } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
+import { foreignIdError } from "../lib/ownership";
 import { postSimpleJournalEntry, voidPostedJournalEntry } from "../lib/postJournalEntry";
 
 const router = Router();
@@ -38,6 +39,10 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
     const { vendorId, description, amount, dueDate, accountId, fundId } = req.body ?? {};
+    {
+      const bad = await foreignIdError(companyId, { vendor: vendorId, glAccount: accountId, fund: fundId });
+      if (bad) return void res.status(400).json({ error: bad });
+    }
     if (!description || !amount || !dueDate) return void res.status(400).json({ error: "Missing required fields" });
     if (!accountId) return void res.status(400).json({ error: "An expense account is required so the bill can post to the general ledger when paid." });
 
@@ -62,6 +67,10 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
     const { vendorId, description, amount, dueDate, accountId, fundId, status } = req.body ?? {};
+    {
+      const bad = await foreignIdError(companyId, { vendor: vendorId, glAccount: accountId, fund: fundId });
+      if (bad) return void res.status(400).json({ error: bad });
+    }
     if ("accountId" in (req.body ?? {}) && !accountId) {
       return void res.status(400).json({ error: "An expense account is required so the bill can post to the general ledger when paid." });
     }
@@ -116,6 +125,10 @@ router.post("/:id/payments", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId, email } = (req as any).user;
     const { amount, date, cashAccountId, notes } = req.body ?? {};
+    {
+      const bad = await foreignIdError(companyId, { glAccount: cashAccountId });
+      if (bad) return void res.status(400).json({ error: bad });
+    }
     if (!amount || !date) return void res.status(400).json({ error: "Missing required fields" });
     if (!cashAccountId) return void res.status(400).json({ error: "A cash/bank account is required to record a payment." });
 

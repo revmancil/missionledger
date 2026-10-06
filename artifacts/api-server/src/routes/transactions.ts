@@ -6,6 +6,7 @@ import {
 } from "@workspace/db";
 import { eq, and, inArray, sql, ne } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
+import { foreignIdError } from "../lib/ownership";
 import { generateGlEntries, voidGlEntries } from "../lib/gl";
 import { logAudit, snap } from "../lib/audit";
 import {
@@ -510,6 +511,16 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
       fundId, splits: rawSplits, functionalType, donorName,
       donorLines: rawDonorLines, showDonorSplit,
     } = req.body ?? {};
+    {
+      const splitList: any[] = Array.isArray(rawSplits) ? rawSplits : [];
+      const bad = await foreignIdError(companyId, {
+        bankAccount: bankAccountId,
+        glAccount: [chartAccountId, ...splitList.map((s) => s?.chartAccountId)],
+        fund: [fundId, ...splitList.map((s) => s?.fundId)],
+        vendor: [vendorId, ...splitList.map((s) => s?.vendorId)],
+      });
+      if (bad) return void res.status(400).json({ error: bad });
+    }
 
     if (!date || !payee || amount === undefined)
       return void res.status(400).json({ error: "date, payee, and amount are required" });
@@ -839,6 +850,16 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
       fundId, bankAccountId, splits: rawSplits, functionalType, donorName,
       donorLines: rawDonorLines, showDonorSplit,
     } = req.body ?? {};
+    {
+      const splitList: any[] = Array.isArray(rawSplits) ? rawSplits : [];
+      const bad = await foreignIdError(companyId, {
+        bankAccount: bankAccountId,
+        glAccount: [chartAccountId, ...splitList.map((s) => s?.chartAccountId)],
+        fund: [fundId, ...splitList.map((s) => s?.fundId)],
+        vendor: [vendorId, ...splitList.map((s) => s?.vendorId)],
+      });
+      if (bad) return void res.status(400).json({ error: bad });
+    }
 
     const [existing] = await db
       .select()

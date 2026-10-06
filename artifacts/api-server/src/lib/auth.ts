@@ -45,8 +45,15 @@ export function toAuthUser(u: AuthUser): AuthUser {
   };
 }
 
-export function signToken(user: AuthUser): string {
-  return jwt.sign(user, JWT_SECRET, { expiresIn: "7d" });
+export function signToken(user: AuthUser, expiresIn: jwt.SignOptions["expiresIn"] = "7d"): string {
+  return jwt.sign(user, JWT_SECRET, { expiresIn });
+}
+
+const DUMMY_HASH = bcrypt.hashSync("not-a-real-password", 10);
+
+/** Spend the same time a real password check would, so login timing doesn't reveal which accounts exist. */
+export async function burnPasswordCheck(password: string): Promise<void> {
+  await bcrypt.compare(password, DUMMY_HASH);
 }
 
 export function verifyToken(token: string): AuthUser | null {

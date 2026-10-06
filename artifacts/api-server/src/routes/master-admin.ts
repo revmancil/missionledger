@@ -3,6 +3,8 @@ import { db, users, companies, bankAccounts, auditLogs } from "@workspace/db";
 import { pool } from "@workspace/db";
 import { eq, count, and, desc, gte, lte, like, or } from "drizzle-orm";
 import { backfillJeGlEntries } from "../seeds/backfill-je-gl-entries";
+import { logAudit } from "../lib/audit";
+import { passwordPolicyError } from "../lib/password";
 import {
   requireAuth,
   requirePlatformAdmin,
@@ -321,8 +323,9 @@ router.post("/reset-password", async (req, res) => {
     if (!userId || !newPassword) {
       return void res.status(400).json({ error: "userId and newPassword are required." });
     }
-    if (newPassword.length < 8) {
-      return void res.status(400).json({ error: "Password must be at least 8 characters." });
+    const pwError = passwordPolicyError(newPassword);
+    if (pwError) {
+      return void res.status(400).json({ error: pwError });
     }
 
     const [user] = await db.select({ id: users.id, email: users.email, companyId: users.companyId })
@@ -363,12 +366,26 @@ router.post("/impersonate/:companyId", async (req, res) => {
       impersonatedBy: adminUser.id,
     };
 
-    const token = signToken(impersonatedUser);
+    // Support sessions expire after 2 hours (the cookie already did; the token inside must too).
+    const token = signToken(impersonatedUser, "2h");
     res.cookie(COOKIE_NAME, token, {
       httpOnly: true,
       secure: true,
       sameSite: "none",
       maxAge: 2 * 60 * 60 * 1000,
+    });
+
+    // Recorded in the customer's own audit trail: someone with platform access entered their books.
+    logAudit({
+      req,
+      companyId: company.id,
+      userId: adminUser.id,
+      userEmail: adminUser.email,
+      userName: adminUser.name,
+      action: "IMPERSONATE_START",
+      entityType: "SESSION",
+      entityId: company.id,
+      description: `Platform admin ${adminUser.email} started a support session in ${company.name} (${company.companyCode})`,
     });
 
     res.json({ success: true, session: impersonatedUser, token });
@@ -382,6 +399,20 @@ router.post("/impersonate/:companyId", async (req, res) => {
 router.post("/exit-impersonation", async (req, res) => {
   try {
     const currentUser = (req as any).user as AuthUser;
+
+    if (currentUser.impersonatedBy && currentUser.companyId) {
+      logAudit({
+        req,
+        companyId: currentUser.companyId,
+        userId: currentUser.id,
+        userEmail: currentUser.email,
+        userName: currentUser.name,
+        action: "IMPERSONATE_END",
+        entityType: "SESSION",
+        entityId: currentUser.companyId,
+        description: `Platform admin ${currentUser.email} ended the support session in ${currentUser.companyName} (${currentUser.companyCode})`,
+      });
+    }
 
     const [user] = await db.select().from(users).where(eq(users.id, currentUser.id)).limit(1);
     if (!user) return void res.status(404).json({ error: "User not found" });

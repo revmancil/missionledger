@@ -86,7 +86,8 @@ export default function RegisterPage() {
             
             <div className="space-y-1">
               <label className="text-sm font-medium">Password</label>
-              <Input required type="password" value={formData.password} onChange={e => setFormData(p => ({...p, password: e.target.value}))} />
+              <Input required type="password" minLength={8} maxLength={72} autoComplete="new-password" value={formData.password} onChange={e => setFormData(p => ({...p, password: e.target.value}))} />
+              <p className="text-xs text-muted-foreground">At least 8 characters.</p>
             </div>
 
             <Button type="submit" className="w-full h-11 mt-4" disabled={isRegistering}>

@@ -2,6 +2,7 @@ import { Router } from "express";
 import { db, expenses, funds, accounts, vendors } from "@workspace/db";
 import { eq, and, desc } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
+import { foreignIdError } from "../lib/ownership";
 import { postSimpleJournalEntry, voidPostedJournalEntry } from "../lib/postJournalEntry";
 
 const router = Router();
@@ -35,6 +36,10 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId, email } = (req as any).user;
     const { description, amount, date, category, fundId, accountId, cashAccountId, vendorId, notes } = req.body ?? {};
+    {
+      const bad = await foreignIdError(companyId, { fund: fundId, glAccount: [accountId, cashAccountId], vendor: vendorId });
+      if (bad) return void res.status(400).json({ error: bad });
+    }
     if (!description || !amount || !date || !category) {
       return void res.status(400).json({ error: "Missing required fields" });
     }
@@ -86,6 +91,10 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId, email } = (req as any).user;
     const { description, amount, date, category, fundId, accountId, cashAccountId, vendorId, notes } = req.body ?? {};
+    {
+      const bad = await foreignIdError(companyId, { fund: fundId, glAccount: [accountId, cashAccountId], vendor: vendorId });
+      if (bad) return void res.status(400).json({ error: bad });
+    }
 
     const [existing] = await db.select().from(expenses).where(and(eq(expenses.id, req.params.id), eq(expenses.companyId, companyId))).limit(1);
     if (!existing) return void res.status(404).json({ error: "Not found" });

@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { apiUrl } from "@/lib/api-base";
+import { MfaCard } from "./MfaCard";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -723,6 +724,8 @@ export default function AdminCommandCenter() {
             </div>
           </div>
         </div>
+
+        <MfaCard />
 
         {/* ── User Messages Inbox ──────────────────────────────────────────── */}
         {(() => {

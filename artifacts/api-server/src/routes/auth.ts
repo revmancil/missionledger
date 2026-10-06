@@ -5,8 +5,10 @@ import { logAudit } from "../lib/audit";
 import { sendWelcomeEmail, sendUserIdRecoveryEmail } from "../lib/email";
 import {
   requireAuth,
+  requirePlatformAdmin,
   hashPassword,
   comparePassword,
+  burnPasswordCheck,
   signToken,
   AuthUser,
   toAuthUser,
@@ -14,6 +16,9 @@ import {
   COOKIE_NAME_EXPORT as COOKIE_NAME,
 } from "../lib/auth";
 import { loginAccountLimiter } from "../lib/rateLimiters";
+import { passwordPolicyError } from "../lib/password";
+import { encryptSecret, decryptSecret, isEncryptionConfigured } from "../lib/secretBox";
+import { generateTotpSecret, verifyTotp, otpauthUri } from "../lib/totp";
 
 const router = Router();
 
@@ -39,6 +44,38 @@ function setCookieAndRespond(res: any, authUser: AuthUser, status = 200) {
   const token = signToken(authUser);
   setSessionCookie(res, token);
   res.status(status).json({ ...authUser, token });
+}
+
+/**
+ * Platform admins with MFA enabled must present a valid TOTP code on every sign-in path
+ * (the admin portal AND the normal company login). Returns true when the request may
+ * proceed; otherwise the response has already been sent.
+ */
+async function passesMfa(
+  res: any,
+  user: { id: string; totpEnabled: boolean; totpSecret: string | null; totpLastStep: number | null },
+  code: unknown,
+): Promise<boolean> {
+  if (!user.totpEnabled || !user.totpSecret) return true;
+  if (code === undefined || code === null || code === "") {
+    res.status(401).json({ error: "MFA_REQUIRED", message: "Enter the 6-digit code from your authenticator app." });
+    return false;
+  }
+  let secret: string;
+  try {
+    secret = decryptSecret(user.totpSecret);
+  } catch (err) {
+    console.error("MFA secret unreadable:", err);
+    res.status(503).json({ error: "MFA_UNAVAILABLE", message: "Multi-factor authentication is temporarily unavailable." });
+    return false;
+  }
+  const step = verifyTotp(secret, code, { lastUsedStep: user.totpLastStep });
+  if (step === null) {
+    res.status(401).json({ error: "ACCESS_DENIED", message: "Invalid authentication code." });
+    return false;
+  }
+  await db.update(users).set({ totpLastStep: step }).where(eq(users.id, user.id));
+  return true;
 }
 
 // GET /auth/me
@@ -83,69 +120,77 @@ router.post("/find-user-id", async (req, res) => {
 // POST /auth/login
 router.post("/login", loginAccountLimiter, async (req, res) => {
   try {
-    const { companyCode, email, userId, password } = req.body ?? {};
-    if (!companyCode || !password || (!email && !userId)) {
+    const { companyCode, email, userId, password, code } = req.body ?? {};
+    const emailOk = email === undefined || typeof email === "string";
+    const userIdOk = userId === undefined || typeof userId === "string";
+    if (
+      typeof companyCode !== "string" || !companyCode ||
+      typeof password !== "string" || !password ||
+      !emailOk || !userIdOk || (!email && !userId)
+    ) {
       return void res.status(400).json({ error: "companyCode, password, and email or userId are required" });
     }
 
-    const normalizedCode = String(companyCode).trim().toUpperCase();
+    const normalizedCode = companyCode.trim().toUpperCase();
     const [company] = await db.select().from(companies)
       .where(eq(companies.companyCode, normalizedCode))
       .limit(1);
-
-    if (!company) {
-      return void res.status(401).json({ error: "Invalid company code" });
-    }
-    if (!company.isActive) {
-      return void res.status(403).json({ error: "ACCOUNT_SUSPENDED", message: "This organization account has been suspended." });
-    }
 
     const normalizedUserId = userId ? String(userId).trim().toLowerCase() : "";
     const normalizedEmail = email ? String(email).trim().toLowerCase() : "";
     const treatUserIdAsEmail = normalizedUserId.includes("@");
 
     let user: any | undefined;
-    if (normalizedUserId && !treatUserIdAsEmail) {
-      [user] = await db.select().from(users).where(
-        and(
-          eq(users.companyId, company.id),
-          eq(users.userId, normalizedUserId),
-          eq(users.isActive, true)
-        )
-      ).limit(1);
-    }
-
-    if (!user) {
-      const effectiveEmail = normalizedEmail || (treatUserIdAsEmail ? normalizedUserId : "");
-      if (effectiveEmail) {
+    if (company) {
+      if (normalizedUserId && !treatUserIdAsEmail) {
         [user] = await db.select().from(users).where(
           and(
             eq(users.companyId, company.id),
-            eq(users.email, effectiveEmail),
+            eq(users.userId, normalizedUserId),
             eq(users.isActive, true)
           )
         ).limit(1);
       }
+
+      if (!user) {
+        const effectiveEmail = normalizedEmail || (treatUserIdAsEmail ? normalizedUserId : "");
+        if (effectiveEmail) {
+          [user] = await db.select().from(users).where(
+            and(
+              eq(users.companyId, company.id),
+              eq(users.email, effectiveEmail),
+              eq(users.isActive, true)
+            )
+          ).limit(1);
+        }
+      }
     }
 
-    if (!user) {
+    // Every way the credentials can be wrong (unknown company, unknown user, wrong password,
+    // no membership) gets the same response and costs the same time, so the endpoint can't be
+    // used to discover which company codes or users exist.
+    let orgMembership: any;
+    let credentialsOk = false;
+    if (company && user) {
+      const valid = await comparePassword(password, user.password);
+      [orgMembership] = await db.select().from(organizationUsers)
+        .where(and(eq(organizationUsers.userId, user.id), eq(organizationUsers.companyId, company.id), eq(organizationUsers.isActive, true)))
+        .limit(1);
+      // Fall back to the legacy companyId check
+      credentialsOk = valid && (!!orgMembership || user.companyId === company.id);
+    } else {
+      await burnPasswordCheck(password);
+    }
+    if (!credentialsOk || !company || !user) {
       return void res.status(401).json({ error: "Invalid credentials" });
     }
 
-    // Verify user has access to this company (check org_users or legacy companyId)
-    const [orgMembership] = await db.select().from(organizationUsers)
-      .where(and(eq(organizationUsers.userId, user.id), eq(organizationUsers.companyId, company.id), eq(organizationUsers.isActive, true)))
-      .limit(1);
-
-    // Fall back to legacy companyId check
-    if (!orgMembership && user.companyId !== company.id) {
-      return void res.status(401).json({ error: "Invalid credentials" });
+    // Only someone who proved they own an account is told it is suspended.
+    if (!company.isActive) {
+      return void res.status(403).json({ error: "ACCOUNT_SUSPENDED", message: "This organization account has been suspended." });
     }
 
-    const valid = await comparePassword(password, user.password);
-    if (!valid) {
-      return void res.status(401).json({ error: "Invalid credentials" });
-    }
+    if (user.isPlatformAdmin && !(await passesMfa(res, user, code))) return;
 
     const effectiveRole = orgMembership?.role ?? user.role;
 
@@ -189,14 +234,15 @@ router.post("/login", loginAccountLimiter, async (req, res) => {
     setCookieAndRespond(res, authUser);
   } catch (error) {
     console.error("Login error:", error);
-    const message = error instanceof Error ? error.message : String(error);
-    res.status(500).json({ error: "Internal server error", message });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
 // POST /auth/logout
 router.post("/logout", (req, res) => {
-  res.clearCookie(COOKIE_NAME);
+  // The attributes must match how the cookie was set (SameSite=None; Secure), or browsers
+  // ignore the clearing header on a cross-site response and the session cookie survives.
+  res.clearCookie(COOKIE_NAME, { httpOnly: true, secure: true, sameSite: "none", path: "/" });
   res.json({ success: true });
 });
 
@@ -204,8 +250,19 @@ router.post("/logout", (req, res) => {
 router.post("/register", async (req, res) => {
   try {
     const { organizationName, ein, organizationType, adminName, adminEmail, adminUserId, password } = req.body ?? {};
-    if (!organizationName || !ein || !organizationType || !adminEmail || !adminUserId || !password) {
+    if (
+      [organizationName, ein, organizationType, adminEmail, adminUserId, password].some(
+        (v) => typeof v !== "string" || !v.trim(),
+      ) ||
+      (adminName !== undefined && adminName !== null && typeof adminName !== "string")
+    ) {
       return void res.status(400).json({ error: "Missing required fields" });
+    }
+    if (!["CHURCH", "MEMBERSHIP", "NONPROFIT"].includes(organizationType)) {
+      return void res.status(400).json({ error: "Invalid organization type" });
+    }
+    if (!adminEmail.includes("@")) {
+      return void res.status(400).json({ error: "A valid email address is required" });
     }
 
     const existingUser = await db.select().from(users).where(
@@ -218,6 +275,11 @@ router.post("/register", async (req, res) => {
       // Registration can be retried after previous failures (e.g. schema drift during deploy).
       // If the email already exists and the provided password matches, treat it as a successful login.
       const existing = existingUser[0];
+      // This retry path signs the user in, so it must never be a way around the MFA that
+      // protects platform-admin accounts.
+      if (existing.isPlatformAdmin) {
+        return void res.status(400).json({ error: "Email already registered" });
+      }
       const valid = await comparePassword(password, existing.password);
       if (!valid) {
         return void res.status(400).json({ error: "Email already registered" });
@@ -263,6 +325,9 @@ router.post("/register", async (req, res) => {
       companyCode = generateCompanyCode(organizationName);
       attempts++;
     }
+
+    const policyError = passwordPolicyError(password);
+    if (policyError) return void res.status(400).json({ error: policyError });
 
     const hashedPw = await hashPassword(password);
 
@@ -328,8 +393,7 @@ router.post("/register", async (req, res) => {
     setCookieAndRespond(res, authUser, 201);
   } catch (error) {
     console.error("Register error:", error);
-    const message = error instanceof Error ? error.message : String(error);
-    res.status(500).json({ error: "Internal server error", message });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -455,35 +519,41 @@ router.post("/switch-org", requireAuth, async (req, res) => {
   }
 });
 
-// POST /auth/admin-login — dedicated platform admin login (email + password only, no company code)
+// POST /auth/admin-login — dedicated platform admin login (email + password [+ TOTP code], no company code)
 // Hard security: only accepts users with isPlatformAdmin = true
 router.post("/admin-login", loginAccountLimiter, async (req, res) => {
   try {
-    const { email, password } = req.body ?? {};
-    if (!email || !password) {
+    const { email, password, code } = req.body ?? {};
+    if (typeof email !== "string" || typeof password !== "string" || !email.trim() || !password) {
       return void res.status(400).json({ error: "Email and password are required." });
     }
 
     const [user] = await db
       .select()
       .from(users)
-      .where(and(eq(users.email, email.trim().toLowerCase()), eq(users.isPlatformAdmin, true)))
+      .where(and(
+        eq(users.email, email.trim().toLowerCase()),
+        eq(users.isPlatformAdmin, true),
+        eq(users.isActive, true),
+      ))
       .limit(1);
 
+    const denied = {
+      error: "ACCESS_DENIED",
+      message: "Platform Administrator credentials not recognized.",
+    };
     if (!user) {
-      return void res.status(401).json({
-        error: "ACCESS_DENIED",
-        message: "Platform Administrator credentials not recognized.",
-      });
+      await burnPasswordCheck(password);
+      return void res.status(401).json(denied);
     }
 
     const valid = await comparePassword(password, user.password);
     if (!valid) {
-      return void res.status(401).json({
-        error: "ACCESS_DENIED",
-        message: "Platform Administrator credentials not recognized.",
-      });
+      return void res.status(401).json(denied);
     }
+
+    // Only revealed after the password is correct, so it can't be used to probe for accounts.
+    if (!(await passesMfa(res, user, code))) return;
 
     const [company] = user.companyId
       ? await db.select().from(companies).where(eq(companies.id, user.companyId)).limit(1)
@@ -509,6 +579,91 @@ router.post("/admin-login", loginAccountLimiter, async (req, res) => {
   }
 });
 
+// ── MFA enrollment (platform admins) ───────────────────────────────────────
+router.get("/mfa/status", requireAuth, requirePlatformAdmin, async (req, res) => {
+  try {
+    const [row] = await db.select({ enabled: users.totpEnabled }).from(users)
+      .where(eq(users.id, (req as any).user.id)).limit(1);
+    res.json({ enabled: !!row?.enabled, encryptionConfigured: isEncryptionConfigured() });
+  } catch (err) {
+    console.error("MFA status error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Step 1: generate a secret (stored encrypted, not yet active) for the admin to add to an authenticator app.
+router.post("/mfa/setup", requireAuth, requirePlatformAdmin, async (req, res) => {
+  try {
+    const { id, email } = (req as any).user as AuthUser;
+    if (!isEncryptionConfigured()) {
+      return void res.status(503).json({
+        error: "ENCRYPTION_NOT_CONFIGURED",
+        message: "Set APP_ENCRYPTION_KEY on the server before enabling multi-factor authentication.",
+      });
+    }
+    const [row] = await db.select({ enabled: users.totpEnabled }).from(users).where(eq(users.id, id)).limit(1);
+    if (row?.enabled) {
+      return void res.status(400).json({ error: "MFA is already enabled. Disable it first to enroll a new device." });
+    }
+    const secret = generateTotpSecret();
+    await db.update(users)
+      .set({ totpSecret: encryptSecret(secret, { required: true }), totpEnabled: false, totpLastStep: null })
+      .where(eq(users.id, id));
+    res.json({ secret, otpauthUri: otpauthUri(secret, email) });
+  } catch (err) {
+    console.error("MFA setup error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Step 2: prove the app is set up by submitting a current code; only then does MFA become mandatory.
+router.post("/mfa/enable", requireAuth, requirePlatformAdmin, async (req, res) => {
+  try {
+    const user = (req as any).user as AuthUser;
+    const [row] = await db.select().from(users).where(eq(users.id, user.id)).limit(1);
+    if (!row?.totpSecret) return void res.status(400).json({ error: "Start MFA setup first." });
+    if (row.totpEnabled) return void res.status(400).json({ error: "MFA is already enabled." });
+
+    const step = verifyTotp(decryptSecret(row.totpSecret), req.body?.code);
+    if (step === null) return void res.status(400).json({ error: "That code is not valid. Check your authenticator app and try again." });
+
+    await db.update(users).set({ totpEnabled: true, totpLastStep: step }).where(eq(users.id, user.id));
+    logAudit({
+      req, companyId: user.companyId || "platform", userId: user.id, userEmail: user.email, userName: user.name,
+      action: "MFA_ENABLED", entityType: "USER", entityId: user.id, description: `Multi-factor authentication enabled for ${user.email}`,
+    });
+    res.json({ enabled: true });
+  } catch (err) {
+    console.error("MFA enable error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Turning MFA off needs both factors, so a stolen session alone cannot remove it.
+router.post("/mfa/disable", requireAuth, requirePlatformAdmin, async (req, res) => {
+  try {
+    const user = (req as any).user as AuthUser;
+    const { password, code } = req.body ?? {};
+    const [row] = await db.select().from(users).where(eq(users.id, user.id)).limit(1);
+    if (!row?.totpEnabled || !row.totpSecret) return void res.status(400).json({ error: "MFA is not enabled." });
+    if (typeof password !== "string" || !(await comparePassword(password, row.password))) {
+      return void res.status(403).json({ error: "Your password is incorrect." });
+    }
+    if (verifyTotp(decryptSecret(row.totpSecret), code, { lastUsedStep: row.totpLastStep }) === null) {
+      return void res.status(403).json({ error: "That code is not valid." });
+    }
+    await db.update(users).set({ totpEnabled: false, totpSecret: null, totpLastStep: null }).where(eq(users.id, user.id));
+    logAudit({
+      req, companyId: user.companyId || "platform", userId: user.id, userEmail: user.email, userName: user.name,
+      action: "MFA_DISABLED", entityType: "USER", entityId: user.id, description: `Multi-factor authentication disabled for ${user.email}`,
+    });
+    res.json({ enabled: false });
+  } catch (err) {
+    console.error("MFA disable error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // POST /auth/change-password — signed-in user updates password (requires current password)
 router.post("/change-password", requireAuth, async (req, res) => {
   try {
@@ -516,8 +671,9 @@ router.post("/change-password", requireAuth, async (req, res) => {
     if (!currentPassword || typeof currentPassword !== "string") {
       return void res.status(400).json({ error: "Current password is required." });
     }
-    if (!newPassword || typeof newPassword !== "string" || newPassword.length < 8) {
-      return void res.status(400).json({ error: "New password must be at least 8 characters." });
+    const newPasswordError = passwordPolicyError(newPassword);
+    if (newPasswordError) {
+      return void res.status(400).json({ error: newPasswordError.replace(/^Password/, "New password") });
     }
     const userId = (req as any).user?.id as string | undefined;
     if (!userId) {

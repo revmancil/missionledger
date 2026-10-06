@@ -12,6 +12,8 @@ import { requireAuth, requireAdmin } from "../lib/auth";
 import { generateGlEntries, voidGlEntries } from "../lib/gl";
 import { recomputeBankBalanceFromTransactions as recomputeBankBalance } from "../lib/bankBalance";
 import { asDate } from "../lib/safeIso";
+import { encryptSecret } from "../lib/secretBox";
+import { readAccessToken } from "../lib/plaidToken";
 
 const router = Router();
 
@@ -201,7 +203,7 @@ router.post("/exchange-token", requireAuth, requireAdmin, async (req, res) => {
     }
 
     await db.update(bankAccounts).set({
-      plaidAccessToken: accessToken,
+      plaidAccessToken: encryptSecret(accessToken),
       plaidItemId: itemId,
       plaidInstitutionName: institutionName || null,
       isPlaidLinked: true,
@@ -228,8 +230,9 @@ router.post("/sync/:bankAccountId", requireAuth, requireAdmin, async (req, res) 
     if (!account.plaidAccessToken) return void res.status(400).json({ error: "Bank account not linked with Plaid" });
 
     const plaid = getPlaidClient();
+    const plaidToken = await readAccessToken({ id: account.id, plaidAccessToken: account.plaidAccessToken });
 
-    const acctResp = await plaid.accountsGet({ access_token: account.plaidAccessToken });
+    const acctResp = await plaid.accountsGet({ access_token: plaidToken });
     const plaidAccountList = (acctResp.data.accounts || []) as PlaidAcct[];
 
     const matchedPlaidAccount = pickPlaidAccountForBank(plaidAccountList, {
@@ -276,7 +279,7 @@ router.post("/sync/:bankAccountId", requireAuth, requireAdmin, async (req, res) 
     let offset = 0;
     while (true) {
       const txResponse = await plaid.transactionsGet({
-        access_token: account.plaidAccessToken,
+        access_token: plaidToken,
         start_date: startDate,
         end_date: endDate,
         options: { count: 500, offset },
@@ -385,7 +388,7 @@ router.post("/sync/:bankAccountId", requireAuth, requireAdmin, async (req, res) 
 
     let updatedBalance: number | undefined;
     try {
-      const balanceResponse = await plaid.accountsBalanceGet({ access_token: account.plaidAccessToken });
+      const balanceResponse = await plaid.accountsBalanceGet({ access_token: plaidToken });
       const plaidAccountsBal = balanceResponse.data.accounts as PlaidAcct[];
       const matchedForBalance = pickPlaidAccountForBank(plaidAccountsBal, {
         plaidAccountId: targetPlaidAccountId,

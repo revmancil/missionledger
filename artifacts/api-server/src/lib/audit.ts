@@ -7,7 +7,7 @@ export interface AuditParams {
   userId: string;
   userEmail?: string | null;
   userName?: string | null;
-  action: "CREATE" | "UPDATE" | "DELETE" | "VOID" | "LOGIN" | "LOGOUT" | "PERIOD_CLOSE" | "PERIOD_REOPEN" | "RESTORE";
+  action: "CREATE" | "UPDATE" | "DELETE" | "VOID" | "LOGIN" | "LOGOUT" | "PERIOD_CLOSE" | "PERIOD_REOPEN" | "RESTORE" | "IMPERSONATE_START" | "IMPERSONATE_END" | "MFA_ENABLED" | "MFA_DISABLED";
   entityType: "TRANSACTION" | "JOURNAL_ENTRY" | "ACCOUNT" | "FUND" | "USER" | "SESSION" | "PERIOD" | "OPENING_BALANCE";
   entityId?: string | null;
   description: string;

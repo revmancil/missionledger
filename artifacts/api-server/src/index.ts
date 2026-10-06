@@ -594,6 +594,14 @@ async function ensureSchema() {
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMP`,
   );
 
+  // TOTP multi-factor auth for platform admins. Fatal for the same reason as above.
+  await ensureAlterThrow("users.totp_secret", `ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_secret TEXT`);
+  await ensureAlterThrow(
+    "users.totp_enabled",
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN NOT NULL DEFAULT FALSE`,
+  );
+  await ensureAlterThrow("users.totp_last_step", `ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_last_step INTEGER`);
+
   // password_reset_tokens was added to the Drizzle schema but never carried over
   // into production by any migration or this file, so /forgot-password has been
   // failing with "relation does not exist" since the feature shipped.

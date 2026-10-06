@@ -4,6 +4,7 @@ import { eq, and } from "drizzle-orm";
 import { requireAuth, requireAdmin, hashPassword, comparePassword } from "../lib/auth";
 import { isEmailConfigured, sendTeamMemberWelcomeEmail, sendSecurityNoticeEmail } from "../lib/email";
 import { logAudit } from "../lib/audit";
+import { passwordPolicyError } from "../lib/password";
 import { getPublicFrontendBase } from "../lib/frontendUrl";
 
 const router = Router();
@@ -268,6 +269,8 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
     if (mismatch) return void res.status(409).json({ error: mismatch });
     const { name, userId, email, password, role } = req.body ?? {};
     if (!userId || !password || !role) return void res.status(400).json({ error: "Missing required fields" });
+    const pwError = passwordPolicyError(password);
+    if (pwError) return void res.status(400).json({ error: pwError });
     const requesterIsPrimary = await isPrimaryAdmin(currentUserId, companyId);
     const legacyRole = mapUiRoleToLegacy(role);
     if (legacyRole === "MASTER_ADMIN" && !requesterIsPrimary) {
@@ -410,6 +413,8 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
     if (typeof isActive === "boolean") updateData.isActive = isActive;
     if (email) updateData.email = email.toLowerCase();
     if (password) {
+      const pwError = passwordPolicyError(password);
+      if (pwError) return void res.status(400).json({ error: pwError });
       updateData.password = await hashPassword(password);
       updateData.passwordChangedAt = new Date();
     }

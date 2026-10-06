@@ -21,6 +21,22 @@ function sortPlansByLowestPrice(plans: any[]): any[] {
   return plans.slice().sort((a, b) => getLowestMonthlyAmount(a) - getLowestMonthlyAmount(b));
 }
 
+/** Every active recurring price the app actually sells — the only IDs checkout may be started with. */
+async function purchasablePriceIds(): Promise<Set<string>> {
+  const ids = new Set<string>();
+  const rows = await stripeStorage.listProductsWithPrices();
+  for (const row of rows as any[]) {
+    if (row.price_id && row.recurring) ids.add(row.price_id);
+  }
+  if (ids.size === 0) {
+    // Same fallback as /plans when the sync tables are empty.
+    const stripe = await getUncachableStripeClient();
+    const prices = await stripe.prices.list({ active: true, limit: 100 });
+    for (const p of prices.data) if (p.recurring) ids.add(p.id);
+  }
+  return ids;
+}
+
 router.get("/plans", async (_req, res) => {
   try {
     const rows = await stripeStorage.listProductsWithPrices();
@@ -125,6 +141,11 @@ router.post("/checkout", requireAuth, requireAdmin, async (req, res) => {
     const { companyId } = (req as any).user;
     const { priceId } = req.body;
     if (!priceId) return void res.status(400).json({ error: "priceId is required" });
+    // Never trust a client-supplied price: it would let a customer check out on any price in
+    // the Stripe account (legacy, discounted, or internal ones).
+    if (typeof priceId !== "string" || !(await purchasablePriceIds()).has(priceId)) {
+      return void res.status(400).json({ error: "That plan is not available." });
+    }
 
     const stripe = await getUncachableStripeClient();
 

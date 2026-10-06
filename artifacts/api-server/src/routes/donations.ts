@@ -2,6 +2,7 @@ import { Router } from "express";
 import { db, donations, funds, accounts } from "@workspace/db";
 import { eq, and, desc } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
+import { foreignIdError } from "../lib/ownership";
 
 const router = Router();
 
@@ -49,6 +50,10 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
     const { donorName, donorEmail, amount, date, type, fundId, accountId, cashAccountId, notes } = req.body ?? {};
+    {
+      const bad = await foreignIdError(companyId, { fund: fundId, glAccount: [accountId, cashAccountId] });
+      if (bad) return void res.status(400).json({ error: bad });
+    }
     if (!donorName || !amount || !date || !type) {
       return void res.status(400).json({ error: "Missing required fields" });
     }
@@ -77,6 +82,10 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
     const { donorName, donorEmail, amount, date, type, fundId, accountId, cashAccountId, notes } = req.body ?? {};
+    {
+      const bad = await foreignIdError(companyId, { fund: fundId, glAccount: [accountId, cashAccountId] });
+      if (bad) return void res.status(400).json({ error: bad });
+    }
 
     const [updated] = await db.update(donations).set({
       donorName,

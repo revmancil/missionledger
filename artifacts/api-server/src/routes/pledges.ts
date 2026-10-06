@@ -2,6 +2,7 @@ import { Router } from "express";
 import { db, pledges } from "@workspace/db";
 import { eq, and, desc } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
+import { foreignIdError } from "../lib/ownership";
 
 const router = Router();
 
@@ -27,6 +28,10 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
     const { donorName, donorEmail, donorId, campaignId, totalAmount, pledgeDate, startDate, endDate, frequency, fundId, notes } = req.body ?? {};
+    {
+      const bad = await foreignIdError(companyId, { donor: donorId, campaign: campaignId, fund: fundId });
+      if (bad) return void res.status(400).json({ error: bad });
+    }
     if (!donorName || !totalAmount || !pledgeDate) return void res.status(400).json({ error: "Missing required fields" });
 
     const [created] = await db.insert(pledges).values({
@@ -64,6 +69,10 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
     const { donorName, donorEmail, donorId, campaignId, totalAmount, pledgeDate, startDate, endDate, frequency, fundId, status, notes } = req.body ?? {};
+    {
+      const bad = await foreignIdError(companyId, { donor: donorId, campaign: campaignId, fund: fundId });
+      if (bad) return void res.status(400).json({ error: bad });
+    }
 
     const [updated] = await db.update(pledges).set({
       donorName,

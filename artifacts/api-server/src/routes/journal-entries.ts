@@ -2,6 +2,7 @@ import { Router } from "express";
 import { db, journalEntries, journalEntryLines, accounts, chartOfAccounts, glEntries, funds } from "@workspace/db";
 import { eq, and, desc } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
+import { foreignIdError } from "../lib/ownership";
 import { logAudit, snap } from "../lib/audit";
 import { nextJournalEntryNumber, withCompanyJournalLock } from "../lib/nextJournalEntryNumber";
 import { recomputeBankBalanceByGlAccount } from "../lib/bankBalance";
@@ -75,6 +76,17 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId, email } = (req as any).user;
     const { date, description, memo, referenceNumber, lines } = req.body ?? {};
+    if (lines !== undefined && lines !== null && !Array.isArray(lines)) {
+      return void res.status(400).json({ error: "lines must be an array" });
+    }
+    {
+      const lineList: any[] = Array.isArray(lines) ? lines : [];
+      const bad = await foreignIdError(companyId, {
+        glAccount: lineList.map((l) => l?.accountId),
+        fund: lineList.map((l) => l?.fundId),
+      });
+      if (bad) return void res.status(400).json({ error: bad });
+    }
     if (!date || !description || !lines?.length) return void res.status(400).json({ error: "Missing required fields" });
 
     const totalDebit = lines.reduce((s: number, l: any) => s + (parseFloat(l.debit) || 0), 0);
@@ -137,6 +149,17 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
     const { date, description, memo, referenceNumber, lines } = req.body ?? {};
+    if (lines !== undefined && lines !== null && !Array.isArray(lines)) {
+      return void res.status(400).json({ error: "lines must be an array" });
+    }
+    {
+      const lineList: any[] = Array.isArray(lines) ? lines : [];
+      const bad = await foreignIdError(companyId, {
+        glAccount: lineList.map((l) => l?.accountId),
+        fund: lineList.map((l) => l?.fundId),
+      });
+      if (bad) return void res.status(400).json({ error: bad });
+    }
 
     const existing = await db.select().from(journalEntries).where(and(eq(journalEntries.id, req.params.id), eq(journalEntries.companyId, companyId))).limit(1);
     if (!existing.length) return void res.status(404).json({ error: "Not found" });

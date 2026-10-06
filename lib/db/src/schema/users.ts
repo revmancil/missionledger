@@ -1,4 +1,4 @@
-import { pgTable, text, boolean, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, text, boolean, timestamp, integer } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { roleEnum } from "./companies";
@@ -14,6 +14,11 @@ export const users = pgTable("users", {
   isActive: boolean("is_active").notNull().default(true),
   isPlatformAdmin: boolean("is_platform_admin").notNull().default(false),
   passwordChangedAt: timestamp("password_changed_at"),
+  /** AES-GCM encrypted TOTP seed (see lib/secretBox). Never returned by the API. */
+  totpSecret: text("totp_secret"),
+  totpEnabled: boolean("totp_enabled").notNull().default(false),
+  /** Last accepted TOTP time-step, so a code cannot be replayed within its validity window. */
+  totpLastStep: integer("totp_last_step"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

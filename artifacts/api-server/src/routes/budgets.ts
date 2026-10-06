@@ -4,6 +4,7 @@ import {
 } from "@workspace/db";
 import { eq, and, desc, asc, gte, lte, inArray } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
+import { foreignIdError } from "../lib/ownership";
 import {
   buildBudgetMonthPeriods,
   normalizeMonthlyAmounts,
@@ -280,6 +281,10 @@ router.post("/:id/lines", requireAuth, requireAdmin, async (req, res) => {
     const { companyId } = (req as any).user;
     const { id } = req.params;
     const { accountId, fundId, amount, monthlyAmounts } = req.body ?? {};
+    {
+      const bad = await foreignIdError(companyId, { glAccount: accountId });
+      if (bad) return void res.status(400).json({ error: bad });
+    }
     if (!accountId || !fundId || (amount === undefined && monthlyAmounts === undefined))
       return void res.status(400).json({ error: "accountId, fundId, and monthlyAmounts (or amount) required" });
 

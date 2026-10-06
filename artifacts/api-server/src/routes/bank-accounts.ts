@@ -2,6 +2,7 @@ import { Router } from "express";
 import { db, bankAccounts, transactions, chartOfAccounts, companies } from "@workspace/db";
 import { eq, and, desc } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "../lib/auth";
+import { foreignIdError } from "../lib/ownership";
 import { toIsoString, asDate } from "../lib/safeIso";
 import { generateGlEntries } from "../lib/gl";
 import { recomputeBankBalanceFromTransactions as recomputeBankBalance } from "../lib/bankBalance";
@@ -57,6 +58,10 @@ router.post("/transfer", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
     const { fromBankAccountId, toBankAccountId, amount, date, memo, fundId } = req.body ?? {};
+    {
+      const bad = await foreignIdError(companyId, { fund: fundId });
+      if (bad) return void res.status(400).json({ error: bad });
+    }
 
     if (!fromBankAccountId || !toBankAccountId || amount === undefined || !date) {
       return void res.status(400).json({ error: "fromBankAccountId, toBankAccountId, amount, and date are required" });
@@ -193,6 +198,10 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
     const { name, accountType, lastFour, currentBalance, glAccountId, isActive } = req.body ?? {};
+    {
+      const bad = await foreignIdError(companyId, { glAccount: glAccountId });
+      if (bad) return void res.status(400).json({ error: bad });
+    }
     if (!name || !accountType) return void res.status(400).json({ error: "Missing required fields" });
 
     const [created] = await db.insert(bankAccounts).values({
@@ -219,6 +228,10 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { companyId } = (req as any).user;
     const { name, accountType, lastFour, currentBalance, glAccountId, isActive } = req.body ?? {};
+    {
+      const bad = await foreignIdError(companyId, { glAccount: glAccountId });
+      if (bad) return void res.status(400).json({ error: bad });
+    }
 
     const [updated] = await db.update(bankAccounts).set({
       name,

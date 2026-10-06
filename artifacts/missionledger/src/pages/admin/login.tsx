@@ -26,6 +26,8 @@ export default function AdminLoginPage() {
   const [showPw, setShowPw]     = useState(false);
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState("");
+  const [code, setCode]         = useState("");
+  const [mfaRequired, setMfaRequired] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -34,6 +36,7 @@ export default function AdminLoginPage() {
     try {
       let lastError = "Authentication failed.";
       let success = false;
+      let promptedForCode = false;
       for (const endpoint of adminLoginCandidates()) {
         const ctrl = new AbortController();
         const timeout = setTimeout(() => ctrl.abort(), 8000);
@@ -42,12 +45,18 @@ export default function AdminLoginPage() {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             credentials: "include",
-            body: JSON.stringify({ email: email.trim(), password }),
+            body: JSON.stringify({ email: email.trim(), password, ...(mfaRequired ? { code: code.trim() } : {}) }),
             signal: ctrl.signal,
           });
           clearTimeout(timeout);
           const data = await res.json().catch(() => ({}));
           if (!res.ok) {
+            if (data.error === "MFA_REQUIRED") {
+              // Password was right; ask for the authenticator code instead of trying other endpoints.
+              setMfaRequired(true);
+              promptedForCode = true;
+              break;
+            }
             lastError = data.message ?? data.error ?? "Authentication failed.";
             continue;
           }
@@ -62,7 +71,7 @@ export default function AdminLoginPage() {
             : "Network error — please try again.";
         }
       }
-      if (!success) setError(lastError);
+      if (!success && !promptedForCode) setError(lastError);
     } catch {
       setError("Network error — please try again.");
     } finally {
@@ -108,6 +117,12 @@ export default function AdminLoginPage() {
             </div>
           )}
 
+          {mfaRequired && !error && (
+            <div className="mb-4 p-3 rounded-lg border border-slate-700 bg-slate-800/60 text-sm text-slate-300">
+              Enter the 6-digit code from your authenticator app.
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">
@@ -148,9 +163,29 @@ export default function AdminLoginPage() {
               </div>
             </div>
 
+            {mfaRequired && (
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">
+                  Authentication Code
+                </label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  value={code}
+                  onChange={e => setCode(e.target.value.replace(/\D/g, ""))}
+                  placeholder="6-digit code"
+                  maxLength={6}
+                  autoFocus
+                  required
+                  className="w-full h-10 px-3 rounded-lg bg-slate-800 border border-slate-700 text-white text-sm placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-red-600 focus:border-transparent tracking-widest"
+                />
+              </div>
+            )}
+
             <button
               type="submit"
-              disabled={loading || !email || !password}
+              disabled={loading || !email || !password || (mfaRequired && code.length !== 6)}
               className="w-full h-10 rounded-lg bg-red-700 hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold flex items-center justify-center gap-2 transition-colors"
             >
               {loading ? (
