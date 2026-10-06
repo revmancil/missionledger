@@ -1,3 +1,4 @@
+import { csvRow } from "@/lib/csv";
 import { useState, useEffect, useCallback } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { useAuth } from "@/hooks/use-auth";
@@ -565,23 +566,18 @@ export default function ReportsPage() {
   const downloadFinancialCsv = useCallback(() => {
     const pl = profitLoss as any;
     if (!pl) return;
-    const esc = (s: string) => `"${String(s ?? "").replace(/"/g, '""')}"`;
     const rows: string[] = [];
-    rows.push(["Section", "Account Code", "Account Name", "Fund", "Amount"].join(","));
+    rows.push(csvRow(["Section", "Account Code", "Account Name", "Fund", "Amount"]));
     for (const r of pl.revenue ?? []) {
-      rows.push(
-        ["Revenue", r.accountCode, esc(r.accountName), esc(r.fundName ?? "—"), Number(r.amount).toFixed(2)].join(","),
-      );
+      rows.push(csvRow(["Revenue", r.accountCode, r.accountName, r.fundName ?? "—", Number(r.amount).toFixed(2)]));
     }
-    rows.push(["Total Revenue", "", "", "", Number(pl.totalRevenue ?? 0).toFixed(2)].join(","));
+    rows.push(csvRow(["Total Revenue", "", "", "", Number(pl.totalRevenue ?? 0).toFixed(2)]));
     rows.push("");
     for (const r of pl.expenses ?? []) {
-      rows.push(
-        ["Expense", r.accountCode, esc(r.accountName), esc(r.fundName ?? "—"), Number(r.amount).toFixed(2)].join(","),
-      );
+      rows.push(csvRow(["Expense", r.accountCode, r.accountName, r.fundName ?? "—", Number(r.amount).toFixed(2)]));
     }
-    rows.push(["Total Expenses", "", "", "", Number(pl.totalExpenses ?? 0).toFixed(2)].join(","));
-    rows.push(["Change in Net Assets", "", "", "", Number(pl.netIncome ?? 0).toFixed(2)].join(","));
+    rows.push(csvRow(["Total Expenses", "", "", "", Number(pl.totalExpenses ?? 0).toFixed(2)]));
+    rows.push(csvRow(["Change in Net Assets", "", "", "", Number(pl.netIncome ?? 0).toFixed(2)]));
     triggerCsvDownload(
       rows.join("\n"),
       `statement-of-activities-${pl.startDate ?? applied.startDate}-${pl.endDate ?? applied.endDate}.csv`,
@@ -596,26 +592,26 @@ export default function ReportsPage() {
     const lines: string[] = [];
     for (const acct of accts) {
       // Beginning balance row
-      lines.push([
-        acct.accountCode, `"${acct.accountName.replace(/"/g, '""')}"`, acct.coaType,
+      lines.push(csvRow([
+        acct.accountCode, acct.accountName, acct.coaType,
         "", "Beginning Balance", "", "", "", acct.beginBalance.toFixed(2),
-      ].join(","));
+      ]));
       for (const e of acct.entries) {
-        lines.push([
-          acct.accountCode, `"${acct.accountName.replace(/"/g, '""')}"`, acct.coaType,
+        lines.push(csvRow([
+          acct.accountCode, acct.accountName, acct.coaType,
           new Date(e.date).toLocaleDateString(),
-          `"${(e.description ?? "").replace(/"/g, '""')}"`,
+          e.description ?? "",
           e.fundName ?? "",
           e.entryType === "DEBIT"  ? e.amount.toFixed(2) : "",
           e.entryType === "CREDIT" ? e.amount.toFixed(2) : "",
           e.runningBalance.toFixed(2),
-        ].join(","));
+        ]));
       }
       // Ending balance row
-      lines.push([
-        acct.accountCode, `"${acct.accountName.replace(/"/g, '""')}"`, acct.coaType,
+      lines.push(csvRow([
+        acct.accountCode, acct.accountName, acct.coaType,
         "", "Ending Balance", "", acct.periodDebit.toFixed(2), acct.periodCredit.toFixed(2), acct.endBalance.toFixed(2),
-      ].join(","));
+      ]));
       lines.push(""); // blank separator between accounts
     }
     triggerCsvDownload([headers.join(","), ...lines].join("\n"),
@@ -630,17 +626,17 @@ export default function ReportsPage() {
     const lines: string[] = [];
     for (const grp of groups) {
       for (const e of grp.entries) {
-        lines.push([
+        lines.push(csvRow([
           new Date(grp.date).toLocaleDateString(),
           SOURCE_LABELS[grp.sourceType] ?? grp.sourceType,
           grp.referenceNumber ?? "",
-          `"${grp.description.replace(/"/g, '""')}"`,
+          grp.description,
           e.accountCode,
-          `"${e.accountName.replace(/"/g, '""')}"`,
+          e.accountName,
           e.fundName ?? "",
           e.entryType === "DEBIT"  ? e.amount.toFixed(2) : "",
           e.entryType === "CREDIT" ? e.amount.toFixed(2) : "",
-        ].join(","));
+        ]));
       }
       lines.push(""); // blank separator between journal entries
     }
@@ -653,17 +649,17 @@ export default function ReportsPage() {
     const rows = registerData?.transactions ?? [];
     if (!rows.length) return;
     const headers = ["Date", "Type", "Description", "Memo", "Check #", "Fund", "Debit Accounts", "Credit Accounts", "Amount"];
-    const lines = rows.map(r => [
+    const lines = rows.map(r => csvRow([
       new Date(r.date).toLocaleDateString(),
       SOURCE_LABELS[r.sourceType] ?? r.sourceType,
-      `"${(r.description ?? "").replace(/"/g, '""')}"`,
-      `"${(r.memo ?? "").replace(/"/g, '""')}"`,
+      r.description ?? "",
+      r.memo ?? "",
       r.checkNumber ?? "",
       r.fundName ?? "",
-      `"${(r.debitAccounts ?? "").replace(/"/g, '""')}"`,
-      `"${(r.creditAccounts ?? "").replace(/"/g, '""')}"`,
+      r.debitAccounts ?? "",
+      r.creditAccounts ?? "",
       r.amount.toFixed(2),
-    ].join(","));
+    ]));
     triggerCsvDownload([headers.join(","), ...lines].join("\n"),
       `transaction-register-${applied.startDate}-${applied.endDate}.csv`);
   }, [registerData, applied]);

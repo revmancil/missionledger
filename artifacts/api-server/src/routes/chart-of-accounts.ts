@@ -508,7 +508,7 @@ router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
 
     await db
       .delete(chartOfAccounts)
-      .where(eq(chartOfAccounts.id, req.params.id));
+      .where(and(eq(chartOfAccounts.id, req.params.id), eq(chartOfAccounts.companyId, companyId)));
 
     res.json({ success: true });
   } catch (error) {

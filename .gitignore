@@ -47,3 +47,10 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# Secrets and local environment — never commit
+.env
+.env.*
+!.env.example
+*.pem
+*.key

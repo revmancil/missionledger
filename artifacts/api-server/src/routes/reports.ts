@@ -1,3 +1,4 @@
+import { csvRow } from "../lib/csv";
 import { Router } from "express";
 import { db, accounts, chartOfAccounts, journalEntries, journalEntryLines, donations, expenses, budgets, budgetLines, glEntries, funds, transactions, transactionSplits } from "@workspace/db";
 import { eq, and, gte, lte, inArray, sql, isNotNull, isNull, ne } from "drizzle-orm";
@@ -1114,19 +1115,18 @@ router.get("/990-export", requireAuth, async (req, res) => {
     ];
 
     for (const r of sqlRows(exportRaw) as any[]) {
-      const row = [
+      lines.push(csvRow([
         new Date(r.date).toISOString().substring(0, 10),
-        `"${String(r.description ?? "").replace(/"/g, '""')}"`,
+        r.description,
         r.account_code,
-        `"${String(r.account_name).replace(/"/g, '""')}"`,
+        r.account_name,
         r.account_type,
-        `"${String(r.fund_name ?? "").replace(/"/g, '""')}"`,
+        r.fund_name,
         r.entry_type,
         parseFloat(r.amount).toFixed(2),
         functionalLabel[r.functional_type] ?? "",
         r.account_type === "EXPENSE" ? irs(String(r.account_code), String(r.account_name)) : "",
-      ].join(",");
-      lines.push(row);
+      ]));
     }
 
     const csv = lines.join("\r\n");

@@ -224,7 +224,7 @@ router.post("/:id/complete", requireAuth, requireAdmin, async (req, res) => {
 
     const [finished] = await db.update(reconciliations)
       .set({ clearedBalance, difference, status: "COMPLETED", reconciledBy: email ?? null, reconciledAt: new Date(), updatedAt: new Date() })
-      .where(eq(reconciliations.id, req.params.id))
+      .where(and(eq(reconciliations.id, req.params.id), eq(reconciliations.companyId, companyId)))
       .returning();
 
     res.json(serializeRecon(finished));
@@ -266,7 +266,7 @@ router.post("/:id/reopen", requireAuth, requireAdmin, async (req, res) => {
         reconciledAt: null,
         updatedAt: new Date(),
       })
-      .where(eq(reconciliations.id, req.params.id))
+      .where(and(eq(reconciliations.id, req.params.id), eq(reconciliations.companyId, companyId)))
       .returning();
 
     res.json(serializeRecon(reopened));
@@ -288,7 +288,7 @@ router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
 
     // Delete items first, then the session
     await db.delete(reconciliationItems).where(eq(reconciliationItems.reconciliationId, req.params.id));
-    await db.delete(reconciliations).where(eq(reconciliations.id, req.params.id));
+    await db.delete(reconciliations).where(and(eq(reconciliations.id, req.params.id), eq(reconciliations.companyId, companyId)));
     res.json({ success: true });
   } catch (err) {
     console.error("Delete recon error:", err);
@@ -310,7 +310,7 @@ router.post("/:id/statement", requireAuth, requireAdmin, async (req, res) => {
 
     await db.update(reconciliations)
       .set({ statementFileName: fileName, statementFileData: fileData, updatedAt: new Date() } as any)
-      .where(eq(reconciliations.id, req.params.id));
+      .where(and(eq(reconciliations.id, req.params.id), eq(reconciliations.companyId, companyId)));
 
     res.json({ success: true, fileName });
   } catch (err) {

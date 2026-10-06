@@ -931,7 +931,7 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
           transactionFingerprint: newFingerprint,
           updatedAt: new Date(),
         })
-        .where(eq(transactions.id, req.params.id))
+        .where(and(eq(transactions.id, req.params.id), eq(transactions.companyId, companyId)))
         .returning();
       await trx.delete(transactionSplits).where(eq(transactionSplits.transactionId, row.id));
       if (isSplit) {

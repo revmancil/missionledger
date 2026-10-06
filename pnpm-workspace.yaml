@@ -4,6 +4,8 @@ packages:
   - lib/integrations/*
   - scripts
 
+
+
 autoInstallPeers: false
 
 catalog:
@@ -38,6 +40,12 @@ onlyBuiltDependencies:
   - unrs-resolver
 
 overrides:
+  proxy-addr: ^2.0.8
+  body-parser: ^2.3.0
+  dompurify: ^3.4.13
+  fflate: ^0.8.3
+  qs: ^6.16.0
+  svix>uuid: ^11.1.1
   '@esbuild-kit/esm-loader': npm:tsx@^4.21.0
   '@expo/ngrok-bin>@expo/ngrok-bin-darwin-arm64': '-'
   '@expo/ngrok-bin>@expo/ngrok-bin-darwin-x64': '-'

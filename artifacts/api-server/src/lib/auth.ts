@@ -12,6 +12,16 @@ if (!process.env.JWT_SECRET) {
   );
 }
 const JWT_SECRET = process.env.JWT_SECRET;
+if (JWT_SECRET.length < 32) {
+  // Anyone who can guess a weak secret can mint a valid login for any account, so say so
+  // loudly. Not fatal by default (an existing deployment may use a shorter one and would
+  // fail to boot); set REQUIRE_STRONG_JWT_SECRET=1 once it has been rotated to enforce it.
+  const message =
+    "JWT_SECRET is only " + JWT_SECRET.length + " characters. Use at least 32 random characters " +
+    "(for example 64 hex characters); changing it signs every user out.";
+  if (process.env.REQUIRE_STRONG_JWT_SECRET === "1") throw new Error(message);
+  console.warn("[security] " + message);
+}
 const COOKIE_NAME = "ml_session";
 
 export interface AuthUser {

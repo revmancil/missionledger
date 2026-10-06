@@ -172,10 +172,10 @@ router.put("/:id", requireAuth, requireAdmin, async (req, res) => {
         memo: memo || null,
         referenceNumber: referenceNumber || null,
         updatedAt: new Date(),
-      }).where(eq(journalEntries.id, req.params.id)).returning();
+      }).where(and(eq(journalEntries.id, req.params.id), eq(journalEntries.companyId, companyId))).returning();
 
       if (lines) {
-        await tx.delete(journalEntryLines).where(eq(journalEntryLines.journalEntryId, req.params.id));
+        await tx.delete(journalEntryLines).where(and(eq(journalEntryLines.journalEntryId, req.params.id), eq(journalEntryLines.companyId, companyId)));
         for (const line of lines) {
           await tx.insert(journalEntryLines).values({
             journalEntryId: req.params.id,
@@ -220,8 +220,8 @@ router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
     if (!existing.length) return void res.status(404).json({ error: "Not found" });
     if (existing[0].status === "POSTED") return void res.status(400).json({ error: "Cannot delete posted entry" });
 
-    await db.delete(journalEntryLines).where(eq(journalEntryLines.journalEntryId, req.params.id));
-    await db.delete(journalEntries).where(eq(journalEntries.id, req.params.id));
+    await db.delete(journalEntryLines).where(and(eq(journalEntryLines.journalEntryId, req.params.id), eq(journalEntryLines.companyId, companyId)));
+    await db.delete(journalEntries).where(and(eq(journalEntries.id, req.params.id), eq(journalEntries.companyId, companyId)));
 
     const { id: userId3, email: userEmail3, name: userName3 } = (req as any).user;
     logAudit({
@@ -328,7 +328,7 @@ router.post("/:id/post", requireAuth, requireAdmin, async (req, res) => {
       status: "POSTED",
       postedAt: new Date(),
       updatedAt: new Date(),
-    }).where(eq(journalEntries.id, req.params.id)).returning();
+    }).where(and(eq(journalEntries.id, req.params.id), eq(journalEntries.companyId, companyId))).returning();
 
     // Recompute bank balances for any bank accounts whose GL account was touched
     const postedLines = await db.select({ accountId: journalEntryLines.accountId })
@@ -365,7 +365,7 @@ router.post("/:id/void", requireAuth, requireAdmin, async (req, res) => {
       status: "VOID",
       voidedAt: new Date(),
       updatedAt: new Date(),
-    }).where(eq(journalEntries.id, req.params.id)).returning();
+    }).where(and(eq(journalEntries.id, req.params.id), eq(journalEntries.companyId, companyId))).returning();
 
     // Recompute bank balances for affected bank accounts
     await Promise.all(uniqueVoidAccountIds.map(id => recomputeBankBalanceByGlAccount(id, companyId).catch(() => {})));

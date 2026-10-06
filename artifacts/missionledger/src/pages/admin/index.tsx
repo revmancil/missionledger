@@ -542,7 +542,7 @@ export default function AdminCommandCenter() {
   async function loadMessages() {
     setMsgLoading(true);
     try {
-      const msgs = await apiFetch("/api/help-messages");
+      const msgs = await apiFetch("/api/help-messages?scope=all");
       setMessages(msgs);
     } catch { }
     finally { setMsgLoading(false); }

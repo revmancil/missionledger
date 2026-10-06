@@ -41,3 +41,11 @@ export const loginAccountLimiter = rateLimit({
   },
   message: { error: "Too many failed sign-in attempts for this account. Please try again in 15 minutes." },
 });
+
+/** Browser CSP violation reports are unauthenticated by nature, so keep them cheap to ignore. */
+export const cspReportLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 30,
+  standardHeaders: false,
+  legacyHeaders: false,
+});

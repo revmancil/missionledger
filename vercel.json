@@ -11,5 +11,54 @@
       "source": "/(.*)",
       "destination": "/index.html"
     }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Strict-Transport-Security",
+          "value": "max-age=31536000"
+        },
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "camera=(), microphone=(), geolocation=(), payment=()"
+        },
+        {
+          "key": "Content-Security-Policy-Report-Only",
+          "value": "default-src 'self'; script-src 'self' https://cdn.plaid.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; connect-src 'self' https://missionledger-api.onrender.com https://*.plaid.com; frame-src https://cdn.plaid.com https://zeffy.com https://*.zeffy.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; report-uri /api/csp-report"
+        }
+      ]
+    },
+    {
+      "source": "/((?!give).*)",
+      "headers": [
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "Content-Security-Policy",
+          "value": "frame-ancestors 'none'; base-uri 'self'; object-src 'none'; form-action 'self'"
+        }
+      ]
+    },
+    {
+      "source": "/give(.*)",
+      "headers": [
+        {
+          "key": "Content-Security-Policy",
+          "value": "base-uri 'self'; object-src 'none'; form-action 'self'"
+        }
+      ]
+    }
   ]
 }

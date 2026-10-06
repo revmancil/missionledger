@@ -1,3 +1,4 @@
+import { csvRow } from "@/lib/csv";
 import { useState, useEffect, useCallback } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -222,7 +223,7 @@ export default function CustomReportsPage() {
     if (!result) return;
     const rows = buildFlatRows(result);
     const headers = Object.keys(rows[0] || {});
-    const csv = [headers.join(","), ...rows.map(r => headers.map(h => `"${(r as any)[h] ?? ""}"`).join(","))].join("\n");
+    const csv = [csvRow(headers), ...rows.map(r => csvRow(headers.map(h => (r as any)[h])))].join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
