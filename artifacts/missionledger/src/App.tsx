@@ -58,6 +58,8 @@ import BoardReportPage from "@/pages/board-report";
 import AdminUsersPage from "@/pages/admin-users";
 import GivePage from "@/pages/give";
 import FundLedgerPage from "@/pages/fund-ledger";
+import ExpensesPage from "@/pages/expenses";
+import BillsPage from "@/pages/bills";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -153,6 +155,8 @@ function Router() {
       <Route path="/board-report"><SubscriptionGatedRoute component={BoardReportPage} /></Route>
       <Route path="/donor-giving"><SubscriptionGatedRoute component={DonorGivingPage} /></Route>
       <Route path="/donor-directory"><SubscriptionGatedRoute component={DonorDirectoryPage} /></Route>
+      <Route path="/bills"><SubscriptionGatedRoute component={BillsPage} /></Route>
+      <Route path="/expenses"><SubscriptionGatedRoute component={ExpensesPage} /></Route>
       <Route path="/master-admin"><Redirect to="/admin" /></Route>
       <Route path="/billing"><ProtectedRoute component={BillingPage} /></Route>
       <Route path="/admin-users"><SubscriptionGatedRoute component={AdminUsersPage} /></Route>

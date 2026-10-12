@@ -42,8 +42,10 @@ import {
   ChevronDown,
   ChevronRight,
   Ban,
+  Paperclip,
 } from "lucide-react";
 import { cn, formatCurrency, formatDate } from "@/lib/utils";
+import { AttachmentPanel } from "@/components/AttachmentPanel";
 
 const BASE = import.meta.env.BASE_URL;
 const api = (url: string, init?: RequestInit) => {
@@ -860,6 +862,9 @@ function HistoryPanel({
                                 ))}
                               </tbody>
                             </table>
+                            <div className="mt-3">
+                              <AttachmentPanel entityType="JOURNAL_ENTRY" entityId={entry.id} variant="compact" />
+                            </div>
                           </div>
                         </TableCell>
                       </TableRow>
