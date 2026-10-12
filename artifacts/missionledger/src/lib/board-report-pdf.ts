@@ -1,6 +1,16 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { format, parseISO } from "date-fns";
+import {
+  formatCurrency,
+  buildHighlights,
+  buildNarrative,
+  revenueSpendingSummary,
+  positionSummary,
+  healthSummary,
+  fundBalancesSummary,
+  type Highlight,
+} from "./board-report-copy";
 
 type RiskStatus = "GREEN" | "YELLOW" | "RED";
 type CommitteeType = "FINANCE" | "AUDIT" | "GOVERNANCE" | "EXECUTIVE" | "PROGRAM" | "OTHER";
@@ -104,12 +114,68 @@ const FUND_TYPE_LABELS: Record<string, string> = {
   BOARD_DESIGNATED: "Board Designated",
 };
 
-function formatCurrency(n: number): string {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n);
-}
-
 function lastTableY(doc: jsPDF): number {
   return (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable?.finalY ?? MARGIN;
+}
+
+const TONE_RGB: Record<Highlight["tone"], [number, number, number]> = {
+  positive: [5, 150, 105],
+  warning: [180, 83, 9],
+  danger: [185, 28, 28],
+  neutral: [71, 85, 105],
+};
+
+const CONTENT_W = 612 - MARGIN * 2; // US Letter width minus margins
+
+/** Section heading plus an optional factual "What this means" line. */
+function sectionTitleWithSummary(doc: jsPDF, title: string, y: number, summary?: string): number {
+  y = sectionTitle(doc, title, y);
+  if (summary) {
+    const lines = doc.splitTextToSize(`What this means: ${summary}`, CONTENT_W) as string[];
+    doc.setFont("helvetica", "italic");
+    doc.setFontSize(9);
+    doc.setTextColor(71, 85, 105);
+    doc.text(lines, MARGIN, y);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(0, 0, 0);
+    y += lines.length * 11 + 6;
+  }
+  return y;
+}
+
+/** Draw a simple horizontal bar chart. Returns the y position after the chart. */
+function drawBarChart(
+  doc: jsPDF,
+  y: number,
+  rows: Array<{ label: string; value: number; color: [number, number, number] }>,
+  options?: { max?: number },
+): number {
+  const labelW = 190;
+  const valueW = 90;
+  const barW = CONTENT_W - labelW - valueW - 8;
+  const rowH = 16;
+  const max = options?.max ?? Math.max(...rows.map((r) => Math.abs(r.value)), 1);
+
+  for (const r of rows) {
+    const barLen = max > 0 ? Math.max((Math.abs(r.value) / max) * barW, 2) : 0;
+    // Label
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(60, 60, 60);
+    doc.text(doc.splitTextToSize(r.label, labelW - 6)[0], MARGIN, y + 8);
+    // Bar
+    doc.setFillColor(235, 235, 235);
+    doc.rect(MARGIN + labelW, y + 1, barW, 9, "F");
+    doc.setFillColor(...r.color);
+    doc.rect(MARGIN + labelW, y + 1, barLen, 9, "F");
+    // Value
+    doc.setTextColor(30, 30, 30);
+    doc.setFontSize(8);
+    doc.text(formatCurrency(r.value), MARGIN + labelW + barW + 8, y + 8);
+    y += rowH;
+  }
+  doc.setTextColor(0, 0, 0);
+  return y;
 }
 
 function addPageHeader(
@@ -179,7 +245,79 @@ export function downloadBoardReportPdf(
     () => addPageHeader(doc, orgName, reportTitle, subtitle),
   );
 
+  const highlights = buildHighlights({
+    totalCash: data.financialHealth.totalCash,
+    netIncome: data.profitLoss.netIncome,
+    monthsOfRunway: data.financialHealth.monthsOfRunway,
+    budget: { percent: data.financialHealth.budget.percent },
+    metrics: {
+      total: data.programmaticImpact.metrics.length,
+      onTrack: data.programmaticImpact.metrics.filter((m) => m.percentOfTarget >= 100).length,
+      atRisk: data.programmaticImpact.metrics.filter((m) => m.percentOfTarget > 0 && m.percentOfTarget < 80).length,
+    },
+    risks: {
+      red: data.strategicRisks.items.filter((r) => r.status === "RED").length,
+      yellow: data.strategicRisks.items.filter((r) => r.status === "YELLOW").length,
+    },
+  });
+
+  const narrative = buildNarrative({
+    label: data.dateRange.label,
+    totalRevenue: data.profitLoss.totalRevenue,
+    totalExpenses: data.profitLoss.totalExpenses,
+    netIncome: data.profitLoss.netIncome,
+    totalCash: data.financialHealth.totalCash,
+    monthsOfRunway: data.financialHealth.monthsOfRunway,
+    metrics: {
+      total: data.programmaticImpact.metrics.length,
+      onTrack: data.programmaticImpact.metrics.filter((m) => m.percentOfTarget >= 100).length,
+    },
+    risks: {
+      red: data.strategicRisks.items.filter((r) => r.status === "RED").length,
+      yellow: data.strategicRisks.items.filter((r) => r.status === "YELLOW").length,
+    },
+  });
+
   let y = 68;
+
+  // ── In a Nutshell (executive summary) ───────────────────────────────────────
+  y = sectionTitle(doc, "In a Nutshell", y);
+  const narrativeLines = doc.splitTextToSize(narrative, CONTENT_W) as string[];
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.setTextColor(40, 40, 40);
+  doc.text(narrativeLines, MARGIN, y);
+  doc.setTextColor(0, 0, 0);
+  y += narrativeLines.length * 11 + 8;
+
+  const tileW = (CONTENT_W - 2 * 8) / 3;
+  const tileH = 46;
+  highlights.forEach((h, i) => {
+    const col = i % 3;
+    const row = Math.floor(i / 3);
+    const tx = MARGIN + col * (tileW + 8);
+    const ty = y + row * (tileH + 8);
+    doc.setDrawColor(225, 225, 225);
+    doc.setFillColor(249, 250, 251);
+    doc.roundedRect(tx, ty, tileW, tileH, 3, 3, "FD");
+    const tone = TONE_RGB[h.tone];
+    doc.setFillColor(...tone);
+    doc.circle(tx + 9, ty + 12, 2.2, "F");
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7.5);
+    doc.setTextColor(90, 90, 90);
+    doc.text(doc.splitTextToSize(h.label, tileW - 20)[0], tx + 15, ty + 14);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(13);
+    doc.setTextColor(20, 20, 20);
+    doc.text(h.value, tx + 9, ty + 30);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(6.5);
+    doc.setTextColor(120, 120, 120);
+    doc.text(doc.splitTextToSize(h.gloss, tileW - 18)[0], tx + 9, ty + 40);
+  });
+  y += Math.ceil(highlights.length / 3) * (tileH + 8) + 10;
+  doc.setTextColor(0, 0, 0);
 
   // ── Action Required (prominent) ─────────────────────────────────────────────
   doc.setFillColor(255, 247, 230);
@@ -228,15 +366,24 @@ export function downloadBoardReportPdf(
     y = lastTableY(doc) + 18;
   }
 
-  // ── Statement of Activities (Summary) ───────────────────────────────────────
-  y = sectionTitle(doc, "Statement of Activities (Summary)", y);
+  // ── Revenue & Spending (was: Statement of Activities) ───────────────────────
+  y = sectionTitleWithSummary(
+    doc,
+    "Revenue & Spending",
+    y,
+    revenueSpendingSummary({
+      totalRevenue: data.profitLoss.totalRevenue,
+      totalExpenses: data.profitLoss.totalExpenses,
+      netIncome: data.profitLoss.netIncome,
+    }),
+  );
   autoTable(doc, {
     startY: y,
     head: [["", "Amount"]],
     body: [
       ["Total Revenue", formatCurrency(data.profitLoss.totalRevenue)],
       ["Total Expenses", formatCurrency(data.profitLoss.totalExpenses)],
-      [{ content: "Net Income", styles: { fontStyle: "bold" } }, { content: formatCurrency(data.profitLoss.netIncome), styles: { fontStyle: "bold" } }],
+      [{ content: data.profitLoss.netIncome >= 0 ? "Surplus" : "Deficit", styles: { fontStyle: "bold" } }, { content: formatCurrency(data.profitLoss.netIncome), styles: { fontStyle: "bold" } }],
     ],
     theme: "striped",
     headStyles: { fillColor: NAVY, fontSize: 9 },
@@ -244,18 +391,24 @@ export function downloadBoardReportPdf(
     columnStyles: { 1: { halign: "right" } },
     margin: { left: MARGIN, right: MARGIN },
   });
-  y = lastTableY(doc) + 8;
+  y = lastTableY(doc) + 10;
+  y = drawBarChart(doc, y, [
+    { label: "Revenue", value: data.profitLoss.totalRevenue, color: [5, 150, 105] },
+    { label: "Expenses", value: data.profitLoss.totalExpenses, color: [220, 38, 38] },
+    { label: "Net", value: data.profitLoss.netIncome, color: [37, 99, 235] },
+  ]);
+  y += 8;
   if (data.profitLoss.topRevenue.length > 0 || data.profitLoss.topExpenses.length > 0) {
     autoTable(doc, {
       startY: y,
-      head: [["Top Revenue Accounts", "Amount", "Top Expense Accounts", "Amount"]],
+      head: [["Where our money came from", "Amount", "Where our money went", "Amount"]],
       body: Array.from({ length: Math.max(data.profitLoss.topRevenue.length, data.profitLoss.topExpenses.length, 1) }).map((_, i) => {
         const rev = data.profitLoss.topRevenue[i];
         const exp = data.profitLoss.topExpenses[i];
         return [
-          rev ? `${rev.accountCode} ${rev.accountName}` : "",
+          rev ? `${rev.accountName} (${rev.accountCode})` : "",
           rev ? formatCurrency(rev.amount) : "",
-          exp ? `${exp.accountCode} ${exp.accountName}` : "",
+          exp ? `${exp.accountName} (${exp.accountCode})` : "",
           exp ? formatCurrency(exp.amount) : "",
         ];
       }),
@@ -268,17 +421,26 @@ export function downloadBoardReportPdf(
     y = lastTableY(doc) + 18;
   }
 
-  // ── Balance Sheet (Summary) ───────────────────────────────────────────────
-  y = sectionTitle(doc, `Statement of Financial Position — As of ${data.balanceSheet.asOfDate}`, y);
+  // ── What We Own & Owe (was: Statement of Financial Position) ─────────────────
+  y = sectionTitleWithSummary(
+    doc,
+    `What We Own & Owe — As of ${data.balanceSheet.asOfDate}`,
+    y,
+    positionSummary({
+      totalAssets: data.balanceSheet.totalAssets,
+      totalLiabilities: data.balanceSheet.totalLiabilities,
+      totalNetAssets: data.balanceSheet.totalNetAssets,
+    }),
+  );
   autoTable(doc, {
     startY: y,
     head: [["", "Amount"]],
     body: [
       ["Total Assets", formatCurrency(data.balanceSheet.totalAssets)],
       ["Total Liabilities", formatCurrency(data.balanceSheet.totalLiabilities)],
-      ["Total Net Assets", formatCurrency(data.balanceSheet.totalNetAssets)],
-      ["Unrestricted Net Assets", formatCurrency(data.balanceSheet.totalUnrestrictedNetAssets)],
-      ["Restricted Net Assets", formatCurrency(data.balanceSheet.totalRestrictedNetAssets)],
+      ["Net Assets", formatCurrency(data.balanceSheet.totalNetAssets)],
+      ["Available to spend (Unrestricted)", formatCurrency(data.balanceSheet.totalUnrestrictedNetAssets)],
+      ["Restricted by donors", formatCurrency(data.balanceSheet.totalRestrictedNetAssets)],
     ],
     theme: "striped",
     headStyles: { fillColor: NAVY, fontSize: 9 },
@@ -289,7 +451,12 @@ export function downloadBoardReportPdf(
   y = lastTableY(doc) + 18;
 
   // ── Fund Balances ───────────────────────────────────────────────────────────
-  y = sectionTitle(doc, `Fund Balances — As of ${data.fundBalances.asOfDate}`, y);
+  y = sectionTitleWithSummary(
+    doc,
+    `Fund Balances — As of ${data.fundBalances.asOfDate}`,
+    y,
+    fundBalancesSummary(data.fundBalances.total, data.fundBalances.items.length),
+  );
   if (data.fundBalances.items.length === 0) {
     doc.setFont("helvetica", "normal");
     doc.setFontSize(10);
@@ -298,6 +465,16 @@ export function downloadBoardReportPdf(
     doc.setTextColor(0, 0, 0);
     y += 20;
   } else {
+    y = drawBarChart(
+      doc,
+      y,
+      data.fundBalances.items.map((f) => ({
+        label: `${f.fundName} (${FUND_TYPE_LABELS[f.fundType] ?? f.fundType})`,
+        value: f.balance,
+        color: f.balance < 0 ? [220, 38, 38] : ([30, 64, 108] as [number, number, number]),
+      })),
+    );
+    y += 8;
     autoTable(doc, {
       startY: y,
       head: [["Fund", "Type", "Balance"]],
@@ -322,13 +499,22 @@ export function downloadBoardReportPdf(
     y = lastTableY(doc) + 18;
   }
 
-  // ── Financial Health ────────────────────────────────────────────────────────
-  y = sectionTitle(doc, "Financial Health", y);
+  // ── Cash & Sustainability (was: Financial Health) ────────────────────────────
+  y = sectionTitleWithSummary(
+    doc,
+    "Cash & Sustainability",
+    y,
+    healthSummary({
+      totalCash: data.financialHealth.totalCash,
+      monthsOfRunway: data.financialHealth.monthsOfRunway,
+      budget: { percent: data.financialHealth.budget.percent },
+    }),
+  );
 
   doc.setFontSize(8);
   doc.setTextColor(100, 100, 100);
   doc.text(
-    `Cash from bank register as of ${data.financialHealth.cashAsOfDate}. Revenue and expenses match Statement of Activities.`,
+    `Cash from bank register as of ${data.financialHealth.cashAsOfDate}.`,
     MARGIN,
     y,
   );
@@ -338,13 +524,13 @@ export function downloadBoardReportPdf(
     startY: y,
     head: [["Metric", "Amount"]],
     body: [
-      ["Cash Position", formatCurrency(data.financialHealth.totalCash)],
-      ["Period Revenue", formatCurrency(data.financialHealth.periodRevenue)],
-      ["Period Expenses", formatCurrency(data.financialHealth.periodExpenses)],
-      ["Period Net", formatCurrency(data.financialHealth.periodNet)],
-      ["Monthly Burn Rate (avg.)", `${formatCurrency(data.financialHealth.periodBurnRate)}/mo`],
+      ["Cash on hand", formatCurrency(data.financialHealth.totalCash)],
+      ["Revenue this period", formatCurrency(data.financialHealth.periodRevenue)],
+      ["Spending this period", formatCurrency(data.financialHealth.periodExpenses)],
+      ["Net this period", formatCurrency(data.financialHealth.periodNet)],
+      ["Avg. monthly spending", `${formatCurrency(data.financialHealth.periodBurnRate)}/mo`],
       [
-        "Estimated Cash Runway",
+        "Months of runway",
         data.financialHealth.monthsOfRunway != null
           ? `${data.financialHealth.monthsOfRunway} months`
           : "—",
@@ -397,8 +583,15 @@ export function downloadBoardReportPdf(
 
   y = lastTableY(doc) + 18;
 
-  // ── Programmatic Impact ───────────────────────────────────────────────────
-  y = sectionTitle(doc, `Programmatic Impact — ${data.period.label}`, y);
+  // ── Program Goals & Impact ────────────────────────────────────────────────
+  const goalsOnTrack = data.programmaticImpact.metrics.filter((m) => m.percentOfTarget >= 100).length;
+  const goalsTotal = data.programmaticImpact.metrics.length;
+  y = sectionTitleWithSummary(
+    doc,
+    `Program Goals & Impact — ${data.period.label}`,
+    y,
+    goalsTotal > 0 ? `${goalsOnTrack} of ${goalsTotal} program goals are on track this period.` : undefined,
+  );
 
   if (data.programmaticImpact.metrics.length === 0) {
     doc.setFontSize(10);
@@ -430,8 +623,8 @@ export function downloadBoardReportPdf(
     y = lastTableY(doc) + 18;
   }
 
-  // ── Strategic Risk ──────────────────────────────────────────────────────────
-  y = sectionTitle(doc, "Strategic Risk Register", y);
+  // ── Strategic Risks ─────────────────────────────────────────────────────────
+  y = sectionTitle(doc, "Strategic Risks", y);
 
   if (data.strategicRisks.items.length === 0) {
     doc.setFontSize(10);
@@ -493,6 +686,30 @@ export function downloadBoardReportPdf(
       margin: { left: MARGIN, right: MARGIN },
     });
   }
+
+  // ── Glossary ────────────────────────────────────────────────────────────────
+  y = lastTableY(doc) + 18;
+  y = sectionTitle(doc, "Terms Used in This Report", y);
+  const glossary: Array<[string, string]> = [
+    ["Revenue", "Money the organization received."],
+    ["Expenses", "Money the organization spent."],
+    ["Surplus / (Deficit)", "What's left when expenses are subtracted from revenue. A surplus is positive; a deficit is negative."],
+    ["Net Assets", "Everything the organization owns minus everything it owes. Also called \"fund balance\" or \"equity\"."],
+    ["Available to spend", "Net assets not restricted by donors (\"unrestricted\")."],
+    ["Restricted", "Net assets a donor designated for a specific purpose."],
+    ["Months of runway", "How long cash would last at the current rate of spending."],
+    ["Budget used", "Share of the active annual budget spent so far."],
+  ];
+  autoTable(doc, {
+    startY: y,
+    head: [["Term", "Meaning"]],
+    body: glossary,
+    theme: "grid",
+    headStyles: { fillColor: NAVY, fontSize: 8 },
+    bodyStyles: { fontSize: 8, cellPadding: 4 },
+    columnStyles: { 0: { cellWidth: 130, fontStyle: "bold" } },
+    margin: { left: MARGIN, right: MARGIN },
+  });
 
   addPdfFooters(doc);
 

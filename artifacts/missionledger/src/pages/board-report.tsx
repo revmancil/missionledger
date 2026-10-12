@@ -16,14 +16,109 @@ import { Progress } from "@/components/ui/progress";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
+} from "recharts";
 import { useAuth } from "@/hooks/use-auth";
 import { authJsonFetch, readJsonSafe } from "@/lib/auth-fetch";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { downloadBoardReportPdf } from "@/lib/board-report-pdf";
+import {
+  formatCurrency as fmt,
+  buildHighlights,
+  buildNarrative,
+  revenueSpendingSummary,
+  positionSummary,
+  healthSummary,
+  fundBalancesSummary,
+  runwayGloss,
+  type Highlight,
+} from "@/lib/board-report-copy";
 
-function fmt(n: number) {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n);
+// Board-facing palette (matches existing branding). Values are hex because SVG
+// chart fills cannot use Tailwind classes.
+const BRAND = {
+  revenue: "#059669",
+  expense: "#dc2626",
+  net: "#2563eb",
+  cash: "#1e406c",
+  accent: "#3b82f6",
+};
+
+const TONE_CLASSES: Record<Highlight["tone"], { card: string; value: string; dot: string }> = {
+  positive: { card: "bg-emerald-50 border-emerald-100", value: "text-emerald-800", dot: "bg-emerald-500" },
+  warning: { card: "bg-amber-50 border-amber-100", value: "text-amber-800", dot: "bg-amber-400" },
+  danger: { card: "bg-red-50 border-red-100", value: "text-red-800", dot: "bg-red-500" },
+  neutral: { card: "bg-muted/50 border-border", value: "text-foreground", dot: "bg-slate-400" },
+};
+
+/** Reusable plain-language "What this means" callout. */
+function WhatsThisMean({ text }: { text: string }) {
+  return (
+    <div className="rounded-lg bg-[hsl(210,60%,25%)]/[0.04] border-l-4 border-[hsl(210,60%,35%)] px-4 py-3 mb-5">
+      <p className="text-sm text-foreground/80">
+        <span className="font-semibold text-[hsl(210,60%,30%)]">What this means: </span>
+        {text}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Plain-language list item for a revenue/expense/asset/liability line. The
+ * account code is kept but de-emphasized (small, muted, monospace).
+ */
+function AccountLine({
+  name,
+  code,
+  amount,
+  total,
+  tone,
+}: {
+  name: string;
+  code: string;
+  amount: number;
+  total: number;
+  tone?: "positive" | "negative";
+}) {
+  const pct = total > 0 ? Math.round((Math.abs(amount) / total) * 100) : 0;
+  return (
+    <li className="flex items-center justify-between gap-3 text-sm">
+      <span className="flex items-baseline gap-2 min-w-0">
+        <span className="truncate">{name}</span>
+        <span className="shrink-0 font-mono text-[10px] text-muted-foreground/60">{code}</span>
+      </span>
+      <span className="flex items-baseline gap-2 shrink-0">
+        <span className="text-[10px] text-muted-foreground tabular-nums">{pct}%</span>
+        <span
+          className={cn(
+            "font-medium tabular-nums",
+            tone === "positive" && "text-emerald-700",
+            tone === "negative" && "text-red-700",
+          )}
+        >
+          {fmt(amount)}
+        </span>
+      </span>
+    </li>
+  );
+}
+
+/** Single-bar horizontal "bar chart" drawn with plain divs (no SVG needed). */
+function MiniBar({ label, value, max, color }: { label: string; value: number; max: number; color: string }) {
+  const pct = max > 0 ? Math.max((Math.abs(value) / max) * 100, 2) : 0;
+  return (
+    <div>
+      <div className="flex justify-between text-sm mb-1">
+        <span className="truncate">{label}</span>
+        <span className="font-medium tabular-nums shrink-0 pl-3">{fmt(value)}</span>
+      </div>
+      <div className="h-2 rounded-full bg-muted overflow-hidden">
+        <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: color }} />
+      </div>
+    </div>
+  );
 }
 
 async function apiGet(path: string) {
@@ -420,6 +515,47 @@ export default function BoardReportPage() {
 
   const showAdminTools = isAdmin && adminView;
 
+  const highlights = buildHighlights({
+    totalCash: data.financialHealth.totalCash,
+    netIncome: data.profitLoss.netIncome,
+    monthsOfRunway: data.financialHealth.monthsOfRunway,
+    budget: { percent: data.financialHealth.budget.percent },
+    metrics: {
+      total: data.programmaticImpact.metrics.length,
+      onTrack: data.programmaticImpact.summary?.onTrack ?? 0,
+      atRisk: data.programmaticImpact.summary?.atRisk ?? 0,
+    },
+    risks: {
+      red: data.strategicRisks.counts.red,
+      yellow: data.strategicRisks.counts.yellow,
+    },
+  });
+
+  const narrative = buildNarrative({
+    label: data.dateRange.label,
+    totalRevenue: data.profitLoss.totalRevenue,
+    totalExpenses: data.profitLoss.totalExpenses,
+    netIncome: data.profitLoss.netIncome,
+    totalCash: data.financialHealth.totalCash,
+    monthsOfRunway: data.financialHealth.monthsOfRunway,
+    metrics: {
+      total: data.programmaticImpact.metrics.length,
+      onTrack: data.programmaticImpact.summary?.onTrack ?? 0,
+    },
+    risks: {
+      red: data.strategicRisks.counts.red,
+      yellow: data.strategicRisks.counts.yellow,
+    },
+  });
+
+  const plChartData = [
+    { name: "Revenue", amount: data.profitLoss.totalRevenue, fill: BRAND.revenue },
+    { name: "Expenses", amount: data.profitLoss.totalExpenses, fill: BRAND.expense },
+    { name: "Net", amount: data.profitLoss.netIncome, fill: BRAND.net },
+  ];
+
+  const fundMax = data.fundBalances.items.reduce((m, f) => Math.max(m, Math.abs(f.balance)), 0);
+
   function handleDownloadPdf() {
     try {
       // `data` is destructured from useQuery, so it is `BoardReport | undefined`; the
@@ -537,6 +673,26 @@ export default function BoardReportPage() {
           </div>
         </div>
 
+        {/* Executive summary */}
+        <SectionCard title="In a Nutshell" icon={BarChart3}>
+          <p className="text-sm text-foreground/80 leading-relaxed mb-5">{narrative}</p>
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+            {highlights.map((h) => {
+              const tone = TONE_CLASSES[h.tone];
+              return (
+                <div key={h.label} className={cn("rounded-lg border p-4", tone.card)}>
+                  <div className="flex items-center gap-1.5">
+                    <span className={cn("w-2 h-2 rounded-full shrink-0", tone.dot)} />
+                    <div className="text-xs text-muted-foreground">{h.label}</div>
+                  </div>
+                  <div className={cn("text-xl font-bold mt-1", tone.value)}>{h.value}</div>
+                  <div className="text-[11px] text-muted-foreground mt-0.5">{h.gloss}</div>
+                </div>
+              );
+            })}
+          </div>
+        </SectionCard>
+
         {/* Action Required */}
         <div className="rounded-xl border border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50 p-5">
           <div className="flex items-center gap-2 mb-3">
@@ -573,8 +729,18 @@ export default function BoardReportPage() {
           )}
         </div>
 
-        {/* High-level P&L */}
-        <SectionCard title="Statement of Activities (Summary)" icon={BarChart3}>
+        {/* Revenue & Spending (was: Statement of Activities) */}
+        <SectionCard title="Revenue & Spending" icon={BarChart3}>
+          <p className="text-xs text-muted-foreground mb-4">
+            Money in versus money out for {data.dateRange.label}. Also known as the Statement of Activities.
+          </p>
+          <WhatsThisMean
+            text={revenueSpendingSummary({
+              totalRevenue: data.profitLoss.totalRevenue,
+              totalExpenses: data.profitLoss.totalExpenses,
+              netIncome: data.profitLoss.netIncome,
+            })}
+          />
           <div className="grid sm:grid-cols-3 gap-3 mb-5">
             <div className="rounded-lg bg-emerald-50 border border-emerald-100 p-4">
               <div className="text-xs text-emerald-700">Total Revenue</div>
@@ -588,37 +754,62 @@ export default function BoardReportPage() {
               "rounded-lg border p-4",
               data.profitLoss.netIncome >= 0 ? "bg-blue-50 border-blue-100" : "bg-amber-50 border-amber-100",
             )}>
-              <div className="text-xs text-muted-foreground">Net Income</div>
+              <div className="text-xs text-muted-foreground">
+                {data.profitLoss.netIncome >= 0 ? "Surplus" : "Deficit"}
+              </div>
               <div className="text-xl font-bold mt-1">{fmt(data.profitLoss.netIncome)}</div>
             </div>
           </div>
+          <div className="h-[220px] mb-5">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={plChartData} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
+                <Tooltip formatter={(v: number) => fmt(v)} />
+                <Bar dataKey="amount" radius={[4, 4, 0, 0]}>
+                  {plChartData.map((d) => (
+                    <Cell key={d.name} fill={d.fill} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
           <div className="grid md:grid-cols-2 gap-4">
             <div>
-              <h3 className="text-xs font-semibold text-muted-foreground uppercase mb-2">Top Revenue</h3>
+              <h3 className="text-xs font-semibold text-muted-foreground uppercase mb-2">Where our money came from</h3>
               {data.profitLoss.topRevenue.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No revenue in this period.</p>
               ) : (
-                <ul className="space-y-1.5">
+                <ul className="space-y-2.5">
                   {data.profitLoss.topRevenue.map((r) => (
-                    <li key={r.accountCode} className="flex justify-between text-sm gap-2">
-                      <span className="truncate">{r.accountCode} – {r.accountName}</span>
-                      <span className="font-medium shrink-0">{fmt(r.amount)}</span>
-                    </li>
+                    <AccountLine
+                      key={r.accountCode}
+                      name={r.accountName}
+                      code={r.accountCode}
+                      amount={r.amount}
+                      total={data.profitLoss.totalRevenue}
+                      tone="positive"
+                    />
                   ))}
                 </ul>
               )}
             </div>
             <div>
-              <h3 className="text-xs font-semibold text-muted-foreground uppercase mb-2">Top Expenses</h3>
+              <h3 className="text-xs font-semibold text-muted-foreground uppercase mb-2">Where our money went</h3>
               {data.profitLoss.topExpenses.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No expenses in this period.</p>
               ) : (
-                <ul className="space-y-1.5">
+                <ul className="space-y-2.5">
                   {data.profitLoss.topExpenses.map((r) => (
-                    <li key={r.accountCode} className="flex justify-between text-sm gap-2">
-                      <span className="truncate">{r.accountCode} – {r.accountName}</span>
-                      <span className="font-medium shrink-0">{fmt(r.amount)}</span>
-                    </li>
+                    <AccountLine
+                      key={r.accountCode}
+                      name={r.accountName}
+                      code={r.accountCode}
+                      amount={r.amount}
+                      total={data.profitLoss.totalExpenses}
+                      tone="negative"
+                    />
                   ))}
                 </ul>
               )}
@@ -626,56 +817,75 @@ export default function BoardReportPage() {
           </div>
         </SectionCard>
 
-        {/* High-level Balance Sheet */}
-        <SectionCard title="Statement of Financial Position (Summary)" icon={Scale}>
-          <p className="text-xs text-muted-foreground mb-4">As of {data.balanceSheet.asOfDate}</p>
+        {/* What We Own & Owe (was: Statement of Financial Position) */}
+        <SectionCard title="What We Own & Owe" icon={Scale}>
+          <p className="text-xs text-muted-foreground mb-4">
+            A snapshot of the organization's finances as of {data.balanceSheet.asOfDate}. Also known as the Statement of Financial Position.
+          </p>
+          <WhatsThisMean
+            text={positionSummary({
+              totalAssets: data.balanceSheet.totalAssets,
+              totalLiabilities: data.balanceSheet.totalLiabilities,
+              totalNetAssets: data.balanceSheet.totalNetAssets,
+            })}
+          />
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
             <div className="rounded-lg bg-muted/50 p-4">
               <div className="text-xs text-muted-foreground">Total Assets</div>
               <div className="text-lg font-bold mt-1">{fmt(data.balanceSheet.totalAssets)}</div>
+              <div className="text-[11px] text-muted-foreground mt-0.5">Everything the organization owns</div>
             </div>
             <div className="rounded-lg bg-muted/50 p-4">
               <div className="text-xs text-muted-foreground">Total Liabilities</div>
               <div className="text-lg font-bold mt-1">{fmt(data.balanceSheet.totalLiabilities)}</div>
+              <div className="text-[11px] text-muted-foreground mt-0.5">What the organization owes</div>
             </div>
             <div className="rounded-lg bg-muted/50 p-4">
               <div className="text-xs text-muted-foreground">Net Assets</div>
               <div className="text-lg font-bold mt-1">{fmt(data.balanceSheet.totalNetAssets)}</div>
+              <div className="text-[11px] text-muted-foreground mt-0.5">What's left after debts</div>
             </div>
             <div className="rounded-lg bg-muted/50 p-4">
-              <div className="text-xs text-muted-foreground">Unrestricted / Restricted</div>
+              <div className="text-xs text-muted-foreground">Available / Restricted</div>
               <div className="text-sm font-semibold mt-1">
                 {fmt(data.balanceSheet.totalUnrestrictedNetAssets)} / {fmt(data.balanceSheet.totalRestrictedNetAssets)}
               </div>
+              <div className="text-[11px] text-muted-foreground mt-0.5">Available to spend / Restricted by donors</div>
             </div>
           </div>
           <div className="grid md:grid-cols-2 gap-4">
             <div>
-              <h3 className="text-xs font-semibold text-muted-foreground uppercase mb-2">Top Assets</h3>
+              <h3 className="text-xs font-semibold text-muted-foreground uppercase mb-2">Largest Assets</h3>
               {data.balanceSheet.topAssets.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No asset balances.</p>
               ) : (
-                <ul className="space-y-1.5">
+                <ul className="space-y-2.5">
                   {data.balanceSheet.topAssets.map((r) => (
-                    <li key={r.accountCode} className="flex justify-between text-sm gap-2">
-                      <span className="truncate">{r.accountCode} – {r.accountName}</span>
-                      <span className="font-medium shrink-0">{fmt(r.amount)}</span>
-                    </li>
+                    <AccountLine
+                      key={r.accountCode}
+                      name={r.accountName}
+                      code={r.accountCode}
+                      amount={r.amount}
+                      total={data.balanceSheet.totalAssets}
+                    />
                   ))}
                 </ul>
               )}
             </div>
             <div>
-              <h3 className="text-xs font-semibold text-muted-foreground uppercase mb-2">Top Liabilities</h3>
+              <h3 className="text-xs font-semibold text-muted-foreground uppercase mb-2">Largest Liabilities</h3>
               {data.balanceSheet.topLiabilities.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No liability balances.</p>
               ) : (
-                <ul className="space-y-1.5">
+                <ul className="space-y-2.5">
                   {data.balanceSheet.topLiabilities.map((r) => (
-                    <li key={r.accountCode} className="flex justify-between text-sm gap-2">
-                      <span className="truncate">{r.accountCode} – {r.accountName}</span>
-                      <span className="font-medium shrink-0">{fmt(r.amount)}</span>
-                    </li>
+                    <AccountLine
+                      key={r.accountCode}
+                      name={r.accountName}
+                      code={r.accountCode}
+                      amount={r.amount}
+                      total={data.balanceSheet.totalLiabilities}
+                    />
                   ))}
                 </ul>
               )}
@@ -686,70 +896,93 @@ export default function BoardReportPage() {
         {/* Fund Balances */}
         <SectionCard title="Fund Balances" icon={Wallet}>
           <p className="text-xs text-muted-foreground mb-4">
-            Net asset position by fund as of {data.fundBalances.asOfDate} (equity, income, and expense GL through that date).
+            How much sits in each fund as of {data.fundBalances.asOfDate}.
           </p>
+          <WhatsThisMean
+            text={fundBalancesSummary(data.fundBalances.total, data.fundBalances.items.length)}
+          />
           {data.fundBalances.items.length === 0 ? (
             <p className="text-sm text-muted-foreground">No funds configured.</p>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b bg-muted/30">
-                    <th className="text-left px-4 py-2.5 font-medium text-muted-foreground text-xs">Fund</th>
-                    <th className="text-left px-4 py-2.5 font-medium text-muted-foreground text-xs">Type</th>
-                    <th className="text-right px-4 py-2.5 font-medium text-muted-foreground text-xs">Balance</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {data.fundBalances.items.map((f) => (
-                    <tr key={f.fundId} className="hover:bg-muted/20">
-                      <td className="px-4 py-3 font-medium">{f.fundName}</td>
-                      <td className="px-4 py-3 text-muted-foreground">
-                        {FUND_TYPE_LABELS[f.fundType] ?? f.fundType}
-                      </td>
-                      <td className={cn(
-                        "px-4 py-3 text-right font-semibold tabular-nums",
-                        f.balance < 0 ? "text-red-600" : "",
-                      )}>
-                        {fmt(f.balance)}
-                      </td>
+            <>
+              <div className="space-y-3 mb-5">
+                {data.fundBalances.items.map((f) => (
+                  <MiniBar
+                    key={f.fundId}
+                    label={`${f.fundName} · ${FUND_TYPE_LABELS[f.fundType] ?? f.fundType}`}
+                    value={f.balance}
+                    max={fundMax}
+                    color={f.balance < 0 ? BRAND.expense : BRAND.cash}
+                  />
+                ))}
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b bg-muted/30">
+                      <th className="text-left px-4 py-2.5 font-medium text-muted-foreground text-xs">Fund</th>
+                      <th className="text-left px-4 py-2.5 font-medium text-muted-foreground text-xs">Type</th>
+                      <th className="text-right px-4 py-2.5 font-medium text-muted-foreground text-xs">Balance</th>
                     </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr className="border-t bg-muted/30 font-semibold">
-                    <td className="px-4 py-3 text-xs uppercase tracking-wide text-muted-foreground" colSpan={2}>
-                      Total across funds
-                    </td>
-                    <td className="px-4 py-3 text-right tabular-nums">{fmt(data.fundBalances.total)}</td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
+                  </thead>
+                  <tbody className="divide-y">
+                    {data.fundBalances.items.map((f) => (
+                      <tr key={f.fundId} className="hover:bg-muted/20">
+                        <td className="px-4 py-3 font-medium">{f.fundName}</td>
+                        <td className="px-4 py-3 text-muted-foreground">
+                          {FUND_TYPE_LABELS[f.fundType] ?? f.fundType}
+                        </td>
+                        <td className={cn(
+                          "px-4 py-3 text-right font-semibold tabular-nums",
+                          f.balance < 0 ? "text-red-600" : "",
+                        )}>
+                          {fmt(f.balance)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t bg-muted/30 font-semibold">
+                      <td className="px-4 py-3 text-xs uppercase tracking-wide text-muted-foreground" colSpan={2}>
+                        Total across funds
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums">{fmt(data.fundBalances.total)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </>
           )}
         </SectionCard>
 
-        {/* Financial Health */}
-        <SectionCard title="Financial Health" icon={Banknote}>
+        {/* Cash & Sustainability (was: Financial Health) */}
+        <SectionCard title="Cash & Sustainability" icon={Banknote}>
           <p className="text-xs text-muted-foreground mb-4">
-            Cash balances from the bank register as of {data.financialHealth.cashAsOfDate}. Period revenue and expenses match the Statement of Activities (GL income and expense accounts).
+            Cash balances from the bank register as of {data.financialHealth.cashAsOfDate}.
           </p>
+          <WhatsThisMean
+            text={healthSummary({
+              totalCash: data.financialHealth.totalCash,
+              monthsOfRunway: data.financialHealth.monthsOfRunway,
+              budget: { percent: data.financialHealth.budget.percent },
+            })}
+          />
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
             <div className="rounded-lg bg-[hsl(210,60%,25%)] text-white p-4">
-              <div className="text-xs opacity-80">Cash Position</div>
+              <div className="text-xs opacity-80">Cash on hand</div>
               <div className="text-xl font-bold mt-1">{fmt(data.financialHealth.totalCash)}</div>
             </div>
             <div className="rounded-lg bg-muted/50 p-4">
-              <div className="text-xs text-muted-foreground">Period Revenue</div>
+              <div className="text-xs text-muted-foreground">Revenue this period</div>
               <div className="text-lg font-semibold mt-1 text-emerald-700">{fmt(data.financialHealth.periodRevenue)}</div>
             </div>
             <div className="rounded-lg bg-muted/50 p-4">
-              <div className="text-xs text-muted-foreground">Period Expenses</div>
+              <div className="text-xs text-muted-foreground">Spending this period</div>
               <div className="text-lg font-semibold mt-1 text-red-700">{fmt(data.financialHealth.periodExpenses)}</div>
             </div>
             <div className="rounded-lg bg-muted/50 p-4">
               <div className="text-xs text-muted-foreground flex items-center gap-1">
-                <Flame className="w-3 h-3" /> Avg. Burn Rate
+                <Flame className="w-3 h-3" /> Avg. monthly spending
               </div>
               <div className="text-lg font-semibold mt-1">{fmt(data.financialHealth.periodBurnRate)}/mo</div>
             </div>
@@ -812,7 +1045,7 @@ export default function BoardReportPage() {
 
           <div className="rounded-lg border p-4">
             <div className="flex items-center justify-between text-sm mb-2">
-              <span className="font-medium">Budget vs. Actual (active budget)</span>
+              <span className="font-medium">Annual budget used so far</span>
               <span className="text-muted-foreground">
                 {fmt(data.financialHealth.budget.actual)} of {fmt(data.financialHealth.budget.total)}
               </span>
@@ -825,6 +1058,9 @@ export default function BoardReportPage() {
               <span>{data.financialHealth.budget.percent}% used</span>
               <span>{fmt(data.financialHealth.budget.remaining)} remaining</span>
             </div>
+            <p className="text-[11px] text-muted-foreground mt-2">
+              {fmt(data.financialHealth.budget.remaining)} left of the annual budget.
+            </p>
           </div>
         </SectionCard>
 
@@ -986,6 +1222,27 @@ export default function BoardReportPage() {
               ))}
             </div>
           )}
+        </SectionCard>
+
+        {/* Glossary */}
+        <SectionCard title="Terms Used in This Report" icon={CheckCircle2}>
+          <dl className="grid sm:grid-cols-2 gap-x-8 gap-y-3 text-sm">
+            {[
+              ["Revenue", "Money the organization received."],
+              ["Expenses", "Money the organization spent."],
+              ["Surplus / (Deficit)", "What's left when expenses are subtracted from revenue. A surplus is positive; a deficit is negative."],
+              ["Net Assets", "Everything the organization owns minus everything it owes. Also called \"fund balance\" or \"equity\"."],
+              ["Available to spend", "Net assets not restricted by donors (\"unrestricted\")."],
+              ["Restricted", "Net assets a donor designated for a specific purpose."],
+              ["Months of runway", "How long cash would last at the current rate of spending."],
+              ["Budget used", "Share of the active annual budget spent so far."],
+            ].map(([term, def]) => (
+              <div key={term}>
+                <dt className="font-medium">{term}</dt>
+                <dd className="text-muted-foreground">{def}</dd>
+              </div>
+            ))}
+          </dl>
         </SectionCard>
 
         {!isAdmin && (

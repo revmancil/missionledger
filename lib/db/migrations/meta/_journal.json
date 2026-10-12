@@ -29,6 +29,27 @@
       "when": 1774020000000,
       "tag": "0003_plaid_account_filter",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1774030000000,
+      "tag": "0004_budget_lines_fund_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1774040000000,
+      "tag": "0005_attachments",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1774050000000,
+      "tag": "0006_attachments_extracted_json",
+      "breakpoints": true
     }
   ]
 }
