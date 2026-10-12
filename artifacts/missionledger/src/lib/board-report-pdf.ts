@@ -685,10 +685,14 @@ export function downloadBoardReportPdf(
       bodyStyles: { fontSize: 8, valign: "top" },
       margin: { left: MARGIN, right: MARGIN },
     });
+    y = lastTableY(doc) + 18;
   }
 
   // ── Glossary ────────────────────────────────────────────────────────────────
-  y = lastTableY(doc) + 18;
+  // Advance from the tracked `y` (updated above whether or not the committee
+  // table rendered). Recomputing from lastTableY() here would jump back to a
+  // stale earlier table and overlap the previous section's heading.
+  y += 18;
   y = sectionTitle(doc, "Terms Used in This Report", y);
   const glossary: Array<[string, string]> = [
     ["Revenue", "Money the organization received."],
