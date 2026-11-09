@@ -83,11 +83,16 @@ async function buildFinancialHealth(
 ) {
   const periodStart = period.start;
   const periodEnd = period.end;
-  const monthsElapsed = Math.max(
-    (periodEnd.getUTCFullYear() - periodStart.getUTCFullYear()) * 12
-      + (periodEnd.getUTCMonth() - periodStart.getUTCMonth()) + 1,
-    1,
-  );
+  // Preset periods count the calendar months they touch (unchanged). A custom range can be only
+  // a few days long, so it is scaled by its real length instead; the floor of a quarter month
+  // keeps a one-day range from producing an absurd monthly burn rate.
+  const monthsElapsed = period.kind === "custom"
+    ? Math.max((periodEnd.getTime() - periodStart.getTime()) / 86_400_000 / 30.4375, 0.25)
+    : Math.max(
+        (periodEnd.getUTCFullYear() - periodStart.getUTCFullYear()) * 12
+          + (periodEnd.getUTCMonth() - periodStart.getUTCMonth()) + 1,
+        1,
+      );
 
   const [bankRows, allTx, activeBudgetRows, budgetLineRows] = await Promise.all([
     db.select({
@@ -315,7 +320,13 @@ router.get("/", requireAuth, async (req, res) => {
     const periodKind = parseBoardPeriodKind(req.query.period);
     const anchor = parseBoardPeriodAnchor(req.query);
     const reportPeriod = resolveBoardPeriod(periodKind, anchor);
-    if (!reportPeriod) return void res.status(400).json({ error: "Invalid period" });
+    if (!reportPeriod) {
+      return void res.status(400).json({
+        error: periodKind === "custom"
+          ? "Invalid date range. Use real dates (YYYY-MM-DD) where the start is on or before the end, the start is not in the future, and the range is at most 10 years."
+          : "Invalid period",
+      });
+    }
 
     const { year, quarter } = quarterForYmd(reportPeriod.endYmd);
     const includeUnpublished = req.query.adminView === "true" && isAdminRole(role);

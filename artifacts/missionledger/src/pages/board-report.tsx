@@ -145,13 +145,14 @@ async function apiMutate(path: string, method: string, body?: unknown) {
 
 type RiskStatus = "GREEN" | "YELLOW" | "RED";
 type CommitteeType = "FINANCE" | "AUDIT" | "GOVERNANCE" | "EXECUTIVE" | "PROGRAM" | "OTHER";
-type PeriodKind = "month" | "quarter" | "year" | "ytd";
+type PeriodKind = "month" | "quarter" | "year" | "ytd" | "custom";
 
 const PERIOD_OPTIONS: { id: PeriodKind; label: string }[] = [
   { id: "month", label: "Month" },
   { id: "quarter", label: "Quarter" },
   { id: "year", label: "Year" },
   { id: "ytd", label: "YTD" },
+  { id: "custom", label: "Custom range" },
 ];
 
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -180,6 +181,41 @@ function buildYearOptions(): number[] {
 
 const YEAR_OPTIONS = buildYearOptions();
 
+interface CustomRange {
+  startDate: string;
+  endDate: string;
+}
+
+function formatYmd(ymd: string): string {
+  try {
+    return format(parseISO(ymd), "MMM d, yyyy");
+  } catch {
+    return ymd;
+  }
+}
+
+/** The previous full calendar month: what a board most often reviews. */
+function previousMonthRange(): CustomRange {
+  const now = new Date();
+  const y = now.getUTCFullYear();
+  const m = now.getUTCMonth();
+  const ymd = (d: Date) =>
+    `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+  return {
+    startDate: ymd(new Date(Date.UTC(m === 0 ? y - 1 : y, m === 0 ? 11 : m - 1, 1))),
+    endDate: ymd(new Date(Date.UTC(y, m, 0))),
+  };
+}
+
+/** null when the range is usable; otherwise what the user needs to fix. */
+function customRangeError(r: CustomRange): string | null {
+  if (!r.startDate || !r.endDate) return "Choose both a start and an end date.";
+  if (r.startDate > r.endDate) return "The start date must be on or before the end date.";
+  if (r.startDate > utcYmdToday()) return "The start date can't be in the future.";
+  if ((Date.parse(r.endDate) - Date.parse(r.startDate)) / 86_400_000 > 3660) return "A report can cover at most 10 years.";
+  return null;
+}
+
 function utcYmdToday(): string {
   const d = new Date();
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
@@ -193,11 +229,17 @@ function utcMonthEndYmd(year: number, monthIndex0: number): string {
 function resolveClientPeriod(
   kind: PeriodKind,
   anchor: PeriodAnchor,
+  custom?: CustomRange,
 ): { kind: PeriodKind; startDate: string; endDate: string; label: string } {
   const now = new Date();
   const today = utcYmdToday();
   const y = anchor.year;
   const m = anchor.month - 1;
+
+  if (kind === "custom" && custom) {
+    const endDate = custom.endDate > today ? today : custom.endDate;
+    return { kind, startDate: custom.startDate, endDate, label: `${formatYmd(custom.startDate)} – ${formatYmd(endDate)}` };
+  }
 
   if (kind === "month") {
     const startDate = `${y}-${String(anchor.month).padStart(2, "0")}-01`;
@@ -259,13 +301,13 @@ const FUND_TYPE_LABELS: Record<string, string> = {
 };
 
 /** Normalize API payloads from older servers or partial responses. */
-function normalizeBoardReport(raw: Record<string, unknown>, periodFilter: PeriodKind, anchor: PeriodAnchor): BoardReport {
+function normalizeBoardReport(raw: Record<string, unknown>, periodFilter: PeriodKind, anchor: PeriodAnchor, custom?: CustomRange): BoardReport {
   const period = (raw.period as BoardReport["period"] | undefined) ?? {
     year: new Date().getUTCFullYear(),
     quarter: Math.floor(new Date().getUTCMonth() / 3) + 1,
     label: `Q${Math.floor(new Date().getUTCMonth() / 3) + 1} ${new Date().getUTCFullYear()}`,
   };
-  const dateRange = (raw.dateRange as BoardReport["dateRange"] | undefined) ?? resolveClientPeriod(periodFilter, anchor);
+  const dateRange = (raw.dateRange as BoardReport["dateRange"] | undefined) ?? resolveClientPeriod(periodFilter, anchor, custom);
   const fh = (raw.financialHealth as Record<string, unknown> | undefined) ?? {};
   const budget = (fh.budget as BoardReport["financialHealth"]["budget"] | undefined) ?? {
     total: 0, actual: 0, percent: 0, remaining: 0,
@@ -428,12 +470,21 @@ export default function BoardReportPage() {
   const isAdmin = user?.role === "ADMIN" || user?.role === "MASTER_ADMIN";
   const [periodFilter, setPeriodFilter] = useState<PeriodKind>("ytd");
   const [periodAnchor, setPeriodAnchor] = useState<PeriodAnchor>(currentPeriodAnchor);
+  // What the user is typing vs. the range actually applied: the applied range only changes once
+  // the inputs are valid, so a half-entered date never blanks the report.
+  const [customDraft, setCustomDraft] = useState<CustomRange>(previousMonthRange);
+  const [customRange, setCustomRange] = useState<CustomRange>(previousMonthRange);
+  const customError = customRangeError(customDraft);
   const [adminView, setAdminView] = useState(false);
   const [metricDialog, setMetricDialog] = useState(false);
   const [riskDialog, setRiskDialog] = useState(false);
   const [committeeDialog, setCommitteeDialog] = useState(false);
 
-  const queryKey = ["board-report", periodFilter, periodAnchor.year, periodAnchor.month, periodAnchor.quarter, adminView && isAdmin];
+  const queryKey = [
+    "board-report", periodFilter, periodAnchor.year, periodAnchor.month, periodAnchor.quarter,
+    ...(periodFilter === "custom" ? [customRange.startDate, customRange.endDate] : []),
+    adminView && isAdmin,
+  ];
 
   const { data, isLoading, isError, refetch, isFetching } = useQuery<BoardReport>({
     queryKey,
@@ -443,13 +494,22 @@ export default function BoardReportPage() {
       p.set("year", String(periodAnchor.year));
       if (periodFilter === "month") p.set("month", String(periodAnchor.month));
       if (periodFilter === "quarter") p.set("quarter", String(periodAnchor.quarter));
+      if (periodFilter === "custom") {
+        p.set("startDate", customRange.startDate);
+        p.set("endDate", customRange.endDate);
+      }
       if (adminView && isAdmin) p.set("adminView", "true");
       const raw = await apiGet(`api/board-report?${p.toString()}`);
-      return normalizeBoardReport(raw as Record<string, unknown>, periodFilter, periodAnchor);
+      return normalizeBoardReport(raw as Record<string, unknown>, periodFilter, periodAnchor, customRange);
     },
   });
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ["board-report"] });
+
+  function updateCustomRange(next: CustomRange) {
+    setCustomDraft(next);
+    if (!customRangeError(next)) setCustomRange(next);
+  }
 
   const createMetric = useMutation({
     mutationFn: (body: unknown) => apiMutate("api/board-report/program-metrics", "POST", body),
@@ -580,7 +640,9 @@ export default function BoardReportPage() {
           <div>
             <h1 className="text-2xl font-bold text-[hsl(210,60%,25%)]">Board Member Report</h1>
             <p className="text-sm text-muted-foreground mt-1">
-              {data.dateRange.label} · {data.dateRange.startDate} – {data.dateRange.endDate}
+              {data.dateRange.kind === "custom"
+                ? `${formatYmd(data.dateRange.startDate)} – ${formatYmd(data.dateRange.endDate)}`
+                : `${data.dateRange.label} · ${formatYmd(data.dateRange.startDate)} – ${formatYmd(data.dateRange.endDate)}`}
             </p>
             <p className="text-xs text-muted-foreground">
               Updated {format(parseISO(data.generatedAt), "MMM d, yyyy h:mm a")}
@@ -626,6 +688,31 @@ export default function BoardReportPage() {
             ))}
           </div>
           <div className="h-5 w-px bg-border hidden sm:block" />
+          {periodFilter === "custom" ? (
+            <div className="flex flex-wrap items-end gap-3">
+              <label className="text-xs text-muted-foreground">
+                From
+                <Input
+                  type="date"
+                  value={customDraft.startDate}
+                  max={utcYmdToday()}
+                  onChange={(e) => updateCustomRange({ ...customDraft, startDate: e.target.value })}
+                  className="h-8 w-[150px] text-sm bg-background mt-0.5"
+                />
+              </label>
+              <label className="text-xs text-muted-foreground">
+                To
+                <Input
+                  type="date"
+                  value={customDraft.endDate}
+                  max={utcYmdToday()}
+                  onChange={(e) => updateCustomRange({ ...customDraft, endDate: e.target.value })}
+                  className="h-8 w-[150px] text-sm bg-background mt-0.5"
+                />
+              </label>
+              {customError && <p className="text-xs text-red-600 pb-1.5">{customError}</p>}
+            </div>
+          ) : (
           <div className="flex flex-wrap items-center gap-2">
             <Select
               value={String(periodAnchor.year)}
@@ -671,6 +758,7 @@ export default function BoardReportPage() {
               </Select>
             )}
           </div>
+          )}
         </div>
 
         {/* Executive summary */}

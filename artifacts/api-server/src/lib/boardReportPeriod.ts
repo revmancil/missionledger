@@ -1,11 +1,28 @@
 import { parseYmdToUtcDayBounds, utcYmdToday } from "./safeIso";
 
-export type BoardPeriodKind = "month" | "quarter" | "year" | "ytd";
+export type BoardPeriodKind = "month" | "quarter" | "year" | "ytd" | "custom";
 
 export interface BoardPeriodAnchor {
   year?: number;
   month?: number;
   quarter?: number;
+  /** Custom range only: inclusive YYYY-MM-DD bounds. */
+  startYmd?: string;
+  endYmd?: string;
+}
+
+/** Longest custom range accepted, so one request cannot ask for an unbounded ledger scan. */
+export const MAX_CUSTOM_RANGE_DAYS = 3660;
+
+const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function formatYmdLabel(ymd: string): string {
+  const [y, m, d] = ymd.split("-").map(Number);
+  return `${MONTH_SHORT[m - 1]} ${d}, ${y}`;
+}
+
+function daysBetweenYmd(fromYmd: string, toYmd: string): number {
+  return (Date.parse(`${toYmd}T00:00:00Z`) - Date.parse(`${fromYmd}T00:00:00Z`)) / 86_400_000;
 }
 
 export interface BoardReportPeriod {
@@ -71,6 +88,16 @@ export function resolveBoardPeriod(
     startYmd = `${y}-01-01`;
     endYmd = y === ref.getUTCFullYear() ? today : capEndYmd(`${y}-12-31`, today);
     label = y === ref.getUTCFullYear() ? `Year to Date ${y}` : `Calendar Year ${y}`;
+  } else if (kind === "custom") {
+    const s = parseYmdToUtcDayBounds(anchor.startYmd);
+    const e = parseYmdToUtcDayBounds(anchor.endYmd);
+    if (!s || !e) return null;
+    startYmd = s.ymd;
+    // Like every other period, the end is capped at today.
+    endYmd = capEndYmd(e.ymd, today);
+    if (endYmd < startYmd) return null;
+    if (daysBetweenYmd(startYmd, endYmd) > MAX_CUSTOM_RANGE_DAYS) return null;
+    label = `${formatYmdLabel(startYmd)} – ${formatYmdLabel(endYmd)}`;
   } else {
     return null;
   }
@@ -91,7 +118,7 @@ export function resolveBoardPeriod(
 
 export function parseBoardPeriodKind(raw: unknown): BoardPeriodKind {
   const v = String(raw ?? "ytd").toLowerCase();
-  if (v === "month" || v === "quarter" || v === "year" || v === "ytd") return v;
+  if (v === "month" || v === "quarter" || v === "year" || v === "ytd" || v === "custom") return v;
   return "ytd";
 }
 
@@ -99,6 +126,8 @@ export function parseBoardPeriodAnchor(raw: {
   year?: unknown;
   month?: unknown;
   quarter?: unknown;
+  startDate?: unknown;
+  endDate?: unknown;
 }): BoardPeriodAnchor {
   const year = raw.year != null && String(raw.year).trim() !== ""
     ? parseInt(String(raw.year), 10)
@@ -109,7 +138,8 @@ export function parseBoardPeriodAnchor(raw: {
   const quarter = raw.quarter != null && String(raw.quarter).trim() !== ""
     ? parseInt(String(raw.quarter), 10)
     : undefined;
-  return { year, month, quarter };
+  const text = (v: unknown) => (typeof v === "string" && v.trim() !== "" ? v.trim() : undefined);
+  return { year, month, quarter, startYmd: text(raw.startDate), endYmd: text(raw.endDate) };
 }
 
 export function quarterForYmd(ymd: string): { year: number; quarter: number } {

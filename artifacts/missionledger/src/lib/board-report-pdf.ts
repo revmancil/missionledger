@@ -231,10 +231,14 @@ export function downloadBoardReportPdf(
   options?: { adminView?: boolean },
 ) {
   const generated = parseISO(data.generatedAt);
-  const monthYear = format(generated, "MMMM yyyy");
-  const reportTitle = `Board Member Report: ${monthYear}`;
+  // The title and dates describe the period being reported on, never the day the report was
+  // run: an October report prepared on November 8 must still say October.
+  const fmtDay = (ymd: string) => format(parseISO(ymd), "MMM d, yyyy");
+  const range = `${fmtDay(data.dateRange.startDate)} – ${fmtDay(data.dateRange.endDate)}`;
+  const reportTitle = `Board Member Report: ${data.dateRange.label}`;
   const viewNote = options?.adminView ? " · Admin view" : " · Board view";
-  const subtitle = `${data.dateRange.label} (${data.dateRange.startDate} – ${data.dateRange.endDate})${viewNote}`;
+  const periodText = data.dateRange.label === range ? "" : `${range} · `;
+  const subtitle = `${periodText}Prepared ${format(generated, "MMM d, yyyy")}${viewNote}`;
 
   const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "letter" });
   const W = doc.internal.pageSize.getWidth();
@@ -718,6 +722,6 @@ export function downloadBoardReportPdf(
   addPdfFooters(doc);
 
   const safeOrg = (orgName || "organization").replace(/[^\w\s-]/g, "").trim().replace(/\s+/g, "-");
-  const filename = `board-report-${safeOrg}-${format(generated, "yyyy-MM-dd")}.pdf`;
+  const filename = `board-report-${safeOrg}-${data.dateRange.startDate}-to-${data.dateRange.endDate}.pdf`;
   doc.save(filename);
 }
