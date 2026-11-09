@@ -18,6 +18,13 @@ function serializeRecon(r: any) {
   };
 }
 
+/** Register rows that belong in a reconciliation of this bank account through the statement date. */
+async function eligibleTransactions(companyId: string, bankAccountId: string, statementYmd: string) {
+  const all = await db.select().from(transactions)
+    .where(and(eq(transactions.companyId, companyId), eq(transactions.bankAccountId, bankAccountId)));
+  return all.filter((t) => !t.isVoid && t.status !== "RECONCILED" && isOnOrBeforeUtcYmd(t.date, statementYmd));
+}
+
 const router = Router();
 
 // ── GET / — history ──────────────────────────────────────────────────────────
@@ -88,14 +95,8 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
       status: "IN_PROGRESS",
     }).returning();
 
-    // Build items from new transactions table
-    const allTx = await db.select().from(transactions)
-      .where(and(eq(transactions.companyId, companyId), eq(transactions.bankAccountId, bankAccountId)));
-
-    const eligible = allTx.filter((t) => {
-      if (t.isVoid || t.status === "RECONCILED") return false;
-      return isOnOrBeforeUtcYmd(t.date, parsedStmt.ymd);
-    });
+    // Build items from the register
+    const eligible = await eligibleTransactions(companyId, bankAccountId, parsedStmt.ymd);
 
     for (const tx of eligible) {
       await db.insert(reconciliationItems).values({
@@ -109,6 +110,44 @@ router.post("/", requireAuth, requireAdmin, async (req, res) => {
     res.status(201).json(serializeRecon(recon));
   } catch (err) {
     console.error("Start recon error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ── POST /:id/refresh — pull in register entries added after the session started ──
+// The item list is a snapshot taken when the session starts, so a deposit entered afterwards
+// would otherwise never appear. Adds only what is missing; nothing already in the session
+// (including its cleared marks) is touched.
+router.post("/:id/refresh", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { companyId } = (req as any).user;
+    const [recon] = await db.select().from(reconciliations)
+      .where(and(eq(reconciliations.id, req.params.id), eq(reconciliations.companyId, companyId)));
+    if (!recon) return void res.status(404).json({ error: "Not found" });
+    if (recon.status !== "IN_PROGRESS") {
+      return void res.status(400).json({ error: "Only an in-progress reconciliation can be refreshed" });
+    }
+
+    const statementYmd = (recon.statementDate instanceof Date ? recon.statementDate : new Date(recon.statementDate))
+      .toISOString().slice(0, 10);
+    const existing = await db.select({ transactionId: reconciliationItems.transactionId })
+      .from(reconciliationItems)
+      .where(eq(reconciliationItems.reconciliationId, recon.id));
+    const have = new Set(existing.map((i) => i.transactionId));
+
+    const missing = (await eligibleTransactions(companyId, recon.bankAccountId, statementYmd))
+      .filter((t) => !have.has(t.id));
+    for (const tx of missing) {
+      await db.insert(reconciliationItems).values({
+        reconciliationId: recon.id,
+        transactionId: tx.id,
+        bankTransactionId: null,
+        cleared: tx.status === "CLEARED",
+      });
+    }
+    res.json({ added: missing.length });
+  } catch (err) {
+    console.error("Refresh recon error:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 });

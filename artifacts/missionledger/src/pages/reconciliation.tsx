@@ -978,6 +978,11 @@ export default function ReconciliationPage() {
   useEffect(() => { loadHistory(); }, [loadHistory]);
 
   async function loadWorkspace(id: string, recon: Reconciliation) {
+    // Pick up anything entered in the register since this session was started (a failure here
+    // just means the existing list is shown as-is).
+    if (recon.status === "IN_PROGRESS") {
+      await api(`${BASE}api/reconciliation/${id}/refresh`, { method: "POST" }).catch(() => {});
+    }
     const res = await api(`${BASE}api/reconciliation/${id}/items`);
     if (!res.ok) {
       const e = await res.json().catch(() => ({}));
